@@ -31,13 +31,13 @@ A single CLI tool that gives AI agents (and humans) efficient access to GitHub r
 
 ## Vision
 
-`ggcode` is the first tool in the `gg` family — a collection of focused, independently installable CLI tools for AI-assisted development. Each tool does one thing well.
+`ghx` is the first tool in the `gg` family — a collection of focused, independently installable CLI tools for AI-assisted development. Each tool does one thing well.
 
-`ggcode` = GitHub code exploration. ~135 lines of bash. One dependency: `gh` CLI.
+`ghx` = GitHub code exploration. ~135 lines of bash. One dependency: `gh` CLI.
 
 ### Design Principles
 
-1. **Zero friction.** No npm install, no Docker, no config files. If you have `gh` CLI, you have `ggcode`.
+1. **Zero friction.** No npm install, no Docker, no config files. If you have `gh` CLI, you have `ghx`.
 
 2. **API-first, not clone-first.** 0.9s GraphQL call vs 3.6s sparse clone. No disk usage, no cleanup.
 
@@ -65,14 +65,14 @@ No direct competitor exists. The landscape has:
 - **Heavy MCPs** (GitHub MCP, Octocode) — rich features, 10K+ token overhead
 - **Dump tools** (Repomix, Gitingest) — holistic understanding, not surgical exploration
 
-`ggcode` occupies the empty niche: lightweight, agent-native, batch-capable remote code exploration.
+`ghx` occupies the empty niche: lightweight, agent-native, batch-capable remote code exploration.
 
 ### The `gg` Family
 
-`ggcode` is scoped to GitHub code exploration. Future tools in the family are separate repos, separate installs, shared brand:
+`ghx` is scoped to GitHub code exploration. Future tools in the family are separate repos, separate installs, shared brand:
 
 ```
-ggcode    — GitHub code exploration (this tool)
+ghx    — GitHub code exploration (this tool)
 gg???     — future tools, each focused, each independent
 ```
 
@@ -84,11 +84,11 @@ The tool is ~135 lines of bash. Distribution channels are thin wrappers around t
 
 | Channel | Install command | How it works |
 |---------|----------------|-------------|
-| Homebrew | `brew install gkoreli/tap/ggcode` | Tap with formula pointing to release tarball |
-| gh extension | `gh extension install gkoreli/gh-ggcode` | Repo with bash script as entry point |
-| npx | `npx ggcode` | npm package wrapping the bash script |
+| Homebrew | `brew install gkoreli/tap/ghx` | Tap with formula pointing to release tarball |
+| gh extension | `gh extension install gkoreli/gh-ghx` | Repo with bash script as entry point |
+| npx | `npx @gkoreli/ghx` | npm package wrapping the bash script |
 | curl | `curl -sf https://... \| sh` | Downloads script to ~/.local/bin |
-| Manual | Copy `ggcode` to PATH | Just the script |
+| Manual | Copy `ghx` to PATH | Just the script |
 
 All channels deliver the same bash script. The only runtime dependency is `gh` CLI (authenticated).
 
@@ -98,11 +98,11 @@ All channels deliver the same bash script. The only runtime dependency is `gh` C
 
 Bash-based gh extensions are fully supported and used by gh core maintainers (e.g., `mislav/gh-branch` — pure bash, 2.5KB). No Go required.
 
-**Decision: separate `gh-ggcode` repo.**
-- `gkoreli/ggcode` — the source of truth. Script, npm, curl, brew, docs, ADRs.
-- `gkoreli/gh-ggcode` — gh extension shim. Contains a `gh-ggcode` executable that is an exact copy of the `ggcode` script. The release workflow in `ggcode` copies the script to `gh-ggcode` and pushes a tagged release there, keeping them in sync automatically.
+**Decision: separate `gh-ghx` repo.**
+- `gkoreli/ghx` — the source of truth. Script, npm, curl, brew, docs, ADRs.
+- `gkoreli/gh-ghx` — gh extension shim. Contains a `gh-ghx` executable that is an exact copy of the `ghx` script. The release workflow in `ghx` copies the script to `gh-ghx` and pushes a tagged release there, keeping them in sync automatically.
 
-This keeps the main repo name clean (`ggcode`), npm package name clean (`ggcode`), and satisfies gh's hard `gh-` prefix requirement without polluting the primary repo.
+This keeps the main repo name clean (`ghx`), npm package name clean (`@gkoreli/ghx`), and satisfies gh's hard `gh-` prefix requirement without polluting the primary repo.
 
 ### Go Rewrite
 
@@ -129,13 +129,13 @@ Parked. Decision: ship bash today, revisit Go when triggers hit.
 - Auth implementation (can use `go-gh` library from GitHub which reads `gh` auth config)
 - Ongoing maintenance of a compiled codebase vs a script
 
-**The contract that survives a rewrite:** The CLI interface is the contract. `ggcode explore owner/repo`, `ggcode read owner/repo --map file`, `ggcode search "query"`. Whether bash or Go executes underneath is invisible to users.
+**The contract that survives a rewrite:** The CLI interface is the contract. `ghx explore owner/repo`, `ghx read owner/repo --map file`, `ghx search "query"`. Whether bash or Go executes underneath is invisible to users.
 
 ### One Source of Truth
 
 **The script IS the source of truth.** Every distribution channel wraps the same code:
 - npm: `package.json` bin points to the script
-- gh extension: exact copy in `gh-ggcode` repo, synced via CI
+- gh extension: exact copy in `gh-ghx` repo, synced via CI
 - brew: formula downloads the script from a GitHub release
 - curl: install.sh downloads the script
 - Manual: copy the script

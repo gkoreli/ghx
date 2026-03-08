@@ -1,4 +1,4 @@
-# ggcode
+# ghx
 
 GitHub code exploration for agents and humans. One command does what takes 3-5 API calls with any other tool.
 
@@ -13,19 +13,19 @@ GitHub code exploration for agents and humans. One command does what takes 3-5 A
 
 ```bash
 # Homebrew (macOS/Linux)
-brew install gkoreli/tap/ggcode
+brew install gkoreli/tap/ghx
 
-# gh extension (coming soon — requires separate gh-ggcode repo)
-gh extension install gkoreli/gh-ggcode
+# gh extension (coming soon — requires separate gh-ghx repo)
+gh extension install gkoreli/gh-ghx
 
 # npx (zero install)
-npx ggcode --help
+npx @gkoreli/ghx --help
 
 # curl
-curl -sf https://raw.githubusercontent.com/gkoreli/ggcode/main/install.sh | sh
+curl -sf https://raw.githubusercontent.com/gkoreli/ghx/main/install.sh | sh
 
 # Manual — just copy the script
-curl -sf https://raw.githubusercontent.com/gkoreli/ggcode/main/ggcode -o ~/.local/bin/ggcode && chmod +x ~/.local/bin/ggcode
+curl -sf https://raw.githubusercontent.com/gkoreli/ghx/main/ghx -o ~/.local/bin/ghx && chmod +x ~/.local/bin/ghx
 ```
 
 Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`).
@@ -34,26 +34,26 @@ Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`).
 
 ```bash
 # Explore a repo — branch, file tree, and README in 1 API call
-ggcode explore plausible/analytics
+ghx explore plausible/analytics
 
 # Read multiple files in 1 API call
-ggcode read plausible/analytics mix.exs assets/js/dashboard/stats/bar.js
+ghx read plausible/analytics mix.exs assets/js/dashboard/stats/bar.js
 
 # Code map — signatures, imports, types only (~92% token reduction)
-ggcode read plausible/analytics --map lib/plausible/stats/query.ex
+ghx read plausible/analytics --map lib/plausible/stats/query.ex
 
 # Grep within a remote file (2 lines context)
-ggcode read plausible/analytics --grep "defmodule" lib/plausible/stats/query.ex
+ghx read plausible/analytics --grep "defmodule" lib/plausible/stats/query.ex
 
 # Read specific line range
-ggcode read plausible/analytics --lines 42-80 lib/plausible/stats/query.ex
+ghx read plausible/analytics --lines 42-80 lib/plausible/stats/query.ex
 
 # Search code (full GitHub search syntax)
-ggcode search "useState repo:facebook/react"
-ggcode search "path:llms.txt extension:txt"
+ghx search "useState repo:facebook/react"
+ghx search "path:llms.txt extension:txt"
 
 # Full recursive tree
-ggcode tree plausible/analytics assets/js
+ghx tree plausible/analytics assets/js
 ```
 
 ## Why
@@ -66,9 +66,9 @@ AI agents exploring GitHub repos face a tooling gap:
 | Octocode MCP | 1 (parallel) | ~10K tokens | npm + Docker |
 | Raw `gh` CLI | 1 | 0 | `gh` |
 | Gitingest | N (clones first) | 0 | pip + tiktoken |
-| **ggcode** | **1-10 (GraphQL batch)** | **0** | **`gh`** |
+| **ghx** | **1-10 (GraphQL batch)** | **0** | **`gh`** |
 
-`ggcode` reads 10 files in 1 API call. No other tool does this.
+`ghx` reads 10 files in 1 API call. No other tool does this.
 
 ## Code Map (`--map`)
 
@@ -88,7 +88,7 @@ Supported: TypeScript/JavaScript, Python, Go, Rust, Java/Kotlin, Ruby. Falls bac
 
 ## How It Works
 
-`ggcode` wraps `gh` CLI with GraphQL batching. The `explore` command fetches tree + README in 1 GraphQL call. The `read` command uses GraphQL aliases (`f0:`, `f1:`, ...) to fetch up to 10 files in 1 call. The `search` command hits the REST `/search/code` endpoint directly (GraphQL has no code search).
+`ghx` wraps `gh` CLI with GraphQL batching. The `explore` command fetches tree + README in 1 GraphQL call. The `read` command uses GraphQL aliases (`f0:`, `f1:`, ...) to fetch up to 10 files in 1 call. The `search` command hits the REST `/search/code` endpoint directly (GraphQL has no code search).
 
 The `--map` flag applies per-language regex patterns to extract structural declarations from the fetched content. No Tree-sitter, no AST parsing — just regex on the first line of each declaration. This works because structural declarations in most languages start at the beginning of a line with a keyword (`function`, `class`, `def`, `func`, `export`, `import`, etc.).
 
