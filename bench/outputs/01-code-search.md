@@ -1,18 +1,21 @@
 # Code search
 
-Search for a multi-word query in a repo. Tests two queries: one where both tools find results (AND-friendly), one where gh search code fails due to exact-phrase wrapping.
+Search for a multi-word query. Tests AND matching (ghx) vs exact-phrase matching (gh search code wraps in quotes).
 
 ## Results
 
-| Method | Time (ms) | Bytes | Tokens | Lines | API Calls |
-|--------|-----------|-------|--------|-------|-----------|
-| ghx search | 999ms |     1741 | 420 | 24 | 2 |
-| gh search code | 585ms |     3971 | 995 | 39 | 2 |
+| Command | Time (ms) | Input Tokens | Output Tokens | Output Lines |
+|---------|-----------|--------------|---------------|--------------|
+| `ghx search "bar width repo:plausible/analytics"` | 415ms | 13 | 360 | 20 |
+| `gh search code "bar width repo:plausible/analytics"` | 359ms | 13 | 951 | 36 |
+| `ghx search "ghx gkoreli"` | 341ms | 11 | 16 | 1 |
+| `gh search code "ghx gkoreli"` | 320ms | 11 | 1 | 0 |
 
-## Method A: ghx search
+## `ghx search "bar width repo:plausible/analytics"`
+
+Input tokens: 13 | Output tokens: 360 | Time: 415ms | Lines: 20 | Bytes: 1529
 
 ```
---- Query 1: 'bar width repo:plausible/analytics' ---
 plausible/analytics assets/js/dashboard/stats/bar.js:bar.js
 plausible/analytics assets/js/dashboard/nav-menu/filters-bar.tsx:filters-bar.tsx
 plausible/analytics assets/js/dashboard/nav-menu/top-bar.tsx:top-bar.tsx
@@ -33,15 +36,13 @@ plausible/analytics test/plausible_web/components/billing/billing_test.exs:billi
 plausible/analytics tracker/test/fixtures/legacy-pageview-properties.html:legacy-pageview-properties.html
 plausible/analytics tracker/test/fixtures/cookies-onetrust.html:cookies-onetrust.html
 plausible/analytics tracker/test/fixtures/cookies-cookiebot.html:cookies-cookiebot.html
-
---- Query 2: 'ghx gkoreli' (gh search code wraps in quotes = exact phrase, finds nothing) ---
-alphaleadership/npm-check docs/pending-db.json:pending-db.json
 ```
 
-## Method B: gh search code
+## `gh search code "bar width repo:plausible/analytics"`
+
+Input tokens: 13 | Output tokens: 951 | Time: 359ms | Lines: 36 | Bytes: 3822
 
 ```
---- Query 1: 'bar width repo:plausible/analytics' ---
 plausible/analytics:assets/js/dashboard/stats/bar.js: export default function Bar({
 plausible/analytics:assets/js/dashboard/nav-menu/filters-bar.tsx: ) => (element === null ? null : element.getBoundingClientRect().width)
 plausible/analytics:assets/js/dashboard/nav-menu/filters-bar.tsx: width: number
@@ -78,6 +79,21 @@ plausible/analytics:tracker/test/fixtures/legacy-pageview-properties.html: event
 plausible/analytics:tracker/test/fixtures/cookies-onetrust.html: <div class="ot-fltr-scrlcnt ot-pc-scrollbar">
 plausible/analytics:tracker/test/fixtures/cookies-onetrust.html: style="position: absolute; top: -50000px; width: 100em"
 plausible/analytics:tracker/test/fixtures/cookies-cookiebot.html: width="14"
-
---- Query 2: 'ghx gkoreli' (gh search code wraps in quotes = exact phrase, finds nothing) ---
 ```
+
+## `ghx search "ghx gkoreli"`
+
+Input tokens: 11 | Output tokens: 16 | Time: 341ms | Lines: 1 | Bytes: 63
+
+```
+alphaleadership/npm-check docs/pending-db.json:pending-db.json
+```
+
+## `gh search code "ghx gkoreli"`
+
+Input tokens: 11 | Output tokens: 1 | Time: 320ms | Lines: 0 | Bytes: 0
+
+```
+
+```
+
