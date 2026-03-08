@@ -197,9 +197,21 @@ Both hit the same `/search/code` endpoint. The difference is the quoting.
 
 **Fix:** 5-line bash check before sending the query. Warn on known-invalid qualifiers, suggest the correct alternative (`filename:` → `path:`).
 
-### Remaining gaps from ADR-0001 research (TODO)
+### Issue 4: GitHub web search vs REST API — different backends (CONFIRMED)
 
-Ideas identified in ADR-0001 that are not yet implemented, prioritized by impact:
+**Evidence from official sources:**
+
+1. **GraphQL has no code search.** Verified via introspection — `SearchType` enum only has: `ISSUE`, `ISSUE_ADVANCED`, `REPOSITORY`, `USER`, `DISCUSSION`. No `CODE`. Attempting `type: CODE` returns: "Argument 'type' on Field 'search' has an invalid value (CODE)."
+
+2. **REST `/search/code` is the only code search API.** GitHub's official docs (docs.github.com/en/rest/search/search) list exactly one code search endpoint: `GET /search/code`. There is no v2, no "new code search" API. The `sort` field is marked "closing down" — suggesting this is legacy infrastructure.
+
+3. **github.com/search uses a different engine.** GitHub's engineering blog (2023-02-06) describes "Blackbird" — a Rust-based search engine built specifically for the new code search on github.com. This engine powers the web UI but has no public API. Source: [github.blog/2023-02-06-the-technology-behind-githubs-new-code-search](https://github.blog/2023-02-06-the-technology-behind-githubs-new-code-search/).
+
+4. **REST API has known limitations the web UI doesn't.** From official docs: "Only the default branch is considered. Only files smaller than 384 KB are searchable. You must always include at least one search term. Repositories with fewer than 500,000 files are searchable." The web UI (Blackbird) doesn't have these constraints.
+
+**What this means for ghx:** Every tool that uses `/search/code` — ghx, gh CLI, GitHub MCP, Octocode — hits the same legacy backend. The web UI's better results (faster indexing, better ranking) are not accessible programmatically. This is a platform limitation, not a ghx limitation. When new repos don't appear in `ghx search` but do appear on github.com/search, this is why.
+
+### Remaining gaps from ADR-0001 research (TODO)
 
 | # | Idea | Effort | Impact | Status |
 |---|------|--------|--------|--------|
