@@ -36,6 +36,25 @@ Steps 1-2 are solved. Steps 3-6 are the v0.3 scope.
 
 **Evidence that this matters:** Next.js ships a 20KB AGENTS.md with monorepo structure, key entry points, testing commands, and coding conventions. An agent that reads this BEFORE touching code makes fundamentally better decisions. An agent that doesn't will guess wrong about the build system, test runner, and directory layout — then waste 5-10 calls recovering.
 
+### What existing tools DON'T do (verified from source code)
+
+**GitHub MCP `get_file_contents`** (`github/github-mcp-server` — `pkg/github/repositories.go` lines 617-800):
+- No `--lines` equivalent — returns the entire file or nothing
+- No `--grep` equivalent — no match filtering within files
+- No batch reading — 1 file = 1 tool call = 1 API round-trip
+- No `--map` equivalent — no code structure extraction
+- For files ≥1MB: returns a ResourceLink (URL) instead of content — agent must make another call
+- Binary detection via `http.DetectContentType` — but no option to skip binaries in batch
+
+**GitHub MCP `search_code`** (`pkg/github/search.go` lines 169-260):
+- Raw `json.Marshal(result)` — dumps the entire GitHub API response as JSON
+- No `text_match` extraction — agent gets full CodeResult objects, not the matching lines
+- No context protection — no 200-char limit, no truncation of large matches
+- No AND matching enforcement — uses GitHub's default OR behavior
+- Pagination support but no guidance on when to stop or refine
+
+**This is ghx's competitive gap.** Every feature ghx has for targeted extraction — `--lines`, `--grep`, `--map`, batch reading, text_match extraction, 200-char protection — is absent from the official GitHub MCP. The gap isn't marginal; it's structural. GitHub MCP is a thin wrapper around the API. ghx is an opinionated layer that makes the API agent-friendly.
+
 ## Evidence: Agent Instruction Files Are Everywhere
 
 Empirical survey of major open-source repos (2026-03-08, verified via GraphQL):
@@ -115,6 +134,16 @@ node_modules/ dist/ build/ .git/ __pycache__/ .next/ .nuxt/ coverage/ vendor/ .c
 ```
 
 12 directories + 25 extensions vs Octocode's 82 + 42 + 90. Focused, not exhaustive. `--all` to disable.
+
+**Cross-validation with Gitingest** (`cyclotruc/gitingest` — `src/gitingest/utils/ignore_patterns.py`, 4897 bytes):
+Gitingest has 120+ patterns organized by language ecosystem. Their list confirms our choices and adds ecosystem-specific lock files:
+- Lock files: `poetry.lock`, `Pipfile.lock`, `package-lock.json`, `yarn.lock`, `bun.lock`, `bun.lockb`, `Cargo.lock`, `Gemfile.lock`
+- IDE dirs: `.idea`, `.vscode`, `.vs`
+- Media: `*.svg`, `*.png`, `*.jpg`, `*.gif`, `*.ico`, `*.pdf`, `*.mov`, `*.mp4`
+- Build: `build`, `dist`, `target`, `out`
+- Virtual envs: `venv`, `.venv`, `env`
+
+Key difference: Gitingest filters a cloned filesystem; ghx filters API tree output (path strings). Our grep-based approach is simpler but sufficient — we match path components, not glob patterns. The 12+25 subset covers the patterns that appear in >90% of repos without needing ecosystem-specific lock file names (those are already caught by `*.lock`).
 
 ### 4. gh-aw's Schema-First Pattern
 **Source:** `github/gh-aw` — `skills/github-pr-query/query-prs.sh` (4113 bytes, verified)
@@ -339,6 +368,15 @@ Hint: ghx read --grep "function_name" file to see implementation
 **Effort:** ~15 lines (1-2 echo statements per command).
 **Impact:** Guides agent's next action. Prevents wrong tool usage. A 50-token hint that prevents a 5000-token wrong read is 100x ROI.
 
+**Cross-validation with gh-aw error recovery** (`github/gh-aw` — `skills/error-recovery-patterns/SKILL.md`, 3291 bytes):
+gh-aw's error recovery skill codifies anti-patterns that ghx hints prevent:
+- ❌ Infinite retry loops → ghx hint after 0 search results: "broaden query" (prevents retry with same query)
+- ❌ Retrying validation errors → ghx hint after large output: "use --grep or --lines" (prevents re-reading the same file)
+- ❌ Silent retries without logging → ghx hints are on stderr, always visible
+- ❌ No backoff delay → ghx hints suggest a DIFFERENT action, not the same one again
+
+The pattern: **hints are proactive error prevention.** Instead of recovering from mistakes, prevent them. gh-aw needs a 3291-byte error recovery skill because their tools don't guide the agent's next action. ghx builds the guidance into the tool output.
+
 ### Feature 5: `ghx read --minify`
 
 **What:** Strip single-line comments and collapse consecutive blank lines before output.
@@ -354,7 +392,26 @@ sed '/^[[:space:]]*\/\//d; /^[[:space:]]*#[^!]/d' | cat -s
 **Effort:** ~5 lines (flag parsing + sed pipeline).
 **Impact:** 20-30% token savings on verbose codebases. Stacks with --map for maximum compression.
 
-**Inspiration:** Octocode's `packages/octocode-mcp/src/utils/core/minify.ts` — per-file-type strategies. We take the conservative approach (strip comments + blanks) which works across all languages.
+**Inspiration:** Octocode's `packages/octocode-mcp/src/utils/minifier/` — per-file-type strategies. We take the conservative approach (strip comments + blanks) which works across all languages.
+
+**Deep evidence from Octocode's minifier** (verified from `minifier.ts`, `minifierTypes.ts`, `minifierStrategies.ts`):
+
+Octocode has 6 minification strategies with 80+ file type mappings:
+- **terser** (JS/JSX/MJS/CJS) — async, uses terser library, drops dead code, removes comments, collapses whitespace
+- **conservative** (TS/TSX/Python/YAML/bash/shell/CSV/Haskell/Elm) — regex-based: remove comments by pattern group, strip trailing whitespace, collapse 3+ blank lines to 2
+- **aggressive** (Go/Java/C/C++/Rust/Swift/Kotlin/Ruby/PHP/SQL/Lua) — collapse ALL whitespace to single space, remove spaces around `{}:;,`, remove whitespace between tags
+- **json** — `JSON.stringify(JSON.parse(content))` with JSONC fallback (strip c-style comments first)
+- **markdown** — remove HTML comments, normalize headings/lists/tables, collapse blank lines
+- **general** (txt/log/unknown) — strip trailing whitespace, normalize line endings, collapse blank lines
+
+Key design decisions in Octocode's minifier:
+- TypeScript uses **conservative**, not aggressive — because indentation matters for readability
+- `INDENTATION_SENSITIVE_NAMES` set: Makefile, Dockerfile, Procfile, Justfile, Rakefile, Gemfile, etc. — always conservative
+- 7 comment pattern groups: c-style (`//`, `/* */`), hash (`#`), html (`<!-- -->`), sql (`--`), lua (`--`, `--[[ ]]`), template (`{{! }}`, `<%# %>`, `{# #}`), haskell (`--`, `{- -}`)
+- Async path uses terser/CleanCSS/html-minifier-terser for better quality; sync path uses regex for speed
+- Graceful fallback: if any strategy throws, return original content unchanged
+
+**What ghx takes:** The conservative strategy is exactly right for `--minify`. Our `sed '/^[[:space:]]*\/\//d; /^[[:space:]]*#[^!]/d' | cat -s` is essentially Octocode's `minifyConservativeCore()` — remove line comments (c-style and hash, preserving shebangs), collapse blank lines. This covers the 80/20: 20-30% token savings with zero information loss for structural understanding. We don't need per-language strategies because we're not minifying for execution — we're minifying for comprehension.
 
 ## What v0.3 Adds to the Competitive Position
 
@@ -362,12 +419,29 @@ sed '/^[[:space:]]*\/\//d; /^[[:space:]]*#[^!]/d' | cat -s
 |---|---|---|---|---|
 | Agent instruction detection | ❌ | ✅ (AGENTS.md, CLAUDE.md) | ❌ | ❌ |
 | Tree filtering | ❌ | ✅ (smart defaults) | ✅ (85 folders) | ❌ |
-| Token estimation | ❌ | ✅ (stderr warnings) | ✅ (3-tier) | ❌ |
+| Token estimation | ❌ | ✅ (stderr warnings) | ✅ (5-tier) | ❌ |
 | Next-action hints | ❌ | ✅ (stderr) | ✅ (JSON hints) | ❌ |
-| Content minification | ❌ | ✅ (--minify) | ✅ (per-language) | ❌ |
+| Content minification | ❌ | ✅ (--minify) | ✅ (6 strategies) | ❌ |
 | Context overhead | 0 tokens | 0 tokens | ~10K tokens | ~10K tokens |
 
 **The pattern:** v0.3 brings every intelligence feature that makes Octocode valuable — without the MCP overhead. Same guidance, same protection, same filtering. Zero schema cost.
+
+### Deeper competitive analysis (verified from source code)
+
+**Features ghx has that GitHub MCP lacks entirely:**
+
+| Feature | ghx | GitHub MCP | Evidence |
+|---|---|---|---|
+| Line range extraction | `--lines 50-100` | ❌ (full file only) | `repositories.go` — no line params in schema |
+| Grep within file | `--grep "pattern"` | ❌ | No match filtering in `get_file_contents` |
+| Batch file reading | `read repo f1 f2 f3` (1 call) | ❌ (1 file = 1 call) | Each `get_file_contents` = 1 API call |
+| Code map generation | `--map` (~92% reduction) | ❌ | No structural extraction |
+| AND search matching | Default behavior | ❌ (GitHub default OR) | `search.go` — raw `client.Search.Code()` |
+| Text match extraction | Shows matching lines | ❌ (raw JSON dump) | `json.Marshal(result)` with no processing |
+| Context protection | 200-char per match | ❌ (full CodeResult) | No truncation in search handler |
+| README in explore | Single GraphQL call | Separate tool call | `get_file_contents` is a separate tool |
+
+**The structural gap:** GitHub MCP is a 1:1 API wrapper — each tool maps to one GitHub API endpoint. ghx is an opinionated composition layer — each command combines multiple API features into an agent-optimized workflow. This is why ghx can do in 1 command what GitHub MCP needs 3-5 tool calls for.
 
 ## What NOT to Build (with evidence)
 
@@ -478,12 +552,22 @@ Both layers are needed. The tool without the skill is a CLI. The skill without t
 - Octocode MCP: `bgauryy/octocode-mcp`
   - Hints + token warnings: `packages/octocode-mcp/src/utils/pagination/hints.ts` — `generateTokenWarnings()`, `generateGitHubPaginationHints()`, `generateStructurePaginationHints()`
   - File filtering: `packages/octocode-mcp/src/utils/file/filters.ts` — `IGNORED_FOLDER_NAMES` (82), `IGNORED_FILE_NAMES` (42), `IGNORED_FILE_EXTENSIONS` (90+), `shouldIgnoreFile()`
+  - Minification: `packages/octocode-mcp/src/utils/minifier/` — `minifier.ts` (5945 bytes), `minifierTypes.ts` (7668 bytes), `minifierStrategies.ts` (8428 bytes). 6 strategies (terser, conservative, aggressive, json, markdown, general), 80+ file type mappings, 7 comment pattern groups
   - Fetch content hints: `packages/octocode-mcp/src/tools/github_fetch_content/execution.ts` — `DIRECTORY_FETCH_HINTS`, `DIRECTORY_CACHE_HIT_HINT`
   - Local tool hints: `packages/octocode-mcp/src/hints/localToolUsageHints.ts`
+- GitHub MCP Server: `github/github-mcp-server`
+  - File reading: `pkg/github/repositories.go` lines 617-800 — `GetFileContents()`: no line ranges, no grep, no batch, no map. 1MB limit returns ResourceLink.
+  - Code search: `pkg/github/search.go` lines 169-260 — `SearchCode()`: raw `json.Marshal(result)`, no text_match extraction, no context protection
+  - Tree: `pkg/github/git.go` — `get_repository_tree`: has `path_filter` param but no exclusion filtering
+  - 18 toolsets, 50+ tools. Default: context, repos, issues, pull_requests, users. Code exploration = repos toolset only.
 - gh-aw skills: `github/gh-aw`
   - Schema-first pattern: `skills/github-pr-query/query-prs.sh` (4113 bytes) — returns schema + suggested_queries when no --jq
   - Developer skill: `skills/developer/SKILL.md` (58KB) — comprehensive coding guidelines
+  - Error recovery: `skills/error-recovery-patterns/SKILL.md` (3291 bytes) — circuit breaker (3 attempts), exponential backoff, fail-fast on non-transient errors
   - 26 skills total, none for code exploration (ghx's niche)
+- Gitingest: `cyclotruc/gitingest`
+  - Ignore patterns: `src/gitingest/utils/ignore_patterns.py` (4897 bytes) — 120+ patterns organized by language ecosystem, includes lock files, IDE dirs, media, build artifacts
+  - Clone-first approach: `git clone --depth=1 --filter=blob:none --sparse` for remote repos
 - Codemap: `kcosr/codemap`
   - Progressive detail reduction: `src/sourceMap.ts` lines 96-180 — `DETAIL_LEVELS`, `fitToBudget()`, `reduceDetailLevel()`
   - Token estimation: `Math.ceil(rendered.length / 4)` (line 119)
