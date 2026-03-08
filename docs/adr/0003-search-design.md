@@ -218,6 +218,17 @@ Code search is 10 req/min. ghx should:
 
 The raw API response is ~4.5KB per result, mostly repo metadata URLs we never use. Our jq already strips this. With text_matches, we add ~50 chars per result (one fragment line). Total output for 30 results: ~2KB vs raw API's ~135KB. **~98% reduction.**
 
+### Decision 6: Prerequisite checks with clear errors
+
+`ghx search` depends on `gh` CLI being installed and authenticated. Both can fail with cryptic errors. Add upfront checks:
+
+| Condition | Current behavior | ghx should do |
+|---|---|---|
+| `gh` not installed | `ghx: line N: gh: command not found` | `"ghx requires the GitHub CLI (gh). Install: https://cli.github.com"` |
+| `gh` not authenticated | `{"message": "Requires authentication"}` | `"gh is not authenticated. Run: gh auth login"` |
+
+Check once at startup, fail fast with actionable message. No wasted API call.
+
 ## Corrections to Previous ADRs
 
 1. **ADR-0001 claimed `filename:` is invalid** — WRONG. `filename:` is a valid legacy API qualifier. Tested: `filename:package.json repo:jquery/jquery` returns results. The confusion was mixing up legacy (where `filename:` works) with new code search (where only `path:` works).
