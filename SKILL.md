@@ -67,7 +67,7 @@ ghx search "path:llms.txt"                                     # Find files by n
 
 2. **`language:markdown` won't find `.txt` files.** GitHub's linguist detection doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` = linguist detection, `extension:` = literal file extension.
 
-3. **`gh search code` is unreliable.** Works for some multi-word queries, returns empty or noisy results for others. `ghx search` hits the REST API directly and provides consistent, compact output. Prefer `ghx search` for reliability.
+3. **`gh search code` silently wraps queries in quotes.** `gh search code "foo bar"` sends `q="foo bar"` (exact phrase), not `q=foo bar` (AND). If the words aren't adjacent in the file, you get zero results with no error. `ghx search` sends AND queries — both words must appear but in any order. This is almost always what you want.
 
 4. **GraphQL returns null for missing paths.** `object(expression: "branch:path")` returns null silently if the path doesn't exist. No error. `ghx` handles this, but if using `gh api graphql` directly, check for null.
 
@@ -85,7 +85,7 @@ ghx search "path:llms.txt"                                     # Find files by n
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files)
 - ❌ Firing multiple code search requests in parallel — 10 req/min rate limit, you'll get 403s
 - ❌ Dumping entire repos into context for a specific question — use targeted `ghx` commands. Reserve `gitingest`/`repomix` for "understand this whole module" tasks
-- ❌ Relying on `gh search code` for consistent results — works for some queries, returns empty or noisy results for others. Use `ghx search` for reliability
+- ❌ Relying on `gh search code` for multi-word queries — silently wraps in quotes (exact phrase), returns nothing when words aren't adjacent. Use `ghx search` (AND matching)
 
 ## Best Practices
 

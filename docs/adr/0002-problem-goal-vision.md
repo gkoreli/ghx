@@ -173,13 +173,21 @@ ghx uses 62% fewer tokens but provides 0% of the matching context. The token sav
 
 **Source:** ADR-0001 documents that Octocode's `matchString` parameter returns matching lines with configurable context — the same pattern we should follow.
 
-### Issue 2: `gh search code` is unreliable, not "broken" or "working"
+### Issue 2: `gh search code` silently wraps queries in quotes (ROOT CAUSE FOUND)
 
-**What's wrong:** ADR-0001 and SKILL.md originally stated: "gh search code silently fails on multi-word queries." Initial re-testing on 2026-03-08 showed it working for `"bar width repo:plausible/analytics"`. But further testing revealed inconsistency: `gh search code "ghx gkoreli"` returns empty results for content that exists, while `gh search code "ghx"` returns noisy, irrelevant results.
+**What's wrong:** `gh search code` silently wraps multi-word queries in double quotes, turning AND search into exact-phrase search. Verified via `GH_DEBUG=api`:
+- `gh search code "ghx gkoreli"` → sends `q=%22ghx+gkoreli%22` (exact phrase `"ghx gkoreli"`)
+- `ghx search "ghx gkoreli"` → sends `q=ghx+gkoreli` (AND — both words, any order)
 
-**Revised assessment:** `gh search code` is unreliable — it works for some queries and fails silently for others. It's not categorically broken, but it's not trustworthy either. The original claim was too absolute ("silently fails on multi-word"), the correction was too generous ("works fine"). The truth is in between: it's flaky.
+Both hit the same `/search/code` endpoint. The difference is the quoting.
 
-**Fix:** Remove absolute claims in either direction. State the observed behavior: `gh search code` works for some multi-word queries but returns inconsistent results. `ghx search` hits the REST API directly and provides consistent, compact output. Agents should prefer `ghx search` for reliability, not because `gh search code` is broken.
+**Why it matters:** When an agent searches for two terms that appear in the same file but not adjacent, `gh search code` returns nothing. `ghx search` finds it. This explains the original "silently fails on multi-word" observation — it wasn't failing, it was searching for an exact phrase that didn't exist.
+
+**Benchmark evidence (bench/outputs/01-code-search.md):**
+- Query `"ghx gkoreli"`: ghx finds 1 result, gh search code finds 0
+- Query `"bar width repo:plausible/analytics"`: both find results (the words happen to appear adjacent)
+
+**Fix:** This is a `gh` CLI bug/design choice, not something we fix. But we document it accurately: `gh search code` does exact-phrase matching, `ghx search` does AND matching. Agents should prefer `ghx search` because AND is almost always what you want.
 
 ### Issue 3: No search query validation
 

@@ -1,17 +1,18 @@
 # Code search
 
-Search for a multi-word query in a repo
+Search for a multi-word query in a repo. Tests two queries: one where both tools find results (AND-friendly), one where gh search code fails due to exact-phrase wrapping.
 
 ## Results
 
 | Method | Time (ms) | Bytes | Tokens | Lines | API Calls |
 |--------|-----------|-------|--------|-------|-----------|
-| ghx search | 441ms |     1529 | 360 | 20 | 1 |
-| gh search code | 340ms |     3822 | 951 | 36 | 1 |
+| ghx search | 999ms |     1741 | 420 | 24 | 2 |
+| gh search code | 585ms |     3971 | 995 | 39 | 2 |
 
 ## Method A: ghx search
 
 ```
+--- Query 1: 'bar width repo:plausible/analytics' ---
 plausible/analytics assets/js/dashboard/stats/bar.js:bar.js
 plausible/analytics assets/js/dashboard/nav-menu/filters-bar.tsx:filters-bar.tsx
 plausible/analytics assets/js/dashboard/nav-menu/top-bar.tsx:top-bar.tsx
@@ -32,11 +33,15 @@ plausible/analytics test/plausible_web/components/billing/billing_test.exs:billi
 plausible/analytics tracker/test/fixtures/legacy-pageview-properties.html:legacy-pageview-properties.html
 plausible/analytics tracker/test/fixtures/cookies-onetrust.html:cookies-onetrust.html
 plausible/analytics tracker/test/fixtures/cookies-cookiebot.html:cookies-cookiebot.html
+
+--- Query 2: 'ghx gkoreli' (gh search code wraps in quotes = exact phrase, finds nothing) ---
+alphaleadership/npm-check docs/pending-db.json:pending-db.json
 ```
 
 ## Method B: gh search code
 
 ```
+--- Query 1: 'bar width repo:plausible/analytics' ---
 plausible/analytics:assets/js/dashboard/stats/bar.js: export default function Bar({
 plausible/analytics:assets/js/dashboard/nav-menu/filters-bar.tsx: ) => (element === null ? null : element.getBoundingClientRect().width)
 plausible/analytics:assets/js/dashboard/nav-menu/filters-bar.tsx: width: number
@@ -73,4 +78,6 @@ plausible/analytics:tracker/test/fixtures/legacy-pageview-properties.html: event
 plausible/analytics:tracker/test/fixtures/cookies-onetrust.html: <div class="ot-fltr-scrlcnt ot-pc-scrollbar">
 plausible/analytics:tracker/test/fixtures/cookies-onetrust.html: style="position: absolute; top: -50000px; width: 100em"
 plausible/analytics:tracker/test/fixtures/cookies-cookiebot.html: width="14"
+
+--- Query 2: 'ghx gkoreli' (gh search code wraps in quotes = exact phrase, finds nothing) ---
 ```
