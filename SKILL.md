@@ -73,23 +73,84 @@ ghx search "path:llms.txt"                                # Find files by name
 
 **Special characters:** Dots act as word separators, not wildcards. `console.log` matches files with both `console` and `log` — it does NOT match `consolelog`.
 
+## Search Strategy for Agents
+
+**Search is the entry point.** Agents search first, then read. Bad search = wasted follow-up reads = token explosion. ghx search is designed to give you enough context to decide your next action in one call.
+
+### Reading search output
+
+```
+90 results (showing 30)                                          ← stderr: is this too broad?
+⚠ Lines truncated to 200 chars (use --full for complete fragments) ← stderr: token protection kicked in
+⚠ Query too broad — add repo:, language:, or path: to narrow      ← stderr: >1000 results
+jquery/jquery src/attributes/classes.js: addClass: function( value ) {  ← stdout: repo path: matching line
+```
+
+**Decision tree after seeing results:**
+- `0 results` → query too specific, broaden (remove qualifiers, try synonyms)
+- `1-30 results` → good. Scan matching lines, `ghx read` the relevant files
+- `30-1000 results` → workable but noisy. Add `repo:`, `language:`, or `path:` to narrow
+- `>1000 results` → too broad. MUST add qualifiers before trusting results
+- `⚠ incomplete` → query timed out, results are partial. Narrow the scope
+
+### Token protection (safe by default)
+
+ghx truncates each matching line to 200 chars. This prevents minified JS files (10,000+ char lines) from exploding your context window. One untruncated minified result can consume more tokens than the other 29 results combined.
+
+- **Default**: 200 char truncation. You see `⚠ Lines truncated` on stderr only when it triggers.
+- **`--full`**: Disables truncation. Use when you specifically need the complete matching line.
+- **When to use `--full`**: Almost never. The truncated line is enough to decide "relevant" or "skip." Use `ghx read` to get the full file context after you've identified the right file.
+
+### Search refinement chain of thought
+
+```
+1. ghx search "useState"                              → 201K results. Too broad.
+2. ghx search "useState language:typescript"           → 50K results. Still broad.
+3. ghx search "useState repo:vercel/next.js"           → 89 results. Workable.
+4. ghx search "useState path:packages/next extension:tsx repo:vercel/next.js"  → 12 results. Surgical.
+```
+
+**Refine, don't paginate.** At 9 req/min, pagination burns rate limit on the same broad query. Adding one qualifier is always better than fetching page 2.
+
+### Two search systems (why some things don't work)
+
+GitHub has two code search engines. The REST API (what ghx uses) is the legacy one. The web UI uses Blackbird (new). No programmatic tool — ghx, `gh` CLI, GitHub MCP, Octocode — can access Blackbird. This is a platform limitation, not a ghx limitation.
+
+**What this means for agents:**
+- `OR`, `NOT`, `symbol:`, regex, `content:`, `is:` → web-only, don't use
+- `repo:`, `path:`, `filename:`, `language:`, `extension:`, `in:`, `size:`, `fork:` → work in REST API
+- ghx warns on stderr if you use web-only qualifiers, but the results will be wrong
+
+### ghx search vs `gh search code`
+
+| Behavior | `ghx search` | `gh search code` |
+|---|---|---|
+| Multi-word matching | AND (both words anywhere) | Exact phrase (words must be adjacent) |
+| Matching context | Shows matching line per result | No matching context |
+| Result count | stderr: "90 results (showing 30)" | Not shown |
+| Token protection | 200 char truncation, `--full` opt-out | None |
+| Web-only warnings | Warns on stderr | Silent |
+| Rate limit | Same (9 req/min) | Same |
+
+AND matching is almost always what agents want. `gh search code "useState fetchData"` returns zero results if the words aren't adjacent — with no error. `ghx search "useState fetchData"` finds files containing both terms.
+
 ## Gotchas
 
 1. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT`, `content:`, `is:`, regex — these only work in GitHub's new web code search (Blackbird). The REST API treats them as literal text. `symbol:foo` searches for the TEXT "symbol:foo" inside files. ghx warns on stderr, but the results will be wrong. No programmatic tool can use these features — it's a GitHub platform limitation.
 
 2. **`filename:` vs `path:` — both valid, different systems.** `filename:package.json` works in the REST API (legacy) for exact filename match. `path:` also works and is more flexible (matches directories too). In the NEW web code search, only `path:` works — `filename:` is not recognized. Since ghx uses the REST API, both work.
 
-2. **`language:markdown` won't find `.txt` files.** GitHub's linguist detection doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` = linguist detection, `extension:` = literal file extension.
+3. **`language:markdown` won't find `.txt` files.** GitHub's linguist detection doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` = linguist detection, `extension:` = literal file extension.
 
-3. **`gh search code` silently wraps queries in quotes.** `gh search code "foo bar"` sends `q="foo bar"` (exact phrase), not `q=foo bar` (AND). If the words aren't adjacent in the file, you get zero results with no error. `ghx search` sends AND queries — both words must appear but in any order. This is almost always what you want. ghx also shows result count on stderr and matching line context — `gh search code` shows neither.
+4. **`gh search code` silently wraps queries in quotes.** `gh search code "foo bar"` sends `q="foo bar"` (exact phrase), not `q=foo bar` (AND). If the words aren't adjacent in the file, you get zero results with no error. `ghx search` sends AND queries — both words must appear but in any order. This is almost always what you want. ghx also shows result count on stderr and matching line context — `gh search code` shows neither.
 
-4. **GraphQL returns null for missing paths.** `object(expression: "branch:path")` returns null silently if the path doesn't exist. No error. `ghx` handles this, but if using `gh api graphql` directly, check for null.
+5. **GraphQL returns null for missing paths.** `object(expression: "branch:path")` returns null silently if the path doesn't exist. No error. `ghx` handles this, but if using `gh api graphql` directly, check for null.
 
-5. **Flag ordering in `read` command.** `ghx read owner/repo file --map` works. `ghx read --map owner/repo file` does NOT — repo must be the first positional arg.
+6. **Flag ordering in `read` command.** `ghx read owner/repo file --map` works. `ghx read --map owner/repo file` does NOT — repo must be the first positional arg.
 
-6. **Not all repos use `main`.** cli/cli uses `trunk`, others use `master`. `ghx` handles this automatically. For raw `gh api` calls, query the default branch first: `gh repo view owner/repo --json defaultBranchRef --jq '.defaultBranchRef.name'`
+7. **Not all repos use `main`.** cli/cli uses `trunk`, others use `master`. `ghx` handles this automatically. For raw `gh api` calls, query the default branch first: `gh repo view owner/repo --json defaultBranchRef --jq '.defaultBranchRef.name'`
 
-7. **`gh` field names are inconsistent.** `stargazersCount` (search) vs `stargazerCount` (repo view). Always check with `--json` (no fields) to see available fields for any command.
+8. **`gh` field names are inconsistent.** `stargazersCount` (search) vs `stargazerCount` (repo view). Always check with `--json` (no fields) to see available fields for any command.
 
 ## Anti-Patterns
 
