@@ -158,7 +158,6 @@ ghx read yamadashy/repomix --lines 38-65 src/core/treeSitter/parseFile.ts
 | Surgical exploration | `ghx` | Batched API calls, zero overhead, targeted extraction |
 | Holistic understanding | `gitingest` / `repomix --compress` | Dump entire module for broad reasoning |
 | PRs, issues, CI | `gh pr view`, `gh issue view`, `gh pr checks` | Purpose-built commands |
-| Single file (simplest) | `gh api repos/o/r/contents/path -H "Accept: application/vnd.github.raw+json"` | One file, one call |
 
 ## `gh` CLI Quick Reference
 
