@@ -1,3 +1,8 @@
+---
+name: ghx
+description: GitHub code exploration for AI agents. Use for repo exploration, reading remote files, code search, code maps. Wraps gh CLI with GraphQL batching — one command does what takes 3-5 API calls.
+---
+
 # ghx — GitHub Code Exploration for AI Agents
 
 Use `ghx` via `execute_bash` for anything on GitHub — repos, files, code search. Authenticated via `gh` CLI, structured output, zero context overhead.
