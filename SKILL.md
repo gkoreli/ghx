@@ -152,6 +152,10 @@ AND matching is almost always what agents want. `gh search code "useState fetchD
 
 8. **`gh` field names are inconsistent.** `stargazersCount` (search) vs `stargazerCount` (repo view). Always check with `--json` (no fields) to see available fields for any command.
 
+9. **`gh api repos/.../contents/` returns base64 by default.** Without `-H "Accept: application/vnd.github.raw+json"`, you get a JSON blob with base64-encoded content. `ghx read` returns plain text via GraphQL — no decoding needed.
+
+10. **`gh search repos` and `gh search code` use different rate limit pools.** Repo search: 30/min (generous). Code search: 10/min (restrictive). Don't assume one rate limit applies to both.
+
 ## Anti-Patterns
 
 - ❌ `web_fetch`/`web_search` on github.com — returns HTML noise, wastes thousands of tokens for zero useful information
@@ -162,6 +166,9 @@ AND matching is almost always what agents want. `gh search code "useState fetchD
 - ❌ Firing multiple code search requests in parallel — 9 req/min rate limit, you'll get 403s
 - ❌ Dumping entire repos into context for a specific question — use targeted `ghx` commands. Reserve `gitingest`/`repomix` for "understand this whole module" tasks
 - ❌ Relying on `gh search code` for multi-word queries — silently wraps in quotes (exact phrase), returns nothing when words aren't adjacent. Use `ghx search` (AND matching + matching context)
+- ❌ Using `ghx search` to find repos — ghx has no repo search. Use `gh search repos "query" --json fullName,description`
+- ❌ Using `gh` for batch file reads — 1 API call per file, base64 encoded. Use `ghx read repo f1 f2 f3` (1 GraphQL call, plain text)
+- ❌ Using `gh repo view` to explore a repo — gets metadata but not tree listing or README content in one call. Use `ghx explore` (1 call for all three)
 
 ## Best Practices
 
@@ -237,6 +244,43 @@ ghx read yamadashy/repomix --lines 38-65 src/core/treeSitter/parseFile.ts
 | Surgical exploration | `ghx` | Batched API calls, zero overhead, targeted extraction |
 | Holistic understanding | `gitingest` / `repomix --compress` | Dump entire module for broad reasoning |
 | PRs, issues, CI | `gh pr view`, `gh issue view`, `gh pr checks` | Purpose-built commands |
+
+## ghx vs gh: When to Use What
+
+**ghx is a complement to gh, not a replacement.** Use ghx for code exploration. Use gh for everything else.
+
+### Use ghx (code exploration)
+
+| Task | Command | Why ghx wins |
+|------|---------|-------------|
+| Code search | `ghx search "query"` | AND matching (gh uses exact phrase), matching context, 37x token reduction on minified files, result count + warnings on stderr |
+| Repo overview | `ghx explore owner/repo` | 1 GraphQL call gets description + tree + README (gh needs 3 calls) |
+| Read multiple files | `ghx read owner/repo f1 f2 f3` | 1 GraphQL call for N files (gh needs N calls, returns base64) |
+| Targeted extraction | `ghx read --grep "pat" f` | Built-in grep with context lines — no shell piping |
+| Code map | `ghx read --map f1 f2` | ~92% token reduction, no gh equivalent |
+
+### Use gh (everything else)
+
+| Task | Command | Why gh wins |
+|------|---------|-------------|
+| Find repos | `gh search repos "query" --json fullName,description` | ghx has no repo search |
+| Issues | `gh issue list/view -R owner/repo` | ghx doesn't touch issues |
+| Pull requests | `gh pr list/view/diff/checks -R owner/repo` | ghx doesn't touch PRs |
+| Releases | `gh release list -R owner/repo` | ghx doesn't touch releases |
+| Repo metadata | `gh repo view owner/repo --json stargazerCount,forkCount` | Stars, forks, language, license |
+| Auth | `gh auth login/status` | ghx depends on gh for auth |
+| Create/update | `gh issue create`, `gh pr create` | ghx is read-only |
+
+### Rate limits (from GitHub docs)
+
+| Endpoint | Limit | Used by |
+|---|---|---|
+| Core REST | 5,000/hour | gh commands, ghx tree |
+| GraphQL | 5,000/hour | ghx explore, ghx read |
+| Search (repos, issues) | 30/min | `gh search repos/issues` |
+| Code search | 10/min (budget 9) | `ghx search`, `gh search code` |
+
+Code search is 50x more restricted than core REST. This is why "refine don't paginate" matters for search but not for explore/read.
 
 ## `gh` CLI Quick Reference
 

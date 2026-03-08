@@ -296,6 +296,98 @@ One line per result. Scannable. An agent processing 30 results consumes ~2KB tot
 
 AND is almost always what agents want. An agent searching for `useState fetchData` wants files containing both terms, not necessarily adjacent. `gh search code` silently returns zero results for non-adjacent terms with no error — the worst possible failure mode for agents.
 
+## Benchmark: ghx vs gh (empirical, 2026-03-08)
+
+All tests use local `./ghx` binary, 8s rate limit sleep between calls. Token counts via tiktoken (cl100k_base).
+
+### Code Search
+
+| Scenario | ghx tokens | gh tokens | Ratio | Notes |
+|---|---|---|---|---|
+| Multi-word AND (`bar width repo:plausible/analytics`) | 927 | 951 | ~1x | ghx adds matching context, gh shows only paths |
+| Non-adjacent words (`ghx gkoreli`) | 73 (1 result) | 1 (0 results) | **ghx finds it** | gh wraps in quotes → exact phrase → miss |
+| Scoped search (`addClass repo:jquery/jquery`) | 395 | 442 | ~1x | ghx shows matching line, gh shows path only |
+| Minified files (`jQuery.fn.extend filename:jquery.min.js`) | 1,602 | 60,200 | **37x fewer** | gh dumps raw minified lines |
+| Broad query (`useState language:typescript`) | 1,784 | 1,101 | 1.6x more | ghx adds matching context (worth the tokens) |
+
+**Key findings:**
+- ghx's 200-char truncation prevents token explosion on minified files (37x reduction)
+- AND matching finds results that gh's exact-phrase matching misses entirely
+- For normal code, token counts are comparable — but ghx includes matching context while gh shows only paths
+- ghx is slower per-call (~800ms vs ~450ms) due to jq processing + text_matches parsing
+
+### Repo Exploration (ghx explore vs gh)
+
+| Operation | ghx | gh equivalent | API calls |
+|---|---|---|---|
+| Repo overview (description + tree + README) | `ghx explore repo` — 1 GraphQL call, ~3,500 tokens | `gh repo view` + `gh api contents/` + `gh api readme` — 3 REST calls, ~3,500 tokens | **1 vs 3** |
+| Subdirectory listing | `ghx explore repo path` — 1 GraphQL call | `gh api contents/path` — 1 REST call | 1 vs 1 |
+
+ghx explore batches 3 operations into 1 GraphQL call. Same data, fewer round-trips.
+
+### File Reading (ghx read vs gh api)
+
+| Operation | ghx | gh equivalent | API calls |
+|---|---|---|---|
+| Read 3 files | `ghx read repo f1 f2 f3` — 1 GraphQL call | 3× `gh api contents/f` — 3 REST calls, base64 decode needed | **1 vs 3** |
+| Read + grep | `ghx read repo f --grep "pat"` — 1 call, filtered output | `gh api contents/f` + pipe to grep — 1 call + shell processing | 1 vs 1 (but ghx is simpler) |
+| Code map | `ghx read repo f --map` — 1 call, ~92% token reduction | No equivalent | **unique** |
+
+### Tree Listing (ghx tree vs gh api)
+
+| Operation | ghx | gh equivalent |
+|---|---|---|
+| Recursive tree | `ghx tree repo [path]` | `gh api repos/.../git/trees/main?recursive=1 --jq ...` |
+
+Same endpoint, same data. ghx tree is a convenience wrapper — no efficiency gain.
+
+### What gh Does That ghx Cannot
+
+| Capability | gh command | ghx equivalent |
+|---|---|---|
+| **Repo search** | `gh search repos "query"` | **None** — use gh |
+| **Issues** | `gh issue list/view` | **None** — use gh |
+| **Pull requests** | `gh pr list/view/diff/checks` | **None** — use gh |
+| **Releases** | `gh release list/view` | **None** — use gh |
+| **Repo metadata** (stars, forks, language) | `gh repo view --json` | **None** — use gh |
+| **Authentication** | `gh auth login/status` | Depends on gh for auth |
+| **Creating/updating** (issues, PRs, releases) | `gh issue create`, `gh pr create` | **None** — use gh |
+
+### Rate Limits by Endpoint (from GitHub docs + /rate_limit API)
+
+| Endpoint | Limit | Pool |
+|---|---|---|
+| Core REST API (contents, trees, repos) | **5,000/hour** | `core` |
+| GraphQL API (ghx explore, ghx read) | **5,000/hour** | `graphql` |
+| Search (repos, issues, users) | **30/min** | `search` |
+| Code search | **10/min** (budget for 9) | `code_search` |
+| Unauthenticated | 60/hour | `core` |
+
+Source: [GitHub rate limits docs](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+
+Code search is the most restricted endpoint — 50x more limited than core REST. This is why ghx's "refine don't paginate" design matters. For explore/read/tree, the 5,000/hr limit is generous — batching saves round-trips, not rate limit budget.
+
+### Verdict: When to Use What
+
+**ghx wins** (use ghx):
+- Code search — AND matching, matching context, token protection, warnings
+- Repo exploration — 1 call vs 3 for description + tree + README
+- Batch file reading — 1 call for N files, plus --grep/--map/--lines
+- Code maps — `--map` has no gh equivalent
+
+**gh wins** (use gh):
+- Repo search (`gh search repos`) — ghx has no equivalent
+- Issues, PRs, releases — gh has purpose-built commands
+- Repo metadata (stars, forks, language) — `gh repo view --json`
+- Authentication management — ghx depends on gh for auth
+- Creating/updating resources — gh is the only option
+
+**Neither wins** (equivalent):
+- Tree listing — same endpoint, ghx is just a convenience wrapper
+- Single file read — both are 1 API call (but ghx adds --grep/--map)
+
+**ghx is a complement to gh, not a replacement.** Use ghx for code exploration (search + read + explore). Use gh for everything else (repos, issues, PRs, releases, auth, metadata).
+
 ## Implementation Status
 
 - [x] Decision 1: `text_matches` header + first fragment line extraction
@@ -308,7 +400,7 @@ AND is almost always what agents want. An agent searching for `useState fetchDat
 - [x] Fix `filename:` claim in ADR-0001
 - [x] Fix `OR` claim in ADR-0001
 - [x] Update SKILL.md with correct qualifier reference
-- [ ] Benchmark: token output before/after
+- [x] Benchmark: token output before/after (5 search pairs + explore/read/tree comparisons)
 
 ## Sources
 
