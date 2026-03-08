@@ -132,16 +132,60 @@ read)
   done
   ;;
 
-# ─── search: code search via REST API (supports full query syntax) ───
+# ─── search: code search via REST API ───
 search)
   query="$*"
   if [[ -z "$query" ]]; then
     echo "Usage: ghx search <query>" >&2
-    echo "Query syntax: 'term1 term2 repo:owner/repo' (AND), 'term1 OR term2 repo:owner/repo'" >&2
-    echo "Filters: path:src/ extension:tsx language:typescript" >&2
+    echo "Examples: 'useState repo:owner/repo' | 'path:src/ extension:tsx language:typescript'" >&2
     exit 1
   fi
-  gh api /search/code --method GET -f q="$query" --jq '.items[] | "\(.repository.full_name) \(.path):\(.name)"'
+
+  # Prerequisite checks
+  if ! command -v gh &>/dev/null; then
+    echo "ghx requires the GitHub CLI (gh). Install: https://cli.github.com" >&2
+    exit 1
+  fi
+  if ! gh auth status &>/dev/null; then
+    echo "GitHub code search requires authentication. Run: gh auth login" >&2
+    exit 1
+  fi
+
+  # Warn on web-only qualifiers (they silently become literal text in REST API)
+  for pat in 'symbol:' 'content:' 'is:' ' OR ' ' NOT ' '/.*/' 'enterprise:'; do
+    if [[ "$query" == *$pat* ]]; then
+      echo "⚠ '$pat' is web-only (Blackbird) — REST API treats it as literal text" >&2
+    fi
+  done
+
+  # Search with text_matches for matching context
+  response=$(gh api /search/code --method GET \
+    -H "Accept: application/vnd.github.text-match+json" \
+    -f q="$query" 2>&1) || {
+    echo "$response" >&2
+    exit 1
+  }
+
+  # Result count + incomplete warning to stderr
+  total=$(echo "$response" | jq -r '.total_count')
+  incomplete=$(echo "$response" | jq -r '.incomplete_results')
+  count=$(echo "$response" | jq '.items | length')
+  echo "$total results (showing $count)" >&2
+  [[ "$incomplete" == "true" ]] && echo "⚠ Results may be incomplete (query timed out)" >&2
+
+  # Output: repo path: first matching line from fragment
+  echo "$response" | jq -r '
+    .items[] |
+    .repository.full_name as $repo |
+    .path as $path |
+    (.text_matches // []) as $tm |
+    if ($tm | length) > 0 then
+      ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
+        gsub("^\\s+"; "") | gsub("\\s+$"; "")) as $line |
+      "\($repo) \($path): \($line)"
+    else
+      "\($repo) \($path)"
+    end'
   ;;
 
 # ─── tree: recursive tree listing via REST API ───
@@ -171,7 +215,7 @@ ghx — GitHub code exploration for agents and humans
 Commands:
   ghx explore <owner/repo> [path]     Branch + tree + README in 1 API call
   ghx read <owner/repo> <f1> [f2..]   Read 1-10 files in 1 API call
-  ghx search <query>                   Code search (full syntax: AND, OR, path:, extension:, language:)
+  ghx search <owner/repo> <f1> [f2..]   Code search (AND matching, qualifiers: repo: path: language: extension: filename:)
   ghx tree <owner/repo> [path]         Full recursive tree listing
 
 Read flags:
@@ -184,7 +228,7 @@ Examples:
   ghx read plausible/analytics src/app.ts --grep "useState"
   ghx read plausible/analytics src/app.ts --lines 42-80
   ghx search "useState repo:plausible/analytics"
-  ghx search "bar OR percentage repo:plausible/analytics"
+  ghx search "filename:package.json repo:plausible/analytics"
   ghx tree plausible/analytics assets/js
 EOF
   ;;
