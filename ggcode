@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# ggcode — GitHub code exploration for agents and humans
+# Efficient GitHub repo exploration via GraphQL batching, code maps, and targeted extraction.
+# One command does what takes 3-5 API calls with any other tool.
+
+set -euo pipefail
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+
+# ─── explore: branch + tree + README in one GraphQL call ───
+explore)
+  repo="$1"; shift || true
+  path="${1:-}"
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+
+  # First get default branch
+  branch=$(gh repo view "$repo" --json defaultBranchRef --jq '.defaultBranchRef.name')
+
+  if [[ -z "$path" ]]; then
+    # Root exploration: tree + README
+    gh api graphql -f query="
+    {
+      repository(owner: \"$owner\", name: \"$name\") {
+        description
+        tree: object(expression: \"$branch:\") {
+          ... on Tree { entries { name type } }
+        }
+        readme: object(expression: \"$branch:README.md\") {
+          ... on Blob { text }
+        }
+      }
+    }" --jq '{
+      description: .data.repository.description,
+      branch: "'"$branch"'",
+      files: [.data.repository.tree.entries[] | "\(if .type == "tree" then .name + "/" else .name end)"],
+      readme: (.data.repository.readme.text // "(no README.md)")
+    }'
+  else
+    # Subdir exploration: tree listing
+    gh api graphql -f query="
+    {
+      repository(owner: \"$owner\", name: \"$name\") {
+        tree: object(expression: \"$branch:$path\") {
+          ... on Tree { entries { name type } }
+        }
+      }
+    }" --jq '{
+      path: "'"$path"'",
+      entries: [.data.repository.tree.entries[] | "\(if .type == "tree" then .name + "/" else .name end)"]
+    }'
+  fi
+  ;;
+
+# ─── read: read 1-10 files in one GraphQL call ───
+# Supports --grep "pattern" to filter output to matching lines (with 2 lines context)
+# Supports --lines N-M to extract specific line ranges
+read)
+  repo="$1"; shift
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+
+  # Parse flags (must come before file paths)
+  grep_pattern=""
+  line_range=""
+  map_mode=""
+  files=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --grep) grep_pattern="$2"; shift 2 ;;
+      --lines) line_range="$2"; shift 2 ;;
+      --map) map_mode=1; shift ;;
+      *) files+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo "Usage: ggcode read <owner/repo> <path1> [path2] [--grep pattern] [--lines N-M]" >&2
+    exit 1
+  fi
+
+  # Get default branch
+  branch=$(gh repo view "$repo" --json defaultBranchRef --jq '.defaultBranchRef.name')
+
+  # Build GraphQL query with aliases
+  query="{ repository(owner: \"$owner\", name: \"$name\") {"
+  for i in "${!files[@]}"; do
+    query+=" f$i: object(expression: \"$branch:${files[$i]}\") { ... on Blob { text byteSize } }"
+  done
+  query+=" } }"
+
+  # Execute and format output
+  result=$(gh api graphql -f query="$query")
+
+  for i in "${!files[@]}"; do
+    text=$(echo "$result" | jq -r ".data.repository.f$i.text // empty")
+    size=$(echo "$result" | jq -r ".data.repository.f$i.byteSize // empty")
+    if [[ -n "$text" ]]; then
+      echo "=== ${files[$i]} ($size bytes) ==="
+      if [[ -n "$grep_pattern" ]]; then
+        echo "$text" | grep -n -i -C2 "$grep_pattern" || echo "(no matches for '$grep_pattern')"
+      elif [[ -n "$line_range" ]]; then
+        start="${line_range%-*}"
+        end="${line_range#*-}"
+        echo "$text" | sed -n "${start},${end}p"
+      elif [[ -n "$map_mode" ]]; then
+        ext="${files[$i]##*.}"
+        case "$ext" in
+          ts|tsx|js|jsx|mjs) pat='^(import |export |const |let |var |function |class |interface |type |enum )' ;;
+          py) pat='^(import |from |class |def |    def |        def |@)' ;;
+          go) pat='^(package |import |func |type |var |const )' ;;
+          rs) pat='^(use |pub |fn |struct |enum |trait |impl |type |mod |const )' ;;
+          java|kt) pat='^(import |public |private |protected |class |interface |enum |@)' ;;
+          rb) pat='^(require |class |module |def |  def |    def )' ;;
+          *) pat='^(import |export |function |class |def |func |type |const |pub )' ;;
+        esac
+        echo "$text" | grep -nE "$pat" || echo "(no signatures detected)"
+        chars=$(echo "$text" | wc -c | tr -d ' ')
+        map_chars=$(echo "$text" | grep -E "$pat" | wc -c | tr -d ' ')
+        echo "# map: ${map_chars}/${chars} chars (~$(( chars / 4 )) tokens full, ~$(( map_chars / 4 )) tokens map)"
+      else
+        echo "$text"
+      fi
+      echo ""
+    else
+      echo "=== ${files[$i]} (not found) ==="
+      echo ""
+    fi
+  done
+  ;;
+
+# ─── search: code search via REST API (supports full query syntax) ───
+search)
+  query="$*"
+  if [[ -z "$query" ]]; then
+    echo "Usage: ggcode search <query>" >&2
+    echo "Query syntax: 'term1 term2 repo:owner/repo' (AND), 'term1 OR term2 repo:owner/repo'" >&2
+    echo "Filters: path:src/ extension:tsx language:typescript" >&2
+    exit 1
+  fi
+  gh api /search/code --method GET -f q="$query" --jq '.items[] | "\(.repository.full_name) \(.path):\(.name)"'
+  ;;
+
+# ─── tree: recursive tree listing via REST API ───
+tree)
+  repo="$1"; shift || true
+  path="${1:-}"
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+
+  branch=$(gh repo view "$repo" --json defaultBranchRef --jq '.defaultBranchRef.name')
+
+  gh api "repos/$owner/$name/git/trees/$branch?recursive=1" --jq '
+    [.tree[] | select(.type == "blob") | .path] |
+    if "'"$path"'" != "" then
+      [.[] | select(startswith("'"$path"'/"))] |
+      map(ltrimstr("'"$path"'/"))
+    else . end |
+    .[]
+  '
+  ;;
+
+# ─── help ───
+help|*)
+  cat <<'EOF'
+ggcode — GitHub code exploration for agents and humans
+
+Commands:
+  ggcode explore <owner/repo> [path]     Branch + tree + README in 1 API call
+  ggcode read <owner/repo> <f1> [f2..]   Read 1-10 files in 1 API call
+  ggcode search <query>                   Code search (full syntax: AND, OR, path:, extension:, language:)
+  ggcode tree <owner/repo> [path]         Full recursive tree listing
+
+Read flags:
+  --grep <pattern>    Filter output to matching lines (case-insensitive, 2 lines context)
+  --lines <N-M>       Extract specific line range
+
+Examples:
+  ggcode explore plausible/analytics
+  ggcode read plausible/analytics mix.exs assets/js/dashboard/stats/bar.js
+  ggcode read plausible/analytics src/app.ts --grep "useState"
+  ggcode read plausible/analytics src/app.ts --lines 42-80
+  ggcode search "useState repo:plausible/analytics"
+  ggcode search "bar OR percentage repo:plausible/analytics"
+  ggcode tree plausible/analytics assets/js
+EOF
+  ;;
+
+esac
