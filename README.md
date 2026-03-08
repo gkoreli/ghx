@@ -78,7 +78,7 @@ AI agents exploring GitHub face a reliability gap: *"Did I find nothing because 
 
 ## Agent Skill Integration
 
-`ghx skill` outputs the full [`SKILL.md`](./SKILL.md) to stdout — designed for agent context injection via spawn hooks:
+`ghx skill` outputs the full [`SKILL.md`](./SKILL.md) to stdout — designed for eager context injection via spawn hooks:
 
 ```json
 {
@@ -90,7 +90,7 @@ AI agents exploring GitHub face a reliability gap: *"Did I find nothing because 
 }
 ```
 
-Every agent session gets the latest ghx skill (commands, gotchas, best practices, search strategy) injected into context automatically. No manual copy/paste, always in sync with the installed version.
+This loads the skill eagerly into every session — not on-demand like a typical skill file. Use this for agent identities where GitHub exploration is a core capability (not occasional). The agent always has the latest ghx knowledge (commands, gotchas, search strategy) without needing to load it mid-conversation.
 
 SKILL.md is included in the npm package and resolved via symlink, so this works with all installation methods.
 
@@ -115,3 +115,7 @@ Supported: TypeScript/JavaScript, Python, Go, Rust, Java/Kotlin, Ruby. Generic f
 ## License
 
 MIT
+
+## For AI Agents
+
+See [`SKILL.md`](./SKILL.md) for agent-optimized instructions — chain of thought, gotchas, anti-patterns, and examples.
