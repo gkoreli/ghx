@@ -22,7 +22,7 @@ ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (Grap
 ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
-ghx search "<query>"                        # Code search (full GitHub syntax)
+ghx search "<query>"                        # Code search (REST API, AND matching, shows matching lines)
 ghx tree <owner/repo> [path]                # Full recursive tree listing
 ```
 
@@ -45,29 +45,42 @@ ghx tree <owner/repo> [path]                # Full recursive tree listing
 
 ## Search Query Syntax
 
-Same as github.com search bar. Both `ghx search` and `gh search code` support full query syntax including multi-word queries.
+`ghx search` uses the GitHub REST code search API (legacy). Multi-word queries use AND matching — both words must appear in the file but not necessarily adjacent. This is different from `gh search code` which silently wraps in quotes (exact phrase).
 
-```bash
-ghx search "bar width repo:plausible/analytics"              # Multi-word AND
-ghx search "bar OR percentage repo:plausible/analytics"       # OR
-ghx search '"progress_bar" repo:plausible/analytics'          # Exact phrase
-ghx search "bar path:assets/js repo:plausible/analytics"      # Path filter
-ghx search "bar extension:tsx repo:plausible/analytics"       # Extension filter
-ghx search "bar language:javascript repo:plausible/analytics"  # Language filter
-ghx search "path:llms.txt"                                     # Find files by name
+**Output format:**
+```
+201472 results (showing 30)                              ← stderr (total + page count)
+jquery/jquery src/attributes/classes.js: addClass: function( value ) {   ← stdout (repo path: matching line)
 ```
 
-**Valid qualifiers:** `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `NOT`, `OR`
+Agents get: result count (stderr) + one line per result with matching context (stdout).
 
-**Rate limit:** 10 code search requests/minute. Space out calls.
+```bash
+ghx search "addClass repo:jquery/jquery"                  # Scoped to repo
+ghx search "useState language:typescript"                 # Language filter
+ghx search "filename:package.json repo:owner/repo"        # Find specific filename
+ghx search "form path:cgi-bin extension:py"               # Path + extension filter
+ghx search '"progress_bar" repo:plausible/analytics'      # Exact phrase (shell quotes around double quotes)
+ghx search "path:llms.txt"                                # Find files by name
+```
+
+**Valid REST API qualifiers:** `repo:`, `org:`, `user:`, `path:`, `filename:`, `extension:`, `language:`, `in:file`, `in:path`, `size:`, `fork:true`
+
+**Web-only (DO NOT USE — silently treated as literal text):** `OR`, `NOT`, `symbol:`, `content:`, `is:`, regex (`/pattern/`), `enterprise:`, glob in `path:`. ghx warns on stderr if you use these.
+
+**Rate limit:** 9 req/min for code search (strictest endpoint). Authentication required — `gh auth login` first.
+
+**Special characters:** Dots act as word separators, not wildcards. `console.log` matches files with both `console` and `log` — it does NOT match `consolelog`.
 
 ## Gotchas
 
-1. **`filename:` is NOT a valid qualifier.** GitHub code search silently treats it as literal text — searches for the TEXT "filename:llms.txt" inside files, NOT for files named llms.txt. Use `path:llms.txt` instead. This is the most dangerous failure mode: no error, plausible-looking wrong results.
+1. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT`, `content:`, `is:`, regex — these only work in GitHub's new web code search (Blackbird). The REST API treats them as literal text. `symbol:foo` searches for the TEXT "symbol:foo" inside files. ghx warns on stderr, but the results will be wrong. No programmatic tool can use these features — it's a GitHub platform limitation.
+
+2. **`filename:` vs `path:` — both valid, different systems.** `filename:package.json` works in the REST API (legacy) for exact filename match. `path:` also works and is more flexible (matches directories too). In the NEW web code search, only `path:` works — `filename:` is not recognized. Since ghx uses the REST API, both work.
 
 2. **`language:markdown` won't find `.txt` files.** GitHub's linguist detection doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` = linguist detection, `extension:` = literal file extension.
 
-3. **`gh search code` silently wraps queries in quotes.** `gh search code "foo bar"` sends `q="foo bar"` (exact phrase), not `q=foo bar` (AND). If the words aren't adjacent in the file, you get zero results with no error. `ghx search` sends AND queries — both words must appear but in any order. This is almost always what you want.
+3. **`gh search code` silently wraps queries in quotes.** `gh search code "foo bar"` sends `q="foo bar"` (exact phrase), not `q=foo bar` (AND). If the words aren't adjacent in the file, you get zero results with no error. `ghx search` sends AND queries — both words must appear but in any order. This is almost always what you want. ghx also shows result count on stderr and matching line context — `gh search code` shows neither.
 
 4. **GraphQL returns null for missing paths.** `object(expression: "branch:path")` returns null silently if the path doesn't exist. No error. `ghx` handles this, but if using `gh api graphql` directly, check for null.
 
@@ -83,14 +96,16 @@ ghx search "path:llms.txt"                                     # Find files by n
 - ❌ `gh api repos/.../contents/<path>` WITHOUT `-H "Accept: application/vnd.github.raw+json"` — returns base64-encoded JSON blob instead of readable text
 - ❌ Reading entire large files when you need 10 lines — use `--grep "pattern"` or `--lines N-M`
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files)
-- ❌ Firing multiple code search requests in parallel — 10 req/min rate limit, you'll get 403s
+- ❌ Using web-only qualifiers (`OR`, `NOT`, `symbol:`, regex) in `ghx search` — silently treated as literal text, returns wrong results. ghx warns but can't prevent it
+- ❌ Firing multiple code search requests in parallel — 9 req/min rate limit, you'll get 403s
 - ❌ Dumping entire repos into context for a specific question — use targeted `ghx` commands. Reserve `gitingest`/`repomix` for "understand this whole module" tasks
-- ❌ Relying on `gh search code` for multi-word queries — silently wraps in quotes (exact phrase), returns nothing when words aren't adjacent. Use `ghx search` (AND matching)
+- ❌ Relying on `gh search code` for multi-word queries — silently wraps in quotes (exact phrase), returns nothing when words aren't adjacent. Use `ghx search` (AND matching + matching context)
 
 ## Best Practices
 
 - **Batch file reads.** `ghx read owner/repo f1 f2 f3` = 1 API call. Three separate reads = 3 calls.
 - **Map before reading.** `ghx read --map` first to understand structure, then `--grep` or `--lines` for specifics.
+- **Refine search, don't paginate.** If `ghx search` shows "201472 results (showing 30)", add qualifiers (`repo:`, `language:`, `path:`) — don't try to page through. 9 req/min rate limit makes pagination expensive.
 - **Use `gh api --cache 1h`** for repeated lookups when using raw `gh` commands.
 - **Use `--json fields --jq 'expr'`** on `gh` commands to get structured output and reduce noise.
 - **Piped output is machine-formatted.** Tab-delimited, no truncation, no color codes — agents always get clean output.
@@ -143,6 +158,8 @@ ghx read yamadashy/repomix --grep "processFiles" src/core/file/fileProcess.ts
 
 # 4. Search across the whole repo for a pattern
 ghx search "CHUNK_SEPARATOR repo:yamadashy/repomix"
+# → stderr: "3 results (showing 3)"
+# → stdout: yamadashy/repomix src/core/output/outputGenerate.ts: const CHUNK_SEPARATOR = '⋮----';
 
 # 5. Read specific lines of a file you've narrowed down
 ghx read yamadashy/repomix --lines 38-65 src/core/treeSitter/parseFile.ts

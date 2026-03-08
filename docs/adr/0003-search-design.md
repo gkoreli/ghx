@@ -1,7 +1,7 @@
 # ADR-0003: Search Design — Best-in-Class `ghx search`
 
 **Date**: 2026-03-08
-**Status**: In Progress
+**Status**: Implemented (search decisions 1-6 shipped)
 
 ## Context
 
@@ -237,15 +237,57 @@ Check once at startup, fail fast with actionable message. No wasted API call.
 
 3. **Docs claim special chars are "ignored"** — MISLEADING. Dots act as word separators. `console.log` ≠ `consolelog`.
 
-## Implementation Plan
+## Implementation Rationale
 
-1. Add `Accept: application/vnd.github.text-match+json` header to search
-2. Update jq to extract first `text_matches[0].fragment` (first line only)
-3. Add `total_count` and `incomplete_results` to stderr
-4. Add query validation for web-only qualifiers (stderr warnings)
-5. Update SKILL.md with correct qualifier reference
-6. Fix `filename:` claim in ADR-0001
-7. Benchmark: token output before/after
+### Why text_matches (Decision 1)
+
+Without fragments, search returns only file paths. An agent seeing 30 paths has no way to know which files are relevant without reading each one — that's 30 follow-up API calls. With fragments, the agent sees the matching line and can immediately filter to the 2-3 files that matter. The 10% API overhead pays for itself by eliminating 90% of follow-up reads.
+
+We extract only the first line of the first fragment. The API returns up to 2 fragments per file, each ~5-8 lines. Dumping all of that would bloat output. One line is enough for an agent to decide "relevant" or "skip."
+
+### Why stderr for metadata (Decision 2)
+
+`total_count` and `incomplete_results` are critical for agents but must not pollute stdout. An agent piping `ghx search` output into further processing needs clean `repo path: line` on stdout. The count on stderr lets the agent (or its orchestrator) decide if the query needs refining — `201472 results` means "too broad, add qualifiers."
+
+### Why warn but don't block (Decision 3)
+
+Web-only qualifiers (`symbol:`, `OR`, `NOT`, regex) silently become literal text in the REST API. `symbol:foo` searches for the string "symbol:foo" inside files. This is the most dangerous failure mode — plausible-looking wrong results with no error.
+
+We warn on stderr but still send the query because: (a) the literal text might still match something useful, (b) blocking would be surprising if the agent is experimenting, (c) the warning teaches the agent what works.
+
+### Why no pagination (Decision 4)
+
+Code search is rate-limited to 9 req/min. Pagination burns those precious requests on the same query. If 30 results aren't enough, the query is too broad — the agent should add qualifiers (`repo:`, `language:`, `path:`) to narrow results, not paginate. This is a deliberate design choice: force precision over volume.
+
+### Why prerequisite checks (Decision 6)
+
+`gh` not installed → bash error `command not found` on some random line number. `gh` not authenticated → JSON error blob from the API. Both are cryptic. A 4-line check at the top gives an actionable message with the exact fix command. Fail fast, no wasted API call.
+
+### Output format rationale
+
+Before: `jquery/jquery src/attributes/classes.js:classes.js` — redundant (path contains filename).
+After: `jquery/jquery src/attributes/classes.js: addClass: function( value ) {` — path + matching context.
+
+One line per result. Scannable. An agent processing 30 results consumes ~2KB total vs ~135KB raw API response (~98% reduction). The jq extraction is where all the token savings happen.
+
+### AND vs exact phrase (competitive advantage)
+
+`ghx search "foo bar"` sends `q=foo+bar` (AND — both words anywhere in file).
+`gh search code "foo bar"` sends `q=%22foo+bar%22` (exact phrase — words must be adjacent).
+
+AND is almost always what agents want. An agent searching for `useState fetchData` wants files containing both terms, not necessarily adjacent. `gh search code` silently returns zero results for non-adjacent terms with no error — the worst possible failure mode for agents.
+
+## Implementation Status
+
+- [x] Add `Accept: application/vnd.github.text-match+json` header to search
+- [x] Extract first line of `text_matches[0].fragment` per result
+- [x] Add `total_count` and `incomplete_results` to stderr
+- [x] Add query validation for web-only qualifiers (stderr warnings)
+- [x] Prerequisite checks: `gh` installed + authenticated
+- [x] Fix `filename:` claim in ADR-0001
+- [x] Fix `OR` claim in ADR-0001
+- [ ] Update SKILL.md with correct qualifier reference
+- [ ] Benchmark: token output before/after
 
 ## Sources
 
