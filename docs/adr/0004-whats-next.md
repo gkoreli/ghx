@@ -19,6 +19,8 @@ v0.3 closes this gap. After `ghx explore`, the agent knows:
 
 The principle: **MCP-level intelligence, zero-overhead CLI.** Octocode has hints, token warnings, file filtering, and content minification — but costs ~10K tokens of MCP schemas. ghx delivers the same intelligence through smart defaults in a bash script.
 
+**Measured overhead** (2026-03-08): GitHub MCP Server has 80 tool schemas totaling 103,920 bytes = ~26K tokens. Even the default toolset (context + repos + issues + pull_requests + users) registers ~40 tools = ~13K tokens of schemas before the agent makes a single API call. ghx: 0 tokens. The SKILL.md is loaded once per session (~2K tokens), not per tool call.
+
 ## The Problem: First Contact Is Expensive
 
 When an agent encounters a new repo, it faces a cold-start problem. It knows nothing about the codebase — not the conventions, not the structure, not the testing strategy, not which directories are noise. Every decision is a guess.
@@ -57,7 +59,7 @@ Steps 1-2 are solved. Steps 3-6 are the v0.3 scope.
 
 ## Evidence: Agent Instruction Files Are Everywhere
 
-Empirical survey of major open-source repos (2026-03-08, verified via GraphQL):
+Empirical survey of major open-source repos (2026-03-08, verified via GraphQL, 19 repos):
 
 | Repository | AGENTS.md | CLAUDE.md | copilot-instructions | Size |
 |---|---|---|---|---|
@@ -70,14 +72,29 @@ Empirical survey of major open-source repos (2026-03-08, verified via GraphQL):
 | anthropics/anthropic-cookbook | — | ✅ 3.4KB | — | Notebook conventions |
 | facebook/react | — | ✅ 208B | — | Monorepo overview |
 | yamadashy/repomix | ✅ 21B | ✅ 21B | ✅ 24B | Pointers to .agents/rules/ |
+| microsoft/TypeScript | — | — | ✅ 10KB | Fourslash tests, build commands, test conventions |
+| huggingface/transformers | ✅ 1.7KB | ✅ 11B (symlink) | ✅ 3.5KB | Modular models, copies, make commands |
+| golang/go | — | — | — | — |
+| rust-lang/rust | — | — | — | — |
+| torvalds/linux | — | — | — | — |
+| kubernetes/kubernetes | — | — | — | — |
+| fastapi/fastapi | — | — | — | — |
+| django/django | — | — | — | — |
+| sveltejs/svelte | — | — | — | — |
+| vuejs/core | — | — | — | — |
 
-**Pattern:** AGENTS.md is the emerging canonical name. CLAUDE.md often symlinks to it. `.github/copilot-instructions.md` is the GitHub Copilot variant. 8 of 9 major repos checked have at least one agent instruction file.
+**Updated stats (19 repos):** 11/19 (58%) have at least one agent instruction file. The pattern is clear in repos with active AI-assisted development (JS/TS/Python/Rust ecosystems). Repos without tend to be older C/Go/system-level projects or frameworks that haven't adopted the convention yet.
 
-**What's in them:** Not just "use TypeScript." Next.js AGENTS.md includes:
-- Complete monorepo directory map (`packages/`, `turbopack/`, `crates/`, `test/`)
-- Key entry points (`src/cli/next-dev.ts → src/server/dev/next-dev-server.ts`)
-- Testing commands and conventions
-- Build system details (pnpm, turbopack)
+**Three naming conventions coexist:**
+- `AGENTS.md` — emerging canonical name, used by 7/19 repos
+- `CLAUDE.md` — Anthropic convention, often symlinks to AGENTS.md, used by 7/19 repos
+- `.github/copilot-instructions.md` — GitHub Copilot convention, used by 4/19 repos
+- `llms.txt` — checked across all 19 repos, found in ZERO. Not worth detecting.
+
+**What's in them:** Not just "use TypeScript." Examples:
+- **Next.js AGENTS.md** (20KB): Complete monorepo directory map (`packages/`, `turbopack/`, `crates/`, `test/`), key entry points (`src/cli/next-dev.ts → src/server/dev/next-dev-server.ts`), testing commands, build system details (pnpm, turbopack)
+- **TypeScript copilot-instructions** (10KB): Fourslash test syntax guide, build commands (`npx hereby runtests-parallel`), mandatory pre-PR steps (lint, format, test), baseline acceptance workflow
+- **Transformers AGENTS.md** (1.7KB): `make style` / `make fix-repo` commands, modular model convention (edit `modular_*.py`, never edit generated `modeling_*.py`), copy propagation rules (`# Copied from` comments)
 
 This is exactly the context an agent needs BEFORE reading code. And `ghx explore` already makes a GraphQL call that could fetch it — for zero extra API cost.
 
@@ -278,23 +295,52 @@ The 15% tolerance (`ok_err = 0.15`) is key — it stops the binary search early 
 
 **What we take (as design principle):** "Fill the budget, don't waste it." When ghx has a token budget (future feature), binary search for the right amount of detail. For v0.3, the simpler version: estimate output size, warn if it exceeds a threshold, suggest a flag that would reduce it.
 
+### 9. Claude Code's code-explorer Agent
+**Source:** `anthropics/claude-code` — `plugins/feature-dev/agents/code-explorer.md` (2115 bytes, verified)
+
+Claude Code ships a dedicated code-explorer agent as a plugin. Its approach:
+```
+Tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch
+Model: sonnet
+```
+
+The agent follows a 4-phase analysis: Feature Discovery (find entry points) → Code Flow Tracing (follow call chains) → Architecture Analysis (map abstraction layers) → Implementation Details (algorithms, error handling). Output includes "entry points with file:line references" and "list of files absolutely essential to understand the topic."
+
+**What this validates:** Claude Code needs a dedicated agent with 8 tools to do what `ghx explore` + `ghx read --map` does in 2 commands. The code-explorer agent is the problem statement incarnate — agents need structured code exploration, and the current tooling requires too much orchestration. ghx collapses this into smart defaults.
+
+**What we take:** The 4-phase model maps to ghx's command sequence: `explore` (discovery) → `read --map` (architecture) → `read --grep` (flow tracing) → `search` (implementation details). The hint system should guide agents through this sequence naturally.
+
+### 10. Octocode's Two-Phase Model (Remote → Local)
+**Source:** `bgauryy/octocode-mcp` — `packages/octocode-mcp/src/hints/localToolUsageHints.ts` (841 bytes, verified)
+
+After cloning a repo, Octocode's hints switch from GitHub API tools to local tools:
+```
+Local tools:  localSearchCode (ripgrep), localGetFileContent, localViewStructure, localFindFiles
+LSP tools:    lspGotoDefinition, lspFindReferences, lspCallHierarchy
+```
+
+This reveals a two-phase model: **remote exploration** (GitHub API, broad understanding) → **local deep analysis** (ripgrep, LSP, precise navigation). Octocode handles both phases in one MCP server.
+
+**What we take:** ghx is the remote exploration phase. When deeper analysis is needed, hints should guide agents to local tools: "Hint: for deeper analysis, clone and use ripgrep/Tree-sitter locally." This is NOT a limitation — it's a design choice. ghx does remote exploration better than anything else. Local analysis has better tools (ripgrep, LSP, Tree-sitter). Don't try to be both. Be the best at one.
+
 ## v0.3 Scope: 5 Features
 
 ### Feature 1: Agent Instruction File Detection in `explore`
 
-**What:** Add AGENTS.md and CLAUDE.md to the `ghx explore` GraphQL query. Surface them alongside README.md.
+**What:** Add AGENTS.md, CLAUDE.md, and `.github/copilot-instructions.md` to the `ghx explore` GraphQL query. Surface them alongside README.md.
 
-**Why:** 8/9 major repos have agent instruction files. Next.js's is 20KB of structured guidance. An agent that reads this first makes fundamentally better decisions about the codebase.
+**Why:** 11/19 major repos have agent instruction files across three naming conventions. Next.js's is 20KB, TypeScript's copilot-instructions is 10KB. An agent that reads this first makes fundamentally better decisions about the codebase.
 
-**How:** Two additional GraphQL aliases in the existing query — zero extra API calls:
+**How:** Three additional GraphQL aliases in the existing query — zero extra API calls:
 ```graphql
 agents: object(expression: "$branch:AGENTS.md") { ... on Blob { text } }
 claude: object(expression: "$branch:CLAUDE.md") { ... on Blob { text } }
+copilot: object(expression: "$branch:.github/copilot-instructions.md") { ... on Blob { text } }
 ```
-If both exist and are identical (common — CLAUDE.md symlinks to AGENTS.md), show only once. If neither exists, show nothing (no noise).
+Dedup logic: if AGENTS.md and CLAUDE.md are identical (common — symlink), show only AGENTS.md. If copilot-instructions exists alongside AGENTS.md, show both (they often contain different content — copilot-instructions tends to be more testing-focused). If none exist, show nothing (no noise).
 
-**Effort:** 2 GraphQL aliases + ~5 jq lines for dedup.
-**Impact:** Agent gets repo conventions in the same call that gets tree + README. Zero extra cost.
+**Effort:** 3 GraphQL aliases + ~8 jq lines for dedup.
+**Impact:** Agent gets repo conventions in the same call that gets tree + README. Zero extra cost. Covers all three naming conventions (AGENTS.md 7/19, CLAUDE.md 7/19, copilot-instructions 4/19).
 
 ### Feature 2: Tree Filtering (Smart Defaults)
 
@@ -422,9 +468,11 @@ Key design decisions in Octocode's minifier:
 | Token estimation | ❌ | ✅ (stderr warnings) | ✅ (5-tier) | ❌ |
 | Next-action hints | ❌ | ✅ (stderr) | ✅ (JSON hints) | ❌ |
 | Content minification | ❌ | ✅ (--minify) | ✅ (6 strategies) | ❌ |
-| Context overhead | 0 tokens | 0 tokens | ~10K tokens | ~10K tokens |
+| Context overhead | 0 tokens | 0 tokens | ~10K tokens | ~13K tokens (default), ~26K (all) |
 
 **The pattern:** v0.3 brings every intelligence feature that makes Octocode valuable — without the MCP overhead. Same guidance, same protection, same filtering. Zero schema cost.
+
+**Measured overhead** (verified 2026-03-08): GitHub MCP has 80 tool schemas = 103,920 bytes = ~26K tokens for all toolsets. Default toolset (~40 tools) = ~13K tokens. This is the cost of having the tools AVAILABLE — before the agent makes a single API call. ghx's SKILL.md is ~2K tokens loaded once per session, not per tool registration.
 
 ### Deeper competitive analysis (verified from source code)
 
@@ -515,9 +563,27 @@ Evidence from source code analysis:
 
 The bet: **agents will prefer tools that are cheap to invoke over tools that are rich to configure.** An agent that can call `ghx explore` 10 times in the context budget of one MCP tool registration will explore more repos, find better answers, and waste fewer tokens.
 
+### ghx's place in the two-phase model
+
+Octocode's local tool hints reveal a pattern: code understanding has two phases.
+
+**Phase 1 — Remote exploration** (broad, fast, cheap):
+- What is this repo? What's the structure? What conventions? Where are the key files?
+- Tools: GitHub API, GraphQL, code search
+- ghx is purpose-built for this phase
+
+**Phase 2 — Local deep analysis** (precise, slow, rich):
+- How does this function work? What calls what? What are the types?
+- Tools: ripgrep, Tree-sitter, LSP (goto definition, find references, call hierarchy)
+- Existing tools (IDE, Claude Code, Cursor) handle this phase well
+
+Claude Code's code-explorer agent (`anthropics/claude-code` — `plugins/feature-dev/agents/code-explorer.md`) validates this split. It needs 8 local tools (Glob, Grep, LS, Read, WebFetch, etc.) and a dedicated agent definition to do what ghx does in 2 commands — because it's trying to do both phases with local tools. ghx does Phase 1 better because it's designed for remote exploration, not adapted from local tools.
+
+The strategic insight: **don't try to be both phases.** Be the best remote exploration tool. When the agent needs Phase 2, hint toward local tools. This is why ghx doesn't need Tree-sitter, LSP, or cloning — those are Phase 2 tools. ghx is Phase 1.
+
 ### The agent instruction file revolution
 
-The empirical survey (8/9 major repos have agent instruction files) reveals a fundamental shift: **repos are becoming agent-aware.** They're shipping instructions not for humans, but for AI agents.
+The empirical survey (11/19 major repos have agent instruction files) reveals a fundamental shift: **repos are becoming agent-aware.** They're shipping instructions not for humans, but for AI agents. Three naming conventions coexist (AGENTS.md, CLAUDE.md, copilot-instructions.md), and the trend is accelerating — the repos without agent files tend to be older C/Go/system-level projects.
 
 This changes the explore workflow:
 - **Before AGENTS.md**: explore → read README → guess conventions → make mistakes → recover
@@ -560,6 +626,7 @@ Both layers are needed. The tool without the skill is a CLI. The skill without t
   - Code search: `pkg/github/search.go` lines 169-260 — `SearchCode()`: raw `json.Marshal(result)`, no text_match extraction, no context protection
   - Tree: `pkg/github/git.go` — `get_repository_tree`: has `path_filter` param but no exclusion filtering
   - 18 toolsets, 50+ tools. Default: context, repos, issues, pull_requests, users. Code exploration = repos toolset only.
+  - Schema overhead measured: 80 tool snaps in `pkg/github/__toolsnaps__/` = 103,920 bytes = ~26K tokens total. Default toolset ~13K tokens.
 - gh-aw skills: `github/gh-aw`
   - Schema-first pattern: `skills/github-pr-query/query-prs.sh` (4113 bytes) — returns schema + suggested_queries when no --jq
   - Developer skill: `skills/developer/SKILL.md` (58KB) — comprehensive coding guidelines
@@ -581,9 +648,15 @@ Both layers are needed. The tool without the skill is a CLI. The skill without t
 - gh-skill: `nicholasspencer/gh-skill`
   - Universal skill registry: gist-based skills, auto-links to Claude Code, Copilot CLI, Codex, OpenCode, Cursor
   - AGENTS.md: 4732 bytes — architecture, key concepts, supported tool targets
-- Agent instruction files: empirical survey of 9 major repos via GraphQL (2026-03-08)
-  - 8/9 repos have at least one agent instruction file
-  - AGENTS.md is the emerging canonical name; CLAUDE.md often symlinks to it
-  - Largest: vercel/next.js AGENTS.md (20KB) — monorepo structure, entry points, testing
+- Agent instruction files: empirical survey of 19 major repos via GraphQL (2026-03-08)
+  - 11/19 repos have at least one agent instruction file (58%)
+  - Three conventions: AGENTS.md (7/19), CLAUDE.md (7/19), .github/copilot-instructions.md (4/19)
+  - llms.txt: checked all 19 repos, found in ZERO — not worth detecting
+  - Largest: vercel/next.js AGENTS.md (20KB), microsoft/TypeScript copilot-instructions (10KB)
+  - New finding: huggingface/transformers has all three formats simultaneously
+- Claude Code: `anthropics/claude-code`
+  - code-explorer agent: `plugins/feature-dev/agents/code-explorer.md` (2115 bytes) — 4-phase analysis with 8 tools, validates ghx's 2-command approach
+  - Plugin system: `.claude-plugin/`, `plugins/` — commands, agents, skills, hooks
+  - `.claude/commands/` — custom slash commands (commit-push-pr, dedupe, triage-issue)
 - GitHub rate limits: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
 - Blackbird engine: https://github.blog/2023-02-06-the-technology-behind-githubs-new-code-search/
