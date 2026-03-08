@@ -1,29 +1,71 @@
-name: Release
+name: Auto Tag and Publish
+
 on:
   push:
-    tags: ['v*']
+    branches:
+      - mainline
+    paths:
+      - 'package.json'
+      - 'ghx'
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
-  release:
+  tag-and-publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
         with:
-          files: ghx
-          generate_release_notes: true
+          fetch-depth: 0
+
+      - name: Check if version changed
+        id: version
+        run: |
+          git fetch --tags
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Tag v$CURRENT_VERSION already exists, skipping"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Tag v$CURRENT_VERSION does not exist, will create"
+          fi
 
       - uses: actions/setup-node@v4
+        if: steps.version.outputs.changed == 'true'
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm (required for OIDC trusted publishing)
+        if: steps.version.outputs.changed == 'true'
+        run: npm install -g npm@latest
+
+      - name: Create and push tag
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          VERSION="v${{ steps.version.outputs.current }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v${{ steps.version.outputs.current }}"
+          gh release create "$VERSION" ghx --title "$VERSION" --generate-notes
 
       - name: Publish to npm
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: steps.version.outputs.changed == 'true'
+        run: npm publish --provenance --access public
