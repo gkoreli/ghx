@@ -15,8 +15,8 @@ GitHub code exploration for agents and humans. One command does what takes 3-5 A
 # Homebrew (macOS/Linux)
 brew install gogakoreli/tap/ggcode
 
-# gh extension
-gh extension install gogakoreli/ggcode
+# gh extension (coming soon — requires separate gh-ggcode repo)
+gh extension install gogakoreli/gh-ggcode
 
 # npx (zero install)
 npx ggcode --help
@@ -95,3 +95,7 @@ The `--map` flag applies per-language regex patterns to extract structural decla
 ## License
 
 MIT
+
+## For AI Agents
+
+See [`SKILL.md`](./SKILL.md) for agent-optimized instructions — chain of thought, gotchas, anti-patterns, and examples.
