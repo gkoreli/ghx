@@ -15,7 +15,7 @@ GitHub has **two code search systems**. Every programmatic tool (ghx, gh CLI, Gi
 
 - **Endpoint**: `GET /search/code`
 - **Docs**: [Searching code (legacy)](https://docs.github.com/en/search-github/searching-on-github/searching-code) — GitHub themselves label it "legacy"
-- **Engine**: Unknown legacy infrastructure. `sort` field marked "closing down."
+- **Engine**: Unknown legacy infrastructure. Both `sort` and `order` fields marked "closing down."
 
 #### Qualifiers (verified working via API)
 
@@ -63,8 +63,10 @@ Tested: `console.log` → 21 results. `consolelog` → 0 results. The dot acts a
 
 #### Rate limits
 
-- **Code search: 10 requests/minute** (authenticated). Stricter than other search endpoints (30/min).
-- Unauthenticated: 10 req/min
+- **Code search: 10 requests/minute** (authenticated) per the "Search code" section. BUT the "About search" section on the same page says **9 req/min**. GitHub's own docs contradict themselves. Our 8s-sleep tests (7.5 req/min) never hit limits, so we can't empirically distinguish 9 vs 10. **Budget for 9 to be safe.**
+- Other search endpoints: 30 req/min (authenticated)
+- Unauthenticated: 10 req/min (all endpoints)
+- 422 can also mean "endpoint has been spammed" — abuse beyond normal rate limits
 
 #### Response structure
 
@@ -82,7 +84,9 @@ With `Accept: application/vnd.github.text-match+json` — 1 result = ~4,890 byte
 }
 ```
 
-Fragment is ~5-8 lines of surrounding code context. Max 2 fragments per item. `property` is always `"content"` — never `"path"` even when searching `in:path`.
+Fragment is ~5-8 lines of surrounding code context. Max 2 fragments per item. `property` is always `"content"` — never `"path"` even when searching `in:path`. (Docs claim text_matches works for both `content` and `path` fields — empirically false.)
+
+No specific token permissions needed — any authenticated fine-grained PAT works for code search.
 
 #### Pagination
 
@@ -103,6 +107,7 @@ Fragment is ~5-8 lines of surrounding code context. Max 2 fragments per item. `p
 
 Empty query → 422 with `{"errors":[{"resource":"Search","field":"q","code":"missing"}]}`.
 Query > 256 chars (excluding qualifiers) → returns results but may be truncated.
+Max 5 `AND`/`OR`/`NOT` operators per query (general search limit, though `OR`/`NOT` don't work in legacy API anyway).
 
 ### System 2: New GitHub Code Search (Web UI only — Blackbird engine)
 
