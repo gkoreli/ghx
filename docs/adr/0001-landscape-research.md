@@ -10,7 +10,7 @@ Agents exploring GitHub repos face a tooling gap: existing tools are either too 
 
 **Why this gap exists**: GitHub's own team (github/gh-aw) builds agent skills as bash scripts wrapping `gh` CLI — the same pattern as ghx. Their skills cover PRs (`query-prs.sh`), issues (`query-issues.sh`), and discussions (`query-discussions.sh`). But they have NO code exploration skill. No `explore-repo.sh`, no `read-files.sh`, no `search-code.sh`. The MCP ecosystem went heavy (50+ tools, 10K+ tokens of schemas). Nobody built the lightweight middle ground for code exploration. Source: `github/gh-aw/skills/` directory — verified via `ghx tree`.
 
-**Design principle**: Fail loudly, never silently. GitHub's code search API silently treats invalid qualifiers (e.g. `filename:`) as literal text — no error, just wrong results. Agent-friendly tools must validate inputs and surface errors explicitly.
+**Design principle**: Fail loudly, never silently. GitHub has two code search systems with different syntax. The REST API (legacy) supports qualifiers like `filename:`, `extension:`, `in:`. The web UI (new, Blackbird) supports `symbol:`, `OR`, `NOT`, regex — but has no API. Using new-only qualifiers in the REST API silently treats them as literal text. Agent-friendly tools must validate inputs and surface errors explicitly. See ADR-0003 for the complete reference.
 
 ### `ghx` — GitHub eXplorer (preferred for research)
 
@@ -36,7 +36,7 @@ Search query syntax (same as github.com search bar):
 - Language: `ghx search "bar language:javascript repo:plausible/analytics"`
 - Find files by name: `ghx search "path:llms.txt"` or `ghx search "path:llms.txt extension:txt"`
 - No regex support via API
-- ⚠️ Invalid qualifiers (e.g. `filename:`) are silently treated as literal text — no error, just wrong results. Valid REST API qualifiers: `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `in:`, `size:`, `filename:` (legacy). Note: `OR`, `NOT`, `symbol:`, regex are only available in GitHub's new web code search — NOT in the REST API.
+- ⚠️ The REST API uses **legacy** code search syntax. Valid qualifiers: `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `in:`, `size:`, `filename:`, `fork:`. Web-only qualifiers (`OR`, `NOT`, `symbol:`, `content:`, `is:`, regex) are silently treated as literal text — no error, wrong results. See ADR-0003 for the complete two-system reference.
 
 Rate limit: 10 code search requests/minute. Space out calls.
 
@@ -80,7 +80,7 @@ Rate limit: 10 code search requests/minute. Space out calls.
 - ❌ Reading entire large files when you need 10 lines — use `ghx read --grep "pattern"` or `--lines N-M` to extract only what you need
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files) instead
 - ❌ ~~Using `gh search code` for multi-word queries~~ — **CORRECTED 2026-03-08**: `gh search code` handles multi-word queries correctly. Earlier claim was false. `ghx search` still adds value through compact output and (planned) configurable verbosity.
-- ❌ Using invalid search qualifiers like `filename:` — GitHub code search silently treats unknown qualifiers as literal text. `filename:llms.txt` searches for the TEXT "filename:llms.txt" inside files, NOT for files named llms.txt. Valid qualifiers: `path:`, `extension:`, `language:`, `repo:`, `org:`, `user:`. Use `path:llms.txt` to find files by name.
+- ❌ Using web-only search qualifiers in the REST API — `symbol:`, `OR`, `NOT`, `content:`, `is:`, regex are only available in GitHub's new web code search (Blackbird). The REST API silently treats them as literal text. `symbol:foo` searches for the TEXT "symbol:foo" inside files. Valid REST API qualifiers: `repo:`, `org:`, `user:`, `path:`, `filename:`, `extension:`, `language:`, `in:`, `size:`, `fork:`. See ADR-0003.
 - ❌ Using `language:markdown` to find `.txt` files — GitHub doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` matches GitHub's linguist detection, `extension:` matches the literal file extension.
 - ❌ Firing multiple code search requests in parallel — 10 req/min rate limit. Space them out or you'll get 403s.
 - ❌ Dumping entire repos into context with `gitingest` for a specific question — use targeted `ghx` commands instead. Reserve `gitingest` for "understand this whole module" tasks.
