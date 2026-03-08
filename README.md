@@ -13,19 +13,19 @@ GitHub code exploration for agents and humans. One command does what takes 3-5 A
 
 ```bash
 # Homebrew (macOS/Linux)
-brew install gogakoreli/tap/ggcode
+brew install gkoreli/tap/ggcode
 
 # gh extension (coming soon — requires separate gh-ggcode repo)
-gh extension install gogakoreli/gh-ggcode
+gh extension install gkoreli/gh-ggcode
 
 # npx (zero install)
 npx ggcode --help
 
 # curl
-curl -sf https://raw.githubusercontent.com/gogakoreli/ggcode/main/install.sh | sh
+curl -sf https://raw.githubusercontent.com/gkoreli/ggcode/main/install.sh | sh
 
 # Manual — just copy the script
-curl -sf https://raw.githubusercontent.com/gogakoreli/ggcode/main/ggcode -o ~/.local/bin/ggcode && chmod +x ~/.local/bin/ggcode
+curl -sf https://raw.githubusercontent.com/gkoreli/ggcode/main/ggcode -o ~/.local/bin/ggcode && chmod +x ~/.local/bin/ggcode
 ```
 
 Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`).

@@ -2,7 +2,7 @@
 # ggcode installer — downloads the script to ~/.local/bin
 set -euo pipefail
 
-REPO="gogakoreli/ggcode"
+REPO="gkoreli/ggcode"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 mkdir -p "$INSTALL_DIR"

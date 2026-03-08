@@ -84,8 +84,8 @@ The tool is ~135 lines of bash. Distribution channels are thin wrappers around t
 
 | Channel | Install command | How it works |
 |---------|----------------|-------------|
-| Homebrew | `brew install gogakoreli/tap/ggcode` | Tap with formula pointing to release tarball |
-| gh extension | `gh extension install gogakoreli/gh-ggcode` | Repo with bash script as entry point |
+| Homebrew | `brew install gkoreli/tap/ggcode` | Tap with formula pointing to release tarball |
+| gh extension | `gh extension install gkoreli/gh-ggcode` | Repo with bash script as entry point |
 | npx | `npx ggcode` | npm package wrapping the bash script |
 | curl | `curl -sf https://... \| sh` | Downloads script to ~/.local/bin |
 | Manual | Copy `ggcode` to PATH | Just the script |
@@ -99,8 +99,8 @@ All channels deliver the same bash script. The only runtime dependency is `gh` C
 Bash-based gh extensions are fully supported and used by gh core maintainers (e.g., `mislav/gh-branch` — pure bash, 2.5KB). No Go required.
 
 **Decision: separate `gh-ggcode` repo.**
-- `gogakoreli/ggcode` — the source of truth. Script, npm, curl, brew, docs, ADRs.
-- `gogakoreli/gh-ggcode` — gh extension shim. Contains a `gh-ggcode` executable that is an exact copy of the `ggcode` script. The release workflow in `ggcode` copies the script to `gh-ggcode` and pushes a tagged release there, keeping them in sync automatically.
+- `gkoreli/ggcode` — the source of truth. Script, npm, curl, brew, docs, ADRs.
+- `gkoreli/gh-ggcode` — gh extension shim. Contains a `gh-ggcode` executable that is an exact copy of the `ggcode` script. The release workflow in `ggcode` copies the script to `gh-ggcode` and pushes a tagged release there, keeping them in sync automatically.
 
 This keeps the main repo name clean (`ggcode`), npm package name clean (`ggcode`), and satisfies gh's hard `gh-` prefix requirement without polluting the primary repo.
 
