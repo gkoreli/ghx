@@ -12,11 +12,8 @@ GitHub code exploration for agents and humans. One command does what takes 3-5 A
 ## Install
 
 ```bash
-# Homebrew (macOS/Linux)
-brew install gkoreli/tap/ghx
-
-# gh extension (coming soon — requires separate gh-ghx repo)
-gh extension install gkoreli/gh-ghx
+# npm (recommended)
+npm install -g @gkoreli/ghx
 
 # npx (zero install)
 npx @gkoreli/ghx --help
@@ -29,6 +26,8 @@ curl -sf https://raw.githubusercontent.com/gkoreli/ghx/main/ghx -o ~/.local/bin/
 ```
 
 Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`).
+
+[![npm](https://img.shields.io/npm/v/@gkoreli/ghx)](https://www.npmjs.com/package/@gkoreli/ghx)
 
 ## Usage
 
