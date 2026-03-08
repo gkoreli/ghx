@@ -1,7 +1,50 @@
-# ADR-0003: Search Design — Best-in-Class `ghx search`
+# ADR-0003: ghx Design — Agentic-First GitHub Exploration
 
 **Date**: 2026-03-08
-**Status**: Implemented (search decisions 1-6 shipped)
+**Status**: Implemented
+
+## Philosophy
+
+**ghx is the smart default for agentic-first GitHub exploration.** You opt into the ghx skill and trust it to provide meaningful context in the fewest steps — so you stop worrying about whether you missed something because you used the wrong flags, wrong endpoint, or wrong query syntax.
+
+### The core problem ghx solves
+
+An agent exploring GitHub faces a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* This uncertainty is toxic for agents. `gh search code "foo bar"` silently wraps in quotes and returns zero results for non-adjacent words — with no error. The agent can't distinguish "no matches exist" from "I searched wrong." It either gives up prematurely or wastes calls retrying.
+
+ghx eliminates this class of failure by encoding the right defaults into every command. AND matching instead of exact phrase. README preview instead of bare names. Matching context instead of bare paths. The agent doesn't need to know the right flags — the right behavior is the default behavior.
+
+### Design principles
+
+1. **One call, one decision.** Every command returns enough context for the agent to decide its next action without a follow-up call. `repos` includes README preview so you know which repo to explore. `search` includes matching lines so you know which file to read. `explore` includes tree + README so you know which files matter.
+
+2. **Batch what agents need, not what APIs expose.** GitHub's API is organized around resources (repos, contents, trees, search). Agents are organized around tasks ("understand this repo," "find where X is used"). ghx maps tasks to API calls — one command does what takes 3-5 sequential calls with raw `gh`.
+
+3. **Smart defaults, explicit opt-out.** Token protection (200 char truncation) is on by default — `--full` to opt out. README preview is on by default. Matching context is on by default. The safe, information-rich path requires zero flags. The raw, unfiltered path requires explicit intent.
+
+4. **Fail visibly.** Web-only qualifiers warn on stderr instead of silently degrading. Broad queries warn instead of returning garbage. Result counts are always shown. The agent always knows the quality of what it got back.
+
+### The consistency pattern
+
+Every ghx command follows the same pattern: batch what agents actually need into one call with smart defaults, instead of making them assemble it from multiple calls with explicit flags.
+
+| Command | What it batches | What gh needs |
+|---|---|---|
+| `ghx repos "query"` | Search + stars + language + README preview | 1 search + N README fetches + `--json field1,field2` |
+| `ghx explore owner/repo` | Description + tree + README | `gh repo view` + `gh api contents/` + `gh api readme` |
+| `ghx read owner/repo f1 f2 f3` | N files in plain text + optional grep/map | N × `gh api contents/f` + base64 decode + shell grep |
+| `ghx search "query"` | AND matching + matching context + count + warnings | `gh search code` (exact phrase, no context, no count) |
+
+### Why this matters for agents
+
+An agent using raw `gh` must know:
+- That `gh search code` wraps in quotes (undocumented behavior)
+- That `--json fullName,description` is needed every time (no smart default)
+- That `gh api contents/` returns base64 (needs decode)
+- That README requires a separate API call
+- That code search is 10/min but repo search is 30/min
+- That web-only qualifiers silently degrade
+
+An agent using ghx needs to know: the command name and the query. Everything else is handled.
 
 ## Context
 

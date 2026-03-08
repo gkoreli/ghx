@@ -9,9 +9,9 @@ Use `ghx` via `execute_bash` for anything on GitHub — repos, files, code searc
 
 ## Why This Exists
 
-Agents exploring GitHub waste API calls, tokens, and time. Existing tools are either too heavy (MCPs with 10K+ token schemas) or too crude (raw `gh` commands requiring 3-5 sequential calls). `ghx` batches operations via GraphQL — one command does what takes 3-5 separate calls.
+Agents exploring GitHub face a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* Raw `gh` commands have silent failure modes — `gh search code` wraps in quotes without telling you, `gh api contents/` returns base64, README requires a separate call. The agent can't distinguish "no results" from "wrong flags."
 
-GitHub's own team (github/gh-aw) builds agent skills as bash scripts wrapping `gh` CLI. They cover PRs, issues, discussions — but have NO code exploration skill. Nobody built the lightweight middle ground. `ghx` fills that gap.
+ghx eliminates this by encoding the right defaults into every command. One call returns enough context to decide the next action. You opt into the ghx skill and stop worrying about whether you searched correctly — the right behavior is the default behavior.
 
 ## Commands
 
