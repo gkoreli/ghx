@@ -63,10 +63,12 @@ Tested: `console.log` → 21 results. `consolelog` → 0 results. The dot acts a
 
 #### Rate limits
 
-- **Code search: 10 requests/minute** (authenticated) per the "Search code" section. BUT the "About search" section on the same page says **9 req/min**. GitHub's own docs contradict themselves. Our 8s-sleep tests (7.5 req/min) never hit limits, so we can't empirically distinguish 9 vs 10. **Budget for 9 to be safe.**
-- Other search endpoints: 30 req/min (authenticated)
-- Unauthenticated: 10 req/min (all endpoints)
-- 422 can also mean "endpoint has been spammed" — abuse beyond normal rate limits
+Code search is the most restricted search endpoint:
+
+- **Authentication required** — unauthenticated requests return `{"message": "Requires authentication"}`. Every other search endpoint works without auth.
+- **9 req/min** (authenticated) per the "About search" section. The "Search code" section says 10/min — GitHub's docs contradict themselves. **Budget for 9.**
+- Other search endpoints: 30 req/min authenticated, 10 req/min unauthenticated.
+- 422 can also mean "endpoint has been spammed" — abuse beyond normal rate limits.
 
 #### Response structure
 
