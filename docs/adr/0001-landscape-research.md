@@ -23,20 +23,20 @@ ghx read <owner/repo> <f1> [f2] [f3]  # Read 1-10 files in 1 API call
 ghx read <repo> --grep "pattern" <f>  # Read file, show only matching lines (2 lines context)
 ghx read <repo> --lines 42-80 <f>     # Read specific line range from file
 ghx read <repo> --map <f1> [f2] [f3]  # Structural map: signatures, imports, types only (~92% reduction)
-ghx search "<query>"                   # Code search (full syntax: AND, OR, path:, extension:)
+ghx search "<query>"                   # Code search (AND matching, qualifiers: repo:, org:, user:, path:, language:, extension:)
 ghx tree <owner/repo> [path]           # Full recursive tree listing
 ```
 
 Search query syntax (same as github.com search bar):
 - Multi-word AND: `ghx search "bar width repo:plausible/analytics"`
-- OR: `ghx search "bar OR percentage repo:plausible/analytics"`
+- Scope to repo: `ghx search "bar repo:plausible/analytics"`
 - Exact phrase: `ghx search '"progress_bar" repo:plausible/analytics'`
 - Path filter: `ghx search "bar path:assets/js repo:plausible/analytics"`
 - Extension: `ghx search "bar extension:tsx repo:plausible/analytics"`
 - Language: `ghx search "bar language:javascript repo:plausible/analytics"`
 - Find files by name: `ghx search "path:llms.txt"` or `ghx search "path:llms.txt extension:txt"`
 - No regex support via API
-- ⚠️ Invalid qualifiers (e.g. `filename:`) are silently treated as literal text — no error, just wrong results. Valid qualifiers: `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `NOT`, `OR`.
+- ⚠️ Invalid qualifiers (e.g. `filename:`) are silently treated as literal text — no error, just wrong results. Valid REST API qualifiers: `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `in:`, `size:`, `filename:` (legacy). Note: `OR`, `NOT`, `symbol:`, regex are only available in GitHub's new web code search — NOT in the REST API.
 
 Rate limit: 10 code search requests/minute. Space out calls.
 
@@ -144,7 +144,7 @@ Key patterns: use aliases (`f1:`, `f2:`) to read multiple files in one call. `..
 
 ## Landscape: What Exists (and Why We Don't Use It)
 
-**GitHub MCP Server** (github/github-mcp-server) — Official, 50+ tools. Their `search_code` uses `go-github` library's `client.Search.Code()` which hits REST `/search/code` directly — supports full query syntax (multi-word, OR, path filters). `gh search code` also supports this syntax (corrected — earlier claim that it was broken was false). But: no GraphQL batching, no multi-file reads, ~10K tokens of tool schemas injected into every agent context. Each file read = 1 tool call. Their `get_file_contents` doesn't support line ranges or match filtering. Overkill for research.
+**GitHub MCP Server** (github/github-mcp-server) — Official, 50+ tools. Their `search_code` uses `go-github` library's `client.Search.Code()` which hits REST `/search/code` directly — supports full query syntax (multi-word, path filters). `gh search code` also uses this endpoint but wraps multi-word queries in quotes (exact phrase matching — see ADR-0002 Issue 2). No GraphQL batching, no multi-file reads, ~10K tokens of tool schemas injected into every agent context. Each file read = 1 tool call. Their `get_file_contents` doesn't support line ranges or match filtering. Overkill for research.
 
 **Octocode MCP** (bgauryy/octocode-mcp, 741⭐) — Best-in-class research MCP. Uses Octokit REST API (not GraphQL). Novel ideas discovered from source code:
 - **Hints system**: Every tool response includes contextual hints that guide the agent's next action. Three categories: `hasResults` (suggest next tool), `empty` (suggest broadening search), `error` (suggest recovery). Example: "💡 TIP: Use matchString for targeted extraction instead of paginating through entire file". This prevents agents from wasting calls on wrong tools.
