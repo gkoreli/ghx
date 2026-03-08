@@ -98,47 +98,15 @@ All channels deliver the same bash script. The only runtime dependency is `gh` C
 
 Bash-based gh extensions are fully supported and used by gh core maintainers (e.g., `mislav/gh-branch` — pure bash, 2.5KB). No Go required.
 
-**Solution: two entry points, one source of truth.**
-- Main repo: `ggcode` — the script, npm package, curl install, brew, docs, ADRs
-- gh extension repo: `gh-ggcode` — contains a single `gh-ggcode` file that's either a copy or a thin wrapper that downloads/runs the real script
+**Decision: separate `gh-ggcode` repo.**
+- `gogakoreli/ggcode` — the source of truth. Script, npm, curl, brew, docs, ADRs.
+- `gogakoreli/gh-ggcode` — gh extension shim. Contains a `gh-ggcode` executable that is an exact copy of the `ggcode` script. The release workflow in `ggcode` copies the script to `gh-ggcode` and pushes a tagged release there, keeping them in sync automatically.
 
-Alternatively, the main repo could be named `gh-ggcode` with both `gh-ggcode` (the script) and a `package.json` that maps `bin.ggcode → ./gh-ggcode`. This makes gh extension the primary distribution and npm/brew/curl all work from the same repo. Trade-off: the script filename is `gh-ggcode` instead of `ggcode`.
+This keeps the main repo name clean (`ggcode`), npm package name clean (`ggcode`), and satisfies gh's hard `gh-` prefix requirement without polluting the primary repo.
 
-### Go Rewrite: When and Why
+### Go Rewrite
 
-**Today: bash is correct.** The tool is 135 lines. Rewriting in Go would be 500-1000 lines for the same functionality. The `gh` CLI handles auth, API calls, and JSON parsing — bash just orchestrates.
-
-**When Go becomes correct:**
-1. When `gh` CLI dependency becomes a friction point (users who don't have `gh` installed)
-2. When Windows support matters (bash doesn't work natively on Windows)
-3. When performance matters (Go binary vs spawning `gh` subprocess per call)
-4. When the tool grows beyond what bash handles cleanly (~500+ lines)
-
-**What Go gives you:**
-- Single binary, zero runtime dependencies (embeds GitHub API + OAuth)
-- Native gh extension support (precompiled binary in GitHub releases, gh auto-downloads correct platform)
-- Cross-platform: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64, windows-amd64
-- npm distribution via platform-specific binaries (same pattern as esbuild, turbo, biome)
-- Faster execution (no subprocess spawning)
-
-**What Go costs:**
-- 5-10x more code for same functionality
-- Build matrix CI (goreleaser handles this)
-- Auth implementation (can use `go-gh` library from GitHub which reads `gh` auth config)
-- Ongoing maintenance of a compiled codebase vs a script
-
-**The contract that survives a rewrite:** The CLI interface is the contract. `ggcode explore owner/repo`, `ggcode read owner/repo --map file`, `ggcode search "query"`. Whether bash or Go executes underneath is invisible to users. Ship bash today, rewrite in Go when one of the triggers above is hit.
-
-### One Source of Truth: The Decision
-
-**The script IS the source of truth.** Every distribution channel wraps the same code:
-- npm: `package.json` bin points to the script
-- gh extension: script at repo root (named `gh-ggcode`)
-- brew: formula downloads the script from a GitHub release
-- curl: install.sh downloads the script
-- Manual: copy the script
-
-If/when Go replaces bash, the same structure holds — just swap the script for a binary. The distribution wrappers don't change.
+Parked. Bash is correct for 135 lines. If the tool outgrows bash (>500 lines, Windows needed, `gh` dependency becomes friction), revisit. The CLI interface (`ggcode explore`, `ggcode read`, `ggcode search`) is the contract — implementation language is invisible to users.
 
 ## Evidence
 
