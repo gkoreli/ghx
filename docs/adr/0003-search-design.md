@@ -341,15 +341,27 @@ ghx explore batches 3 operations into 1 GraphQL call. Same data, fewer round-tri
 
 Same endpoint, same data. ghx tree is a convenience wrapper — no efficiency gain.
 
+### Repo Search (ghx repos vs gh search repos)
+
+| Aspect | `ghx repos` | `gh search repos` |
+|---|---|---|
+| API calls | 1 GraphQL | 1 REST (+ N more for READMEs) |
+| README preview | ✅ 300 chars, HTML/badge noise stripped | ❌ Not included |
+| Stars + language | ✅ Inline | Requires `--json stargazerCount,...` |
+| Result ranking | GraphQL `search(type: REPOSITORY)` — surfaces popular repos | REST `/search/repositories` — different ranking, often surfaces obscure repos |
+| Smart defaults | Name, stars, language, description, README — no flags needed | Requires `--json field1,field2` every time |
+| Token cost | ~2,000 tokens (5 results with README) | ~570 bytes (5 results, no README) |
+
+Example: `"react state management"` — gh returns `FrontendMasters/react-state-management` (empty description). ghx returns zustand (57K★), jotai (21K★), react-hook-form (44K★) with README previews revealing what each actually does.
+
 ### What gh Does That ghx Cannot
 
 | Capability | gh command | ghx equivalent |
 |---|---|---|
-| **Repo search** | `gh search repos "query"` | **None** — use gh |
 | **Issues** | `gh issue list/view` | **None** — use gh |
 | **Pull requests** | `gh pr list/view/diff/checks` | **None** — use gh |
 | **Releases** | `gh release list/view` | **None** — use gh |
-| **Repo metadata** (stars, forks, language) | `gh repo view --json` | **None** — use gh |
+| **Repo metadata** (stars, forks, language) | `gh repo view --json` | `ghx repos` shows stars + language inline, but gh has more fields |
 | **Authentication** | `gh auth login/status` | Depends on gh for auth |
 | **Creating/updating** (issues, PRs, releases) | `gh issue create`, `gh pr create` | **None** — use gh |
 
@@ -371,14 +383,14 @@ Code search is the most restricted endpoint — 50x more limited than core REST.
 
 **ghx wins** (use ghx):
 - Code search — AND matching, matching context, token protection, warnings
+- Repo search — 1 GraphQL call gets name + stars + language + README preview (gh needs N+1 calls, no README, worse ranking)
 - Repo exploration — 1 call vs 3 for description + tree + README
 - Batch file reading — 1 call for N files, plus --grep/--map/--lines
 - Code maps — `--map` has no gh equivalent
 
 **gh wins** (use gh):
-- Repo search (`gh search repos`) — ghx has no equivalent
 - Issues, PRs, releases — gh has purpose-built commands
-- Repo metadata (stars, forks, language) — `gh repo view --json`
+- Detailed repo metadata (forks, license, topics) — `gh repo view --json`
 - Authentication management — ghx depends on gh for auth
 - Creating/updating resources — gh is the only option
 

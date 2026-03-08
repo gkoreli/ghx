@@ -22,6 +22,7 @@ ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (Grap
 ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
+ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
 ghx search "<query>"                        # Code search (REST API, AND matching, shows matching lines)
 ghx search --full "<query>"                 # Code search without line truncation (for minified files)
 ghx tree <owner/repo> [path]                # Full recursive tree listing
@@ -166,7 +167,7 @@ AND matching is almost always what agents want. `gh search code "useState fetchD
 - ❌ Firing multiple code search requests in parallel — 9 req/min rate limit, you'll get 403s
 - ❌ Dumping entire repos into context for a specific question — use targeted `ghx` commands. Reserve `gitingest`/`repomix` for "understand this whole module" tasks
 - ❌ Relying on `gh search code` for multi-word queries — silently wraps in quotes (exact phrase), returns nothing when words aren't adjacent. Use `ghx search` (AND matching + matching context)
-- ❌ Using `ghx search` to find repos — ghx has no repo search. Use `gh search repos "query" --json fullName,description`
+- ❌ Using `ghx search` to find repos — ghx search is for code. Use `ghx repos "query"` for repo discovery
 - ❌ Using `gh` for batch file reads — 1 API call per file, base64 encoded. Use `ghx read repo f1 f2 f3` (1 GraphQL call, plain text)
 - ❌ Using `gh repo view` to explore a repo — gets metadata but not tree listing or README content in one call. Use `ghx explore` (1 call for all three)
 
@@ -254,6 +255,7 @@ ghx read yamadashy/repomix --lines 38-65 src/core/treeSitter/parseFile.ts
 | Task | Command | Why ghx wins |
 |------|---------|-------------|
 | Code search | `ghx search "query"` | AND matching (gh uses exact phrase), matching context, 37x token reduction on minified files, result count + warnings on stderr |
+| Repo search | `ghx repos "query"` | 1 GraphQL call gets name + stars + language + README preview. gh needs 1+N calls for same info, returns worse ranking, no README |
 | Repo overview | `ghx explore owner/repo` | 1 GraphQL call gets description + tree + README (gh needs 3 calls) |
 | Read multiple files | `ghx read owner/repo f1 f2 f3` | 1 GraphQL call for N files (gh needs N calls, returns base64) |
 | Targeted extraction | `ghx read --grep "pat" f` | Built-in grep with context lines — no shell piping |
@@ -263,11 +265,10 @@ ghx read yamadashy/repomix --lines 38-65 src/core/treeSitter/parseFile.ts
 
 | Task | Command | Why gh wins |
 |------|---------|-------------|
-| Find repos | `gh search repos "query" --json fullName,description` | ghx has no repo search |
 | Issues | `gh issue list/view -R owner/repo` | ghx doesn't touch issues |
 | Pull requests | `gh pr list/view/diff/checks -R owner/repo` | ghx doesn't touch PRs |
 | Releases | `gh release list -R owner/repo` | ghx doesn't touch releases |
-| Repo metadata | `gh repo view owner/repo --json stargazerCount,forkCount` | Stars, forks, language, license |
+| Repo metadata | `gh repo view owner/repo --json stargazerCount,forkCount` | Detailed stats beyond what ghx repos shows |
 | Auth | `gh auth login/status` | ghx depends on gh for auth |
 | Create/update | `gh issue create`, `gh pr create` | ghx is read-only |
 

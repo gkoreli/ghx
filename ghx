@@ -231,6 +231,56 @@ search)
   fi
   ;;
 
+# ─── repos: search repos with README preview in 1 GraphQL call ───
+repos)
+  query="$*"
+  if [[ -z "$query" ]]; then
+    echo "Usage: ghx repos <query>" >&2
+    exit 1
+  fi
+
+  response=$(gh api graphql -f query='
+  {
+    search(query: "'"$query"'", type: REPOSITORY, first: 5) {
+      repositoryCount
+      nodes {
+        ... on Repository {
+          nameWithOwner
+          description
+          stargazerCount
+          primaryLanguage { name }
+          object(expression: "HEAD:README.md") {
+            ... on Blob { text }
+          }
+        }
+      }
+    }
+  }')
+
+  echo "$response" | jq -r '.data.search.repositoryCount | "\(.) repos found"' >&2
+  echo "$response" | jq -r '
+    .data.search.nodes[] |
+    .nameWithOwner as $name |
+    (.stargazerCount | tostring) as $stars |
+    ((.primaryLanguage.name // "?")) as $lang |
+    (.description // "") as $desc |
+    ((.object.text // "") | gsub("\\n"; " ") | gsub("\\s+"; " ") | gsub("^\\s+"; "") |
+      gsub("\\[!\\[[^]]*\\]\\([^)]*\\)\\]\\([^)]*\\)"; "") |
+      gsub("!\\[[^]]*\\]\\([^)]*\\)"; "") |
+      gsub("\\[!\\[[^]]*\\]\\([^)]*\\)\\]"; "") |
+      gsub("\\[![^]]*\\]\\([^)]*\\)"; "") |
+      gsub("<img[^>]*>"; "") |
+      gsub("<div[^>]*>"; "") | gsub("</div>"; "") |
+      gsub("<br[^>]*/?>"; "") |
+      gsub("<p[^>]*>"; "") | gsub("</p>"; "") |
+      gsub("<a[^>]*>"; "") | gsub("</a>"; "") |
+      gsub("\\s+"; " ") | gsub("^\\s+"; "") |
+      .[:300]) as $readme |
+    "\($name) (\($stars)★ \($lang)) \($desc)" +
+    (if ($readme | length) > 0 then "\n  " + $readme + (if ($readme | length) >= 300 then "…" else "" end) else "" end)
+  '
+  ;;
+
 # ─── tree: recursive tree listing via REST API ───
 tree)
   repo="$1"; shift || true
@@ -258,8 +308,9 @@ ghx — GitHub code exploration for agents and humans
 Commands:
   ghx explore <owner/repo> [path]     Branch + tree + README in 1 API call
   ghx read <owner/repo> <f1> [f2..]   Read 1-10 files in 1 API call
-  ghx search <owner/repo> <f1> [f2..]   Code search (AND matching, qualifiers: repo: path: language: extension: filename:)
-  ghx search --full <query>              Code search without line truncation
+  ghx repos <query>                    Search repos with README preview in 1 GraphQL call
+  ghx search "<query>"                 Code search (AND matching, qualifiers: repo: path: language: extension: filename:)
+  ghx search --full "<query>"          Code search without line truncation
   ghx tree <owner/repo> [path]         Full recursive tree listing
 
 Read flags:
@@ -271,6 +322,7 @@ Examples:
   ghx read plausible/analytics mix.exs assets/js/dashboard/stats/bar.js
   ghx read plausible/analytics src/app.ts --grep "useState"
   ghx read plausible/analytics src/app.ts --lines 42-80
+  ghx repos "react state management"
   ghx search "useState repo:plausible/analytics"
   ghx search "filename:package.json repo:plausible/analytics"
   ghx tree plausible/analytics assets/js
