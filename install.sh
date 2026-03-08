@@ -10,10 +10,11 @@ mkdir -p "$INSTALL_DIR"
 echo "Installing ghx to $INSTALL_DIR..."
 
 if command -v gh &>/dev/null; then
-  # Use gh for authenticated download (handles private repos too)
   gh api "repos/$REPO/contents/ghx" -H "Accept: application/vnd.github.raw+json" > "$INSTALL_DIR/ghx"
+  gh api "repos/$REPO/contents/SKILL.md" -H "Accept: application/vnd.github.raw+json" > "$INSTALL_DIR/SKILL.md"
 else
   curl -sfL "https://raw.githubusercontent.com/$REPO/main/ghx" -o "$INSTALL_DIR/ghx"
+  curl -sfL "https://raw.githubusercontent.com/$REPO/main/SKILL.md" -o "$INSTALL_DIR/SKILL.md"
 fi
 
 chmod +x "$INSTALL_DIR/ghx"
