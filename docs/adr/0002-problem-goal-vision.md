@@ -35,7 +35,7 @@ A single CLI tool that gives AI agents (and humans) efficient access to GitHub r
 
 `ghx` is the first tool in the `gg` family — a collection of focused, independently installable CLI tools for AI-assisted development. Each tool does one thing well.
 
-`ghx` = GitHub code exploration. ~135 lines of bash. One dependency: `gh` CLI.
+`ghx` = GitHub code exploration. ~345 lines of bash. One dependency: `gh` CLI.
 
 ### Design Principles
 
@@ -47,7 +47,7 @@ A single CLI tool that gives AI agents (and humans) efficient access to GitHub r
 
 4. **Fail loudly.** GitHub's API silently degrades invalid search qualifiers to literal text. Agent-friendly tools must validate inputs and surface errors explicitly.
 
-5. **Minimal code.** ~135 lines of bash. The entire tool fits on one screen. Less code = fewer bugs, easier to audit, easier to contribute.
+5. **Minimal code.** ~345 lines of bash (6 commands). Less code = fewer bugs, easier to audit, easier to contribute.
 
 ### Architectural Decisions
 
@@ -82,7 +82,7 @@ The `gg` prefix is the platform. Each tool is a member. They don't depend on eac
 
 ### Distribution Strategy
 
-The tool is ~135 lines of bash. Distribution channels are thin wrappers around the same script:
+The tool is ~345 lines of bash. Distribution channels are thin wrappers around the same script:
 
 | Channel | Install command | How it works |
 |---------|----------------|-------------|

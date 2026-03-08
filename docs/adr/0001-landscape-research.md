@@ -413,7 +413,7 @@ ghx's `--map` is equivalent to codemap's `compact` level. A future `--map=names`
 - Zero install — `gh` CLI is already on PATH for any GitHub user
 - Composable with shell pipes (`ghx read ... | grep ... | wc -l`)
 - No package manager, no node_modules, no virtual environments
-- ~120 lines total — entire tool fits in one screen
+- ~345 lines total — entire tool is one bash script
 - Trade-off accepted: no Tree-sitter, no SQLite caching, no cross-file references. These are complementary tool territory.
 
 **Why API-first over clone-first:**
@@ -472,7 +472,7 @@ Evidence-based competitive analysis — every claim verified from source code:
 
 3. **Intelligent context selection** (aider's PageRank approach): Use reference graphs to pick the RIGHT files. Best for: "which files are most relevant to this change?", "what would I need to modify to add feature X?"
 
-No single tool in the landscape combines all three. `ghx` occupies the sweet spot for strategy #1: lightweight (120 lines bash), zero dependencies beyond `gh` CLI, agent-friendly output, and it does the most common operations (explore, read, search, tree) in minimal API calls.
+No single tool in the landscape combines all three. `ghx` occupies the sweet spot for strategy #1: lightweight (~345 lines bash), zero dependencies beyond `gh` CLI, agent-friendly output, and it does the most common operations (explore, read, search, tree, repos) in minimal API calls.
 
 ### Emerging Convention: AGENTS.md
 
