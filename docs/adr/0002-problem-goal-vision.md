@@ -173,19 +173,13 @@ ghx uses 62% fewer tokens but provides 0% of the matching context. The token sav
 
 **Source:** ADR-0001 documents that Octocode's `matchString` parameter returns matching lines with configurable context — the same pattern we should follow.
 
-### Issue 2: False claim about `gh search code` (CRITICAL)
+### Issue 2: `gh search code` is unreliable, not "broken" or "working"
 
-**What's wrong:** ADR-0001 and SKILL.md both state: "gh search code silently fails on multi-word queries — returns empty results with no error." This is false. Tested 2026-03-08:
-```
-gh search code "bar width" -L 3  → returns results correctly
-gh search code "bar width repo:plausible/analytics"  → returns results correctly
-```
+**What's wrong:** ADR-0001 and SKILL.md originally stated: "gh search code silently fails on multi-word queries." Initial re-testing on 2026-03-08 showed it working for `"bar width repo:plausible/analytics"`. But further testing revealed inconsistency: `gh search code "ghx gkoreli"` returns empty results for content that exists, while `gh search code "ghx"` returns noisy, irrelevant results.
 
-**Why it matters:** This false claim is in agent-facing documentation (SKILL.md). Agents reading it will avoid `gh search code` unnecessarily and use `ghx search` which currently returns LESS information (no matching lines). We're actively making agents worse with incorrect guidance.
+**Revised assessment:** `gh search code` is unreliable — it works for some queries and fails silently for others. It's not categorically broken, but it's not trustworthy either. The original claim was too absolute ("silently fails on multi-word"), the correction was too generous ("works fine"). The truth is in between: it's flaky.
 
-**Root cause:** The claim may have been true in an older `gh` CLI version, or was a misinterpretation during initial testing. Regardless, it's wrong now and must be corrected.
-
-**Fix:** Remove the false claim from SKILL.md and ADR-0001. Replace with accurate comparison: `gh search code` works for multi-word queries but `ghx search` adds value through compact output and (after Issue 1 fix) configurable verbosity.
+**Fix:** Remove absolute claims in either direction. State the observed behavior: `gh search code` works for some multi-word queries but returns inconsistent results. `ghx search` hits the REST API directly and provides consistent, compact output. Agents should prefer `ghx search` for reliability, not because `gh search code` is broken.
 
 ### Issue 3: No search query validation
 
