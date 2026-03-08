@@ -60,7 +60,7 @@ Rate limit: 10 code search requests/minute. Space out calls.
 - `gh pr checks <number> -R <owner/repo>` — CI status per check
 - `gh issue view <number> -R <owner/repo>` — issue body + comments
 - `gh issue list -R <owner/repo> -S "<query>"` — search issues (uses `-S` flag)
-- `gh search code "<query>"` — **limited: single keyword only**. For multi-word/OR/path queries, use `ghx search` instead.
+- `gh search code "<query>"` — supports full query syntax including multi-word queries. Returns paths + matching line content. `ghx search` provides more compact output.
 
 **Best practices (from gh maintainers):**
 
@@ -79,7 +79,7 @@ Rate limit: 10 code search requests/minute. Space out calls.
 - ❌ Hardcoding `main` as branch in API calls — repos use different defaults (`trunk`, `master`, etc.). `ghx` handles this automatically. For raw `gh api`, query with `gh repo view --json defaultBranchRef` first.
 - ❌ Reading entire large files when you need 10 lines — use `ghx read --grep "pattern"` or `--lines N-M` to extract only what you need
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files) instead
-- ❌ Using `gh search code` for multi-word queries — it silently returns empty results. Use `ghx search` which hits the REST API directly.
+- ❌ ~~Using `gh search code` for multi-word queries~~ — **CORRECTED 2026-03-08**: `gh search code` handles multi-word queries correctly. Earlier claim was false. `ghx search` still adds value through compact output and (planned) configurable verbosity.
 - ❌ Using invalid search qualifiers like `filename:` — GitHub code search silently treats unknown qualifiers as literal text. `filename:llms.txt` searches for the TEXT "filename:llms.txt" inside files, NOT for files named llms.txt. Valid qualifiers: `path:`, `extension:`, `language:`, `repo:`, `org:`, `user:`. Use `path:llms.txt` to find files by name.
 - ❌ Using `language:markdown` to find `.txt` files — GitHub doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` matches GitHub's linguist detection, `extension:` matches the literal file extension.
 - ❌ Firing multiple code search requests in parallel — 10 req/min rate limit. Space them out or you'll get 403s.
@@ -144,7 +144,7 @@ Key patterns: use aliases (`f1:`, `f2:`) to read multiple files in one call. `..
 
 ## Landscape: What Exists (and Why We Don't Use It)
 
-**GitHub MCP Server** (github/github-mcp-server) — Official, 50+ tools. Their `search_code` uses `go-github` library's `client.Search.Code()` which hits REST `/search/code` directly — supports full query syntax (multi-word, OR, path filters), unlike the broken `gh search code` CLI wrapper. But: no GraphQL batching, no multi-file reads, ~10K tokens of tool schemas injected into every agent context. Each file read = 1 tool call. Their `get_file_contents` doesn't support line ranges or match filtering. Overkill for research.
+**GitHub MCP Server** (github/github-mcp-server) — Official, 50+ tools. Their `search_code` uses `go-github` library's `client.Search.Code()` which hits REST `/search/code` directly — supports full query syntax (multi-word, OR, path filters). `gh search code` also supports this syntax (corrected — earlier claim that it was broken was false). But: no GraphQL batching, no multi-file reads, ~10K tokens of tool schemas injected into every agent context. Each file read = 1 tool call. Their `get_file_contents` doesn't support line ranges or match filtering. Overkill for research.
 
 **Octocode MCP** (bgauryy/octocode-mcp, 741⭐) — Best-in-class research MCP. Uses Octokit REST API (not GraphQL). Novel ideas discovered from source code:
 - **Hints system**: Every tool response includes contextual hints that guide the agent's next action. Three categories: `hasResults` (suggest next tool), `empty` (suggest broadening search), `error` (suggest recovery). Example: "💡 TIP: Use matchString for targeted extraction instead of paginating through entire file". This prevents agents from wasting calls on wrong tools.

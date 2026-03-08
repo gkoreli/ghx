@@ -150,3 +150,60 @@ All claims backed by source code analysis documented in [ADR-0001](./0001-landsc
 - 10K token overhead: counted from GitHub MCP's 50+ tool schemas
 - GraphQL batching: verified via alias mechanism (`f0:`, `f1:`, etc.)
 - No competitor: searched gh extension registry, npm, GitHub repos — verified empty niche
+
+## Issues Found (v0.1 Self-Audit)
+
+**Date**: 2026-03-08
+
+After benchmarking ghx against `gh search code` and re-reading ADR-0001's landscape research, we found issues in the current implementation. Each issue is traced back to the research that identified the gap.
+
+### Issue 1: Search discards matching lines (CRITICAL)
+
+**What's wrong:** `ghx search` outputs only file paths: `repo path:name`. The REST `/search/code` API returns `text_matches` with matching code fragments when you send `Accept: application/vnd.github.text-match+json`. We don't use that header and our jq only extracts path/name.
+
+**Why it matters:** `gh search code` shows `repo:path: matching line content` — our tool returns LESS information than the tool we claim to improve on. An agent searching for "bar width" gets file paths but no context about which lines matched or why. The agent must then do a follow-up `ghx read --grep` call for every file — defeating the purpose.
+
+**Benchmark evidence (bench/RESULTS.md):**
+- `ghx search`: 360 tokens, 20 lines (paths only)
+- `gh search code`: 951 tokens, 36 lines (paths + matching lines)
+
+ghx uses 62% fewer tokens but provides 0% of the matching context. The token savings are meaningless if the agent needs a follow-up call for every result.
+
+**Fix:** Add `Accept: application/vnd.github.text-match+json` header. Default output: compact (path + first match fragment per file). `--verbose` flag: all fragments with context. This gives agents the matching lines they need while keeping output concise.
+
+**Source:** ADR-0001 documents that Octocode's `matchString` parameter returns matching lines with configurable context — the same pattern we should follow.
+
+### Issue 2: False claim about `gh search code` (CRITICAL)
+
+**What's wrong:** ADR-0001 and SKILL.md both state: "gh search code silently fails on multi-word queries — returns empty results with no error." This is false. Tested 2026-03-08:
+```
+gh search code "bar width" -L 3  → returns results correctly
+gh search code "bar width repo:plausible/analytics"  → returns results correctly
+```
+
+**Why it matters:** This false claim is in agent-facing documentation (SKILL.md). Agents reading it will avoid `gh search code` unnecessarily and use `ghx search` which currently returns LESS information (no matching lines). We're actively making agents worse with incorrect guidance.
+
+**Root cause:** The claim may have been true in an older `gh` CLI version, or was a misinterpretation during initial testing. Regardless, it's wrong now and must be corrected.
+
+**Fix:** Remove the false claim from SKILL.md and ADR-0001. Replace with accurate comparison: `gh search code` works for multi-word queries but `ghx search` adds value through compact output and (after Issue 1 fix) configurable verbosity.
+
+### Issue 3: No search query validation
+
+**What's wrong:** ADR-0001 idea #1 identifies the most dangerous failure mode: GitHub silently treats invalid qualifiers (`filename:`, `in:`, `type:`) as literal text. `ghx search` passes queries through without checking.
+
+**Why it matters:** An agent searching `filename:llms.txt` gets results — files that contain the TEXT "filename:llms.txt" — not files named llms.txt. No error, plausible-looking wrong results. Hours of wasted investigation.
+
+**Fix:** 5-line bash check before sending the query. Warn on known-invalid qualifiers, suggest the correct alternative (`filename:` → `path:`).
+
+### Remaining gaps from ADR-0001 research (TODO)
+
+Ideas identified in ADR-0001 that are not yet implemented, prioritized by impact:
+
+| # | Idea | Effort | Impact | Status |
+|---|------|--------|--------|--------|
+| 1 | Search query validation | 5 lines | High — prevents silent wrong results | TODO |
+| 2 | Hints in output | 3 lines/cmd | Medium — guides agent's next action | TODO |
+| 4 | AGENTS.md/CLAUDE.md in explore | 1 GraphQL alias | Medium — instant agent context | TODO |
+| 5 | Token estimation warnings | 3 lines | Medium — prevents context overflow | TODO |
+| 7 | `gh api --cache` internally | 1 flag | Low — helps repeated reads | TODO |
+| 6 | File filtering in tree | ~10 lines | Low — reduces noise on large repos | TODO |

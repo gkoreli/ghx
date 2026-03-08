@@ -45,7 +45,7 @@ ghx tree <owner/repo> [path]                # Full recursive tree listing
 
 ## Search Query Syntax
 
-Same as github.com search bar. `ghx search` hits the REST API directly — supports full syntax unlike `gh search code` which silently breaks on multi-word queries.
+Same as github.com search bar. Both `ghx search` and `gh search code` support full query syntax including multi-word queries.
 
 ```bash
 ghx search "bar width repo:plausible/analytics"              # Multi-word AND
@@ -67,7 +67,7 @@ ghx search "path:llms.txt"                                     # Find files by n
 
 2. **`language:markdown` won't find `.txt` files.** GitHub's linguist detection doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` = linguist detection, `extension:` = literal file extension.
 
-3. **`gh search code` silently fails on multi-word queries.** Returns empty results with no error. Always use `ghx search` instead — it hits the REST API directly.
+3. **`gh search code` works for multi-word queries** (contrary to earlier claims). Both `ghx search` and `gh search code` handle multi-word queries. `ghx search` returns compact output (paths + first match per file). `gh search code` returns paths + all matching line content.
 
 4. **GraphQL returns null for missing paths.** `object(expression: "branch:path")` returns null silently if the path doesn't exist. No error. `ghx` handles this, but if using `gh api graphql` directly, check for null.
 
@@ -85,7 +85,7 @@ ghx search "path:llms.txt"                                     # Find files by n
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files)
 - ❌ Firing multiple code search requests in parallel — 10 req/min rate limit, you'll get 403s
 - ❌ Dumping entire repos into context for a specific question — use targeted `ghx` commands. Reserve `gitingest`/`repomix` for "understand this whole module" tasks
-- ❌ Using `gh search code` for multi-word queries — silently returns empty. Use `ghx search`
+- ❌ Using `gh search code` without `ghx search` when you need compact output — `gh search code` returns all matching lines (verbose), `ghx search` returns paths + first match (compact)
 
 ## Best Practices
 
