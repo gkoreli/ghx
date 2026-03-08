@@ -2,12 +2,13 @@
 
 GitHub code exploration for agents and humans. One command does what takes 3-5 API calls with any other tool.
 
+- **Repos** — search repos with README preview in 1 GraphQL call
 - **Explore** a repo (tree + README) in 1 API call
 - **Read** 1-10 files in 1 API call via GraphQL batching
 - **Map** code structure with ~92% token reduction
-- **Search** code with full GitHub search syntax
+- **Search** code with AND matching, matching context, token protection
 
-~135 lines of bash. One dependency: `gh` CLI.
+Bash script. One dependency: `gh` CLI. Cross-platform (macOS, Linux, Windows via Git Bash/WSL).
 
 ## Install
 
@@ -20,18 +21,28 @@ npx @gkoreli/ghx --help
 
 # curl
 curl -sf https://raw.githubusercontent.com/gkoreli/ghx/main/install.sh | sh
-
-# Manual — just copy the script
-curl -sf https://raw.githubusercontent.com/gkoreli/ghx/main/ghx -o ~/.local/bin/ghx && chmod +x ~/.local/bin/ghx
 ```
 
 Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`).
 
 [![npm](https://img.shields.io/npm/v/@gkoreli/ghx)](https://www.npmjs.com/package/@gkoreli/ghx)
 
+### Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | ✅ Native | bash + readlink -f (12.3+) |
+| Linux | ✅ Native | bash + GNU coreutils |
+| Windows | ✅ Git Bash / WSL | Ships with Git for Windows. Raw cmd.exe/PowerShell not supported |
+
+If you have `gh` CLI working, ghx works too — same prerequisites.
+
 ## Usage
 
 ```bash
+# Search repos — name, stars, language, README preview in 1 call
+ghx repos "react state management"
+
 # Explore a repo — branch, file tree, and README in 1 API call
 ghx explore plausible/analytics
 
@@ -47,7 +58,7 @@ ghx read plausible/analytics --grep "defmodule" lib/plausible/stats/query.ex
 # Read specific line range
 ghx read plausible/analytics --lines 42-80 lib/plausible/stats/query.ex
 
-# Search code (full GitHub search syntax)
+# Search code (AND matching, shows matching lines, token-protected)
 ghx search "useState repo:facebook/react"
 ghx search "path:llms.txt extension:txt"
 
@@ -57,23 +68,35 @@ ghx tree plausible/analytics assets/js
 
 ## Why
 
-AI agents exploring GitHub repos face a tooling gap:
+AI agents exploring GitHub face a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* ghx eliminates this with smart defaults — AND matching instead of exact phrase, README previews instead of bare names, matching context instead of bare paths. The right behavior is the default behavior.
 
-| Tool | Files per API call | Context overhead | Dependencies |
-|------|-------------------|-----------------|-------------|
-| GitHub MCP | 1 | ~10K tokens (50+ tool schemas) | Go binary |
-| Octocode MCP | 1 (parallel) | ~10K tokens | npm + Docker |
-| Raw `gh` CLI | 1 | 0 | `gh` |
-| Gitingest | N (clones first) | 0 | pip + tiktoken |
-| **ghx** | **1-10 (GraphQL batch)** | **0** | **`gh`** |
+| Tool | Files per call | Matching context | Smart defaults | Dependencies |
+|------|---------------|-----------------|---------------|-------------|
+| GitHub MCP | 1 | No | No (~10K token schemas) | Go binary |
+| `gh` CLI | 1 | No | No (exact phrase, base64, no README) | `gh` |
+| **ghx** | **1-10 (batch)** | **Yes** | **Yes** | **`gh`** |
 
-`ghx` reads 10 files in 1 API call. No other tool does this.
+## Agent Skill Integration
+
+`ghx skill` outputs the full [`SKILL.md`](./SKILL.md) to stdout — designed for agent context injection via spawn hooks:
+
+```json
+{
+  "hooks": {
+    "agentSpawn": [
+      {"command": "ghx skill"}
+    ]
+  }
+}
+```
+
+Every agent session gets the latest ghx skill (commands, gotchas, best practices, search strategy) injected into context automatically. No manual copy/paste, always in sync with the installed version.
+
+SKILL.md is included in the npm package and resolved via symlink, so this works with all installation methods.
 
 ## Code Map (`--map`)
 
 The `--map` flag extracts only structural declarations — imports, exports, function signatures, class definitions, type declarations. Implementation bodies are stripped.
-
-Tested on 6 real files across TypeScript, Python, and Go:
 
 | File | Full | Map | Reduction |
 |------|------|-----|-----------|
@@ -83,18 +106,12 @@ Tested on 6 real files across TypeScript, Python, and Go:
 
 Average: **92% reduction**. An agent can map 16 files in the space of reading 1 file fully.
 
-Supported: TypeScript/JavaScript, Python, Go, Rust, Java/Kotlin, Ruby. Falls back to generic pattern for unknown extensions.
+Supported: TypeScript/JavaScript, Python, Go, Rust, Java/Kotlin, Ruby. Generic fallback for unknown extensions.
 
 ## How It Works
 
-`ghx` wraps `gh` CLI with GraphQL batching. The `explore` command fetches tree + README in 1 GraphQL call. The `read` command uses GraphQL aliases (`f0:`, `f1:`, ...) to fetch up to 10 files in 1 call. The `search` command hits the REST `/search/code` endpoint directly (GraphQL has no code search).
-
-The `--map` flag applies per-language regex patterns to extract structural declarations from the fetched content. No Tree-sitter, no AST parsing — just regex on the first line of each declaration. This works because structural declarations in most languages start at the beginning of a line with a keyword (`function`, `class`, `def`, `func`, `export`, `import`, etc.).
+`ghx` wraps `gh` CLI with GraphQL batching. `repos` and `explore` use GraphQL to batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call. `search` hits the REST `/search/code` endpoint with `text_matches` for matching context and 200-char token protection.
 
 ## License
 
 MIT
-
-## For AI Agents
-
-See [`SKILL.md`](./SKILL.md) for agent-optimized instructions — chain of thought, gotchas, anti-patterns, and examples.
