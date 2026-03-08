@@ -214,11 +214,26 @@ Code search is 10 req/min. ghx should:
 - If agent needs more, they refine the query — not paginate
 - Respect rate limits in SKILL.md guidance
 
-### Decision 5: Response token optimization
+### Decision 5: Token budget protection (default safe, opt-out with `--full`)
+
+Two layers of protection against token explosion:
+
+**Layer 1: Line truncation (200 chars per result)**
+Each matching line is capped at 200 characters. Minified JS files can have 10,000+ char lines — one search result could consume more tokens than the entire rest of the output. Truncation is silent unless it actually triggers, then warns on stderr: `"⚠ Lines truncated to 200 chars (use --full for complete fragments)"`.
+
+**Layer 2: Broad query warning (>1,000 results)**
+When `total_count > 1000`, stderr warns: `"⚠ Query too broad — add repo:, language:, or path: to narrow"`. Agents immediately know to refine instead of trusting the first 30 results from a 200K-result query.
+
+**Opt-out: `--full` flag**
+`ghx search --full "query"` disables line truncation. Same result count, same warnings, just untruncated fragment lines. For when the agent specifically needs the full matching context.
+
+**Design rationale**: Safe by default, explicit opt-out. Agents that don't know about `--full` are protected. Agents that need full context can ask for it. This mirrors the `--map` philosophy — compact by default, full on request.
+
+### Decision 6: Response token optimization
 
 The raw API response is ~4.5KB per result, mostly repo metadata URLs we never use. Our jq already strips this. With text_matches, we add ~50 chars per result (one fragment line). Total output for 30 results: ~2KB vs raw API's ~135KB. **~98% reduction.**
 
-### Decision 6: Prerequisite checks with clear errors
+### Decision 7: Prerequisite checks with clear errors
 
 `ghx search` depends on `gh` CLI being installed and authenticated. Both can fail with cryptic errors. Add upfront checks:
 
@@ -259,7 +274,11 @@ We warn on stderr but still send the query because: (a) the literal text might s
 
 Code search is rate-limited to 9 req/min. Pagination burns those precious requests on the same query. If 30 results aren't enough, the query is too broad — the agent should add qualifiers (`repo:`, `language:`, `path:`) to narrow results, not paginate. This is a deliberate design choice: force precision over volume.
 
-### Why prerequisite checks (Decision 6)
+### Why token budget protection (Decision 5)
+
+Minified JS files can have 10,000+ char lines. One search result hitting a minified file could consume more tokens than the entire rest of the output combined. The 200-char truncation is invisible when lines are short (most code) and critical when they're not. The `--full` opt-out follows the same pattern as `--map` — compact by default, full on explicit request.
+
+### Why prerequisite checks (Decision 7)
 
 `gh` not installed → bash error `command not found` on some random line number. `gh` not authenticated → JSON error blob from the API. Both are cryptic. A 4-line check at the top gives an actionable message with the exact fix command. Fail fast, no wasted API call.
 
@@ -279,14 +298,16 @@ AND is almost always what agents want. An agent searching for `useState fetchDat
 
 ## Implementation Status
 
-- [x] Add `Accept: application/vnd.github.text-match+json` header to search
-- [x] Extract first line of `text_matches[0].fragment` per result
-- [x] Add `total_count` and `incomplete_results` to stderr
-- [x] Add query validation for web-only qualifiers (stderr warnings)
-- [x] Prerequisite checks: `gh` installed + authenticated
+- [x] Decision 1: `text_matches` header + first fragment line extraction
+- [x] Decision 2: `total_count` + `incomplete_results` to stderr
+- [x] Decision 3: Web-only qualifier warnings to stderr
+- [x] Decision 4: `per_page=30` default, no pagination
+- [x] Decision 5: 200-char line truncation, `--full` opt-out, broad query warning
+- [x] Decision 6: jq extraction (~98% token reduction)
+- [x] Decision 7: Prerequisite checks (`gh` installed + authenticated)
 - [x] Fix `filename:` claim in ADR-0001
 - [x] Fix `OR` claim in ADR-0001
-- [ ] Update SKILL.md with correct qualifier reference
+- [x] Update SKILL.md with correct qualifier reference
 - [ ] Benchmark: token output before/after
 
 ## Sources

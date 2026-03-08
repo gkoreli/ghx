@@ -23,6 +23,7 @@ ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, import
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
 ghx search "<query>"                        # Code search (REST API, AND matching, shows matching lines)
+ghx search --full "<query>"                 # Code search without line truncation (for minified files)
 ghx tree <owner/repo> [path]                # Full recursive tree listing
 ```
 

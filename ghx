@@ -134,9 +134,18 @@ read)
 
 # ─── search: code search via REST API ───
 search)
-  query="$*"
+  # Parse flags
+  full_mode=""
+  args=()
+  for arg in "$@"; do
+    case "$arg" in
+      --full) full_mode=1 ;;
+      *) args+=("$arg") ;;
+    esac
+  done
+  query="${args[*]}"
   if [[ -z "$query" ]]; then
-    echo "Usage: ghx search <query>" >&2
+    echo "Usage: ghx search <query> [--full]" >&2
     echo "Examples: 'useState repo:owner/repo' | 'path:src/ extension:tsx language:typescript'" >&2
     exit 1
   fi
@@ -172,20 +181,44 @@ search)
   count=$(echo "$response" | jq '.items | length')
   echo "$total results (showing $count)" >&2
   [[ "$incomplete" == "true" ]] && echo "⚠ Results may be incomplete (query timed out)" >&2
+  [[ "$total" -gt 1000 ]] 2>/dev/null && echo "⚠ Query too broad — add repo:, language:, or path: to narrow" >&2
 
   # Output: repo path: first matching line from fragment
-  echo "$response" | jq -r '
-    .items[] |
-    .repository.full_name as $repo |
-    .path as $path |
-    (.text_matches // []) as $tm |
-    if ($tm | length) > 0 then
-      ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
-        gsub("^\\s+"; "") | gsub("\\s+$"; "")) as $line |
-      "\($repo) \($path): \($line)"
-    else
-      "\($repo) \($path)"
-    end'
+  # Default: truncate lines to 200 chars to prevent token explosion (minified JS, etc.)
+  if [[ -n "$full_mode" ]]; then
+    echo "$response" | jq -r '
+      .items[] |
+      .repository.full_name as $repo |
+      .path as $path |
+      (.text_matches // []) as $tm |
+      if ($tm | length) > 0 then
+        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
+          gsub("^\\s+"; "") | gsub("\\s+$"; "")) as $line |
+        "\($repo) \($path): \($line)"
+      else
+        "\($repo) \($path)"
+      end'
+  else
+    truncated=$(echo "$response" | jq '[.items[] |
+      (.text_matches // []) as $tm |
+      if ($tm | length) > 0 then
+        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
+          gsub("^\\s+"; "") | gsub("\\s+$"; "")) | length > 200
+      else false end] | any')
+    [[ "$truncated" == "true" ]] && echo "⚠ Lines truncated to 200 chars (use --full for complete fragments)" >&2
+    echo "$response" | jq -r '
+      .items[] |
+      .repository.full_name as $repo |
+      .path as $path |
+      (.text_matches // []) as $tm |
+      if ($tm | length) > 0 then
+        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
+          gsub("^\\s+"; "") | gsub("\\s+$"; "") | .[:200]) as $line |
+        "\($repo) \($path): \($line)"
+      else
+        "\($repo) \($path)"
+      end'
+  fi
   ;;
 
 # ─── tree: recursive tree listing via REST API ───
@@ -216,6 +249,7 @@ Commands:
   ghx explore <owner/repo> [path]     Branch + tree + README in 1 API call
   ghx read <owner/repo> <f1> [f2..]   Read 1-10 files in 1 API call
   ghx search <owner/repo> <f1> [f2..]   Code search (AND matching, qualifiers: repo: path: language: extension: filename:)
+  ghx search --full <query>              Code search without line truncation
   ghx tree <owner/repo> [path]         Full recursive tree listing
 
 Read flags:
