@@ -26,7 +26,9 @@ A single CLI tool that gives AI agents (and humans) efficient access to GitHub r
 - **Explore** a repo (tree + README) in 1 API call
 - **Read** 1-10 files in 1 API call via GraphQL batching
 - **Map** code structure (signatures, imports, types) with ~92% token reduction
-- **Search** code with full GitHub search syntax
+- **Search** code with AND matching, matching context, token protection
+- **Repos** — search repos with README preview in 1 GraphQL call
+- **Skill** — output SKILL.md for agent context injection
 - **Zero context overhead** — no MCP schemas, no tool registration, just stdout
 
 ## Vision
@@ -112,7 +114,7 @@ Parked. Decision: ship bash today, revisit Go when triggers hit.
 
 **When Go becomes correct:**
 1. When `gh` CLI dependency becomes a friction point (users who don't have `gh` installed)
-2. When Windows support matters (bash doesn't work natively on Windows)
+2. When Windows support matters (bash requires Git Bash or WSL on Windows — works but not native)
 3. When performance matters (Go binary vs spawning `gh` subprocess per call)
 4. When the tool grows beyond what bash handles cleanly (~500+ lines)
 

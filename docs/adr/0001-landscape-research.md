@@ -1,5 +1,7 @@
 ## GitHub Content: Use `ghx` and `gh` CLI
 
+> **Note (2026-03-08):** Search-related decisions are now in [ADR-0003](./0003-search-design.md), which is the definitive reference. Some claims in this ADR were corrected there — notably: `filename:` IS valid in the REST API, `OR` is web-only, `gh search code` silently wraps in quotes (exact phrase). The landscape research below remains valuable for context but defer to ADR-0003 for search specifics.
+
 For anything on GitHub — repos, files, PRs, issues — use CLI tools via `execute_bash`. Authenticated, structured data, no HTML scraping.
 
 ### Problem: Agents Waste API Calls, Tokens, and Time Exploring GitHub
@@ -38,7 +40,7 @@ Search query syntax (same as github.com search bar):
 - No regex support via API
 - ⚠️ The REST API uses **legacy** code search syntax. Valid qualifiers: `repo:`, `org:`, `user:`, `path:`, `extension:`, `language:`, `in:`, `size:`, `filename:`, `fork:`. Web-only qualifiers (`OR`, `NOT`, `symbol:`, `content:`, `is:`, regex) are silently treated as literal text — no error, wrong results. See ADR-0003 for the complete two-system reference.
 
-Rate limit: 10 code search requests/minute. Space out calls.
+Rate limit: 9 code search requests/minute (budget conservatively — docs contradict between 9 and 10). Space out calls.
 
 ### `gh` CLI (for PRs, issues, and single operations)
 
@@ -79,7 +81,7 @@ Rate limit: 10 code search requests/minute. Space out calls.
 - ❌ Hardcoding `main` as branch in API calls — repos use different defaults (`trunk`, `master`, etc.). `ghx` handles this automatically. For raw `gh api`, query with `gh repo view --json defaultBranchRef` first.
 - ❌ Reading entire large files when you need 10 lines — use `ghx read --grep "pattern"` or `--lines N-M` to extract only what you need
 - ❌ Multiple sequential `gh api` calls for explore workflows — use `ghx explore` (1 GraphQL call) or `ghx read` (batch files) instead
-- ❌ ~~Using `gh search code` for multi-word queries~~ — **CORRECTED 2026-03-08**: `gh search code` handles multi-word queries correctly. Earlier claim was false. `ghx search` still adds value through compact output and (planned) configurable verbosity.
+- ❌ Using `gh search code` for multi-word queries — silently wraps in quotes (exact phrase matching via `GH_DEBUG=api` trace). Returns nothing when words aren't adjacent, with no error. Use `ghx search` (AND matching + matching context). See ADR-0003 Issue 2.
 - ❌ Using web-only search qualifiers in the REST API — `symbol:`, `OR`, `NOT`, `content:`, `is:`, regex are only available in GitHub's new web code search (Blackbird). The REST API silently treats them as literal text. `symbol:foo` searches for the TEXT "symbol:foo" inside files. Valid REST API qualifiers: `repo:`, `org:`, `user:`, `path:`, `filename:`, `extension:`, `language:`, `in:`, `size:`, `fork:`. See ADR-0003.
 - ❌ Using `language:markdown` to find `.txt` files — GitHub doesn't classify .txt as markdown. Use `extension:txt` instead. `language:` matches GitHub's linguist detection, `extension:` matches the literal file extension.
 - ❌ Firing multiple code search requests in parallel — 10 req/min rate limit. Space them out or you'll get 403s.
@@ -218,7 +220,7 @@ Ideas worth implementing in `ghx` or adopting as agent practices, ranked by impa
 
 **Implementable in bash (no new dependencies):**
 
-1. **Search query validation** (from the `filename:` bug): Before sending a search query, check for known-invalid qualifiers (`filename:`, `in:`, `type:`) and warn. GitHub's API silently degrades invalid qualifiers to literal text — the most dangerous failure mode for agents. A 5-line bash check prevents hours of wasted investigation on wrong results.
+1. **Search query validation** ~~(from the `filename:` bug)~~: Before sending a search query, check for web-only qualifiers (`symbol:`, `OR`, `NOT`, `content:`, `is:`, regex) and warn. GitHub's API silently degrades these to literal text — the most dangerous failure mode for agents. ✅ DONE — ghx now warns on stderr. Note: `filename:` IS valid in the REST API (corrected in ADR-0003).
 
 2. **Hints in output** (from Octocode): After search results, append `"Hint: use ghx read to view these files"`. After large file read, append `"Hint: use --grep to narrow"`. After explore, `"Hint: use ghx tree for recursive listing"`. Trivial to implement — just echo a line. Guides agent's next action without burning context on wrong tool calls.
 
