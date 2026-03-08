@@ -183,8 +183,9 @@ search)
   [[ "$incomplete" == "true" ]] && echo "⚠ Results may be incomplete (query timed out)" >&2
   [[ "$total" -gt 1000 ]] 2>/dev/null && echo "⚠ Query too broad — add repo:, language:, or path: to narrow" >&2
 
-  # Output: repo path: first matching line from fragment
-  # Default: truncate lines to 200 chars to prevent token explosion (minified JS, etc.)
+  # Output: repo path: matching context from fragment
+  # Default: 200 char window centered on the match (prevents minified JS token explosion)
+  # Uses matches[0].indices to find the actual match position in the fragment
   if [[ -n "$full_mode" ]]; then
     echo "$response" | jq -r '
       .items[] |
@@ -192,7 +193,7 @@ search)
       .path as $path |
       (.text_matches // []) as $tm |
       if ($tm | length) > 0 then
-        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
+        ($tm[0].fragment | gsub("\\n"; " ") | gsub("\\s+"; " ") |
           gsub("^\\s+"; "") | gsub("\\s+$"; "")) as $line |
         "\($repo) \($path): \($line)"
       else
@@ -202,8 +203,7 @@ search)
     truncated=$(echo "$response" | jq '[.items[] |
       (.text_matches // []) as $tm |
       if ($tm | length) > 0 then
-        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
-          gsub("^\\s+"; "") | gsub("\\s+$"; "")) | length > 200
+        ($tm[0].fragment | length) > 200
       else false end] | any')
     [[ "$truncated" == "true" ]] && echo "⚠ Lines truncated to 200 chars (use --full for complete fragments)" >&2
     echo "$response" | jq -r '
@@ -212,8 +212,18 @@ search)
       .path as $path |
       (.text_matches // []) as $tm |
       if ($tm | length) > 0 then
-        ($tm[0].fragment | split("\n") | map(select(length > 0)) | .[0] // "" |
-          gsub("^\\s+"; "") | gsub("\\s+$"; "") | .[:200]) as $line |
+        $tm[0] as $m |
+        ($m.fragment | gsub("\\n"; " ") | gsub("\\s+"; " ")) as $flat |
+        (if ($m.matches | length) > 0 then
+          $m.matches[0].indices[0] as $start |
+          ([$start - 80, 0] | max) as $from |
+          ($from + 200) as $to |
+          (if $from > 0 then "…" else "" end) as $prefix |
+          (if $to < ($flat | length) then "…" else "" end) as $suffix |
+          $prefix + ($flat[$from:$to] | gsub("^\\s+"; "") | gsub("\\s+$"; "")) + $suffix
+        else
+          $flat[:200]
+        end) as $line |
         "\($repo) \($path): \($line)"
       else
         "\($repo) \($path)"
