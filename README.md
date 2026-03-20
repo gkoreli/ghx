@@ -42,6 +42,7 @@ If you have `gh` CLI working, ghx works too — same prerequisites.
 ```bash
 # Search repos — name, stars, language, README preview in 1 call
 ghx repos "react state management"
+ghx repos "playwright mcp" --limit 5
 
 # Explore a repo — branch, file tree, and README in 1 API call
 ghx explore plausible/analytics
@@ -60,7 +61,7 @@ ghx read plausible/analytics --lines 42-80 lib/plausible/stats/query.ex
 
 # Search code (AND matching, shows matching lines, token-protected)
 ghx search "useState repo:facebook/react"
-ghx search "path:llms.txt extension:txt"
+ghx search "path:llms.txt extension:txt" --limit 10
 
 # Full recursive tree
 ghx tree plausible/analytics assets/js
@@ -68,7 +69,7 @@ ghx tree plausible/analytics assets/js
 
 ## Why
 
-AI agents exploring GitHub face a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* ghx eliminates this with smart defaults — AND matching instead of exact phrase, README previews instead of bare names, matching context instead of bare paths. The right behavior is the default behavior.
+AI agents exploring GitHub face a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* ghx eliminates this with smart defaults — AND matching instead of exact phrase, README previews instead of bare names, matching context instead of bare paths. Unknown flags are rejected loudly (not silently absorbed into queries). The right behavior is the default behavior, and the wrong behavior is impossible.
 
 | Tool | Files per call | Matching context | Smart defaults | Dependencies |
 |------|---------------|-----------------|---------------|-------------|

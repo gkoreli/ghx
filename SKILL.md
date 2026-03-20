@@ -22,11 +22,16 @@ ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (Grap
 ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
-ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
-ghx search "<query>"                        # Code search (REST API, AND matching, shows matching lines)
+ghx repos "<query>"                         # Search repos with README preview (default: 10 results)
+ghx repos "<query>" --limit 5               # Limit repo results (max: 20)
+ghx search "<query>"                        # Code search (AND matching, default: 30 results)
+ghx search "<query>" --limit 10             # Limit code search results (max: 100)
 ghx search --full "<query>"                 # Code search without line truncation (for minified files)
 ghx tree <owner/repo> [path]                # Full recursive tree listing
 ```
+
+**Exit codes:** 0 = results returned, 1 = no results (query valid), 2 = usage error (bad flags/args).
+**Flag safety:** Unknown flags always error (exit 2). Never silently absorbed into queries.
 
 ## Chain of Thought: Progressive Disclosure
 
@@ -157,6 +162,8 @@ AND matching is almost always what agents want. `gh search code "useState fetchD
 
 10. **`gh search repos` and `gh search code` use different rate limit pools.** Repo search: 30/min (generous). Code search: 10/min (restrictive). Don't assume one rate limit applies to both.
 
+11. **Unknown flags are rejected, not silently absorbed.** `ghx search "query" --json` exits 2 with a clear error. This is intentional — silent flag absorption was the #1 cause of agent failures (flags like `--limit` would get concatenated into the query string, corrupting it). If you get exit 2, check your flags.
+
 ## Anti-Patterns
 
 - ❌ `web_fetch`/`web_search` on github.com — returns HTML noise, wastes thousands of tokens for zero useful information
@@ -176,6 +183,8 @@ AND matching is almost always what agents want. `gh search code "useState fetchD
 - **Batch file reads.** `ghx read owner/repo f1 f2 f3` = 1 API call. Three separate reads = 3 calls.
 - **Map before reading.** `ghx read --map` first to understand structure, then `--grep` or `--lines` for specifics.
 - **Refine search, don't paginate.** If `ghx search` shows "201472 results (showing 30)", add qualifiers (`repo:`, `language:`, `path:`) — don't try to page through. 9 req/min rate limit makes pagination expensive.
+- **Use `--limit` to control token budget.** `ghx repos "query" --limit 5` for quick checks, `--limit 15` for thorough discovery. `ghx search "query" --limit 10` when you only need top results.
+- **Check exit codes.** 0 = got results, 1 = no results (query was valid, broaden it), 2 = usage error (fix your command).
 - **Use `gh api --cache 1h`** for repeated lookups when using raw `gh` commands.
 - **Use `--json fields --jq 'expr'`** on `gh` commands to get structured output and reduce noise.
 - **Piped output is machine-formatted.** Tab-delimited, no truncation, no color codes — agents always get clean output.

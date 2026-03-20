@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+VERSION="0.2.1"
+
 cmd="${1:-help}"
 shift || true
 
@@ -73,13 +75,14 @@ read)
       --grep) grep_pattern="$2"; shift 2 ;;
       --lines) line_range="$2"; shift 2 ;;
       --map) map_mode=1; shift ;;
+      --*) echo "ghx read: unknown flag '$1'" >&2; exit 2 ;;
       *) files+=("$1"); shift ;;
     esac
   done
 
   if [[ ${#files[@]} -eq 0 ]]; then
     echo "Usage: ghx read <owner/repo> <path1> [path2] [--grep pattern] [--lines N-M]" >&2
-    exit 1
+    exit 2
   fi
 
   # Get default branch
@@ -136,28 +139,37 @@ read)
 search)
   # Parse flags
   full_mode=""
+  limit=""
   args=()
-  for arg in "$@"; do
-    case "$arg" in
-      --full) full_mode=1 ;;
-      *) args+=("$arg") ;;
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --full) full_mode=1; shift ;;
+      --limit) [[ $# -lt 2 ]] && { echo "ghx search: --limit requires a value" >&2; exit 2; }
+        limit="$2"; shift 2 ;;
+      --*) echo "ghx search: unknown flag '$1'" >&2; exit 2 ;;
+      *) args+=("$1"); shift ;;
     esac
   done
   query="${args[*]}"
   if [[ -z "$query" ]]; then
-    echo "Usage: ghx search <query> [--full]" >&2
+    echo "Usage: ghx search <query> [--full] [--limit N]" >&2
     echo "Examples: 'useState repo:owner/repo' | 'path:src/ extension:tsx language:typescript'" >&2
-    exit 1
+    exit 2
+  fi
+  # Validate and clamp limit (API max: 100)
+  if [[ -n "$limit" ]]; then
+    [[ "$limit" =~ ^[0-9]+$ ]] || { echo "ghx search: --limit must be a number, got '$limit'" >&2; exit 2; }
+    (( limit > 100 )) && { echo "⚠ --limit clamped to 100 (API max)" >&2; limit=100; }
   fi
 
   # Prerequisite checks
   if ! command -v gh &>/dev/null; then
     echo "ghx requires the GitHub CLI (gh). Install: https://cli.github.com" >&2
-    exit 1
+    exit 2
   fi
   if ! gh auth status &>/dev/null; then
     echo "GitHub code search requires authentication. Run: gh auth login" >&2
-    exit 1
+    exit 2
   fi
 
   # Warn on web-only qualifiers (they silently become literal text in REST API)
@@ -168,9 +180,10 @@ search)
   done
 
   # Search with text_matches for matching context
+  per_page="${limit:-30}"
   response=$(gh api /search/code --method GET \
     -H "Accept: application/vnd.github.text-match+json" \
-    -f q="$query" 2>&1) || {
+    -f q="$query" -f per_page="$per_page" 2>&1) || {
     echo "$response" >&2
     exit 1
   }
@@ -182,6 +195,7 @@ search)
   echo "$total results (showing $count)" >&2
   [[ "$incomplete" == "true" ]] && echo "⚠ Results may be incomplete (query timed out)" >&2
   [[ "$total" -gt 1000 ]] 2>/dev/null && echo "⚠ Query too broad — add repo:, language:, or path: to narrow" >&2
+  [[ "$count" -eq 0 ]] && exit 1
 
   # Output: repo path: matching context from fragment
   # Default: 200 char window centered on the match (prevents minified JS token explosion)
@@ -233,15 +247,29 @@ search)
 
 # ─── repos: search repos with README preview in 1 GraphQL call ───
 repos)
-  query="$*"
+  limit=""
+  args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --limit) [[ $# -lt 2 ]] && { echo "ghx repos: --limit requires a value" >&2; exit 2; }
+        limit="$2"; shift 2 ;;
+      --*) echo "ghx repos: unknown flag '$1'" >&2; exit 2 ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  query="${args[*]}"
   if [[ -z "$query" ]]; then
-    echo "Usage: ghx repos <query>" >&2
-    exit 1
+    echo "Usage: ghx repos <query> [--limit N]" >&2
+    exit 2
   fi
+  # Validate and clamp limit (GraphQL max: 100, but README fetching makes >20 expensive)
+  first="${limit:-10}"
+  [[ "$first" =~ ^[0-9]+$ ]] || { echo "ghx repos: --limit must be a number, got '$first'" >&2; exit 2; }
+  (( first > 20 )) && { echo "⚠ --limit clamped to 20 (README fetching makes larger values slow)" >&2; first=20; }
 
   response=$(gh api graphql -f query='
   {
-    search(query: "'"$query"'", type: REPOSITORY, first: 5) {
+    search(query: "'"$query"'", type: REPOSITORY, first: '"$first"') {
       repositoryCount
       nodes {
         ... on Repository {
@@ -258,6 +286,8 @@ repos)
   }')
 
   echo "$response" | jq -r '.data.search.repositoryCount | "\(.) repos found"' >&2
+  count=$(echo "$response" | jq '.data.search.nodes | length')
+  [[ "$count" -eq 0 ]] && exit 1
   echo "$response" | jq -r '
     .data.search.nodes[] |
     .nameWithOwner as $name |
@@ -313,6 +343,10 @@ tree)
   ;;
 
 # ─── help ───
+version|-v|--version)
+  echo "ghx $VERSION"
+  ;;
+
 help|*)
   cat <<'EOF'
 ghx — GitHub code exploration for agents and humans
@@ -320,8 +354,8 @@ ghx — GitHub code exploration for agents and humans
 Commands:
   ghx explore <owner/repo> [path]     Branch + tree + README in 1 API call
   ghx read <owner/repo> <f1> [f2..]   Read 1-10 files in 1 API call
-  ghx repos <query>                    Search repos with README preview in 1 GraphQL call
-  ghx search "<query>"                 Code search (AND matching, qualifiers: repo: path: language: extension: filename:)
+  ghx repos <query> [--limit N]        Search repos with README preview (default: 10)
+  ghx search "<query>" [--limit N]     Code search (AND matching, default: 30)
   ghx search --full "<query>"          Code search without line truncation
   ghx skill                            Output SKILL.md (for agent context injection)
   ghx tree <owner/repo> [path]         Full recursive tree listing
@@ -329,6 +363,12 @@ Commands:
 Read flags:
   --grep <pattern>    Filter output to matching lines (case-insensitive, 2 lines context)
   --lines <N-M>       Extract specific line range
+  --map               Structural signatures only (~92% token reduction)
+
+Exit codes:
+  0  Success with results
+  1  No results (query valid, nothing matched)
+  2  Usage error (bad flags, missing args)
 
 Examples:
   ghx explore plausible/analytics
