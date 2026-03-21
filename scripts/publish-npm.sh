@@ -42,7 +42,7 @@ for archive in "${!PLATFORMS[@]}"; do
   node -e "const p=require('./npm/$pkg/package.json'); p.version='$VERSION'; require('fs').writeFileSync('./npm/$pkg/package.json', JSON.stringify(p,null,2)+'\n')"
 
   # Publish from repo root so .npmrc auth is found
-  npm publish "npm/$pkg" --access public --provenance
+  npm publish "./npm/$pkg" --access public --provenance
 
   rm -f "$TMPDIR/archive" "$TMPDIR/$bin"
 done
