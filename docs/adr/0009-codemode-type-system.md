@@ -233,8 +233,215 @@ async () => {
 | esbuild loader | `LoaderTS` | Accepts both TS and JS, strips annotations, no failure mode |
 | Token budget | 6,000 token cap (Cloudflare's number) | ghx uses ~240 tokens (4% of budget), scales to 50+ tools |
 | Generation source | Go types → JSON Schema → TS declarations | Standard MCP pipeline, no custom schema format |
+| Return types | `Returns string` on Tool struct (manual TS) | Working tech debt — shipped 40%→0% accuracy fix. See known gap below. |
 | Generation timing | Server startup, cached | Fast (~1ms for 5 tools), always in sync |
 | Truncation strategy | Descriptions first, then nested types → `Record<string, unknown>` | Preserves tool signatures (minimum LLM needs) |
+
+## Known Gap: Return Type Generation
+
+### Current state
+
+Return types are hand-written TS strings in `register.go`:
+
+```go
+Returns: "{ description: string; branch: string; files: { name: string; type: string }[]; readme: string }"
+```
+
+Input schemas are hand-written JSON Schema maps in the same file:
+
+```go
+Schema: map[string]any{
+    "type": "object",
+    "properties": map[string]any{
+        "repo": map[string]any{"type": "string", "description": "owner/repo"},
+        "path": map[string]any{"type": "string", "description": "subdirectory path"},
+    },
+    "required": []string{"repo"},
+}
+```
+
+Both duplicate information already in Go structs with json tags:
+
+```go
+type ExploreResult struct {
+    Description string      `json:"description"`
+    Branch      string      `json:"branch"`
+    Files       []FileEntry `json:"files"`
+    Readme      string      `json:"readme"`
+}
+
+type FileEntry struct {
+    Name string `json:"name"`
+    Type string `json:"type"`
+}
+```
+
+Three places to update for every field change. They will drift.
+
+### The problem in typegen.go
+
+`typegen.go` has two code paths:
+
+1. **Input types** — generated from JSON Schema via `buildArgsType()` and `schemaTypeToTS()`. These handle `string`, `number`, `boolean`, `array` but NOT nested objects, `$ref`, `anyOf`, `enum`, or `additionalProperties`. Arrays always become `any[]` regardless of item type.
+
+2. **Return types** — raw string passthrough. `tool.Returns` is injected verbatim:
+```go
+retType := "any"
+if tool.Returns != "" {
+    retType = tool.Returns
+}
+```
+
+Neither path generates types from Go structs. Both require manual authoring.
+
+### How Cloudflare solved this
+
+`packages/codemode/src/json-schema-types.ts` (300 lines) is a complete JSON Schema → TS converter:
+
+- Handles: `$ref`, `anyOf`/`oneOf`/`allOf`, `enum`, `const`, nested objects, typed arrays, tuples, `additionalProperties`, `nullable`, circular references (depth guard + seen set)
+- Both `inputSchema` and `outputSchema` on each tool descriptor
+- `generateTypesFromJsonSchema()` produces both input and output type declarations
+- JSDoc comments from schema `description` fields
+
+Their tool descriptor interface:
+```typescript
+interface JsonSchemaToolDescriptor {
+  description?: string;
+  inputSchema: JSONSchema7;
+  outputSchema?: JSONSchema7;  // ← this is what ghx is missing
+}
+```
+
+### Decided direction: Go reflection (Option B)
+
+**Single source of truth**: Go structs with json tags → JSON Schema → TS types. Zero manual strings.
+
+**How it works**:
+
+1. At registration time, reflect the return type of each tool function:
+```go
+// Instead of:
+Returns: "{ description: string; branch: string; ... }"
+
+// Reflect from the Go type:
+OutputType: reflect.TypeOf(ExploreResult{})
+```
+
+2. Use `invopop/jsonschema` (or similar) to generate JSON Schema from the Go type at startup:
+```go
+schema := jsonschema.Reflect(&ExploreResult{})
+// Produces: { "type": "object", "properties": { "description": { "type": "string" }, "branch": { "type": "string" }, "files": { "type": "array", "items": { "$ref": "#/$defs/FileEntry" } } ... } }
+```
+
+3. Upgrade `typegen.go` to convert JSON Schema → TS for both inputs and outputs (port Cloudflare's logic — handles `$ref`, nested objects, typed arrays, etc.)
+
+4. `register.go` becomes:
+```go
+r.Register(codemode.Tool{
+    Name:        "explore",
+    Description: "Explore a GitHub repo — returns branch, file tree, and README",
+    Func:        wrapExplore,
+    InputType:   reflect.TypeOf(ExploreInput{}),
+    OutputType:  reflect.TypeOf(ExploreResult{}),
+})
+```
+
+No hand-written schemas. No hand-written TS strings. Adding a field to `ExploreResult` automatically updates the type stubs.
+
+**Same approach for input types**: Currently hand-written `map[string]any` JSON schemas. With reflection, `InputType: reflect.TypeOf(ExploreInput{})` generates the input schema too.
+
+### What changes
+
+| Component | Current | After reflection |
+|-----------|---------|-----------------|
+| `register.go` | Hand-written `Schema` maps + `Returns` strings (135 lines) | `InputType` + `OutputType` reflect.Type fields (~50 lines) |
+| `typegen.go` | `buildArgsType()` (basic) + raw string passthrough (128 lines) | Full JSON Schema → TS converter (~200 lines, port from Cloudflare) |
+| `registry.go` | `Schema map[string]any` + `Returns string` | `InputType reflect.Type` + `OutputType reflect.Type` + generated schemas |
+| Go structs | Source of truth (already) | Source of truth (unchanged) |
+| Drift risk | High (3 places to update) | Zero (one source of truth) |
+
+### Why not urgent
+
+The manual `Returns` strings shipped a real accuracy fix — field name guessing dropped from 40% to 0% (commit `6901971`). The stubs are correct today. The risk is future drift when someone adds a field to a Go struct and forgets to update the string. For 5 tools, that's manageable. For 50 tools, it's not.
+
+### Dependencies
+
+- `invopop/jsonschema` (746★, maintained, formerly `alecthomas/jsonschema`) for Go struct → JSON Schema reflection. Handles: json tags → property names, nested structs → `$ref`/`$defs`, `omitempty` → optional, typed arrays with item schemas, maps, enums via `jsonschema:"enum=a,enum=b"` tags, descriptions via `jsonschema_description` tags.
+
+- Upgrade `typegen.go` to handle `$ref` resolution. Current `schemaTypeToTS()` only handles primitives and `any[]`. Needs:
+  - `$ref` → resolve against `$defs` in root schema (Cloudflare's `resolveRef()` — 10 lines)
+  - Nested objects → recursive `{ field: type; ... }` generation
+  - Typed arrays → `ItemType[]` instead of `any[]`
+  - Circular reference guard (depth limit + seen set)
+
+The full Cloudflare converter is 300 lines handling `anyOf`/`oneOf`/`allOf`, tuples, `additionalProperties`, `nullable`, `enum`, `const`. ghx needs ~100 lines — just `$ref`, objects, typed arrays, and primitives. The rest is edge cases ghx structs don't use.
+
+### Concrete example: what the engineer builds
+
+```go
+// register.go — BEFORE (manual, 3 sources of truth)
+r.Register(codemode.Tool{
+    Name:    "explore",
+    Func:    wrapExplore,
+    Returns: "{ description: string; branch: string; files: { name: string; type: string }[]; readme: string }",
+    Schema:  map[string]any{"type": "object", "properties": map[string]any{...}},
+})
+
+// register.go — AFTER (reflected, 1 source of truth)
+r.Register(codemode.Tool{
+    Name:       "explore",
+    Func:       wrapExplore,
+    InputType:  reflect.TypeOf(ExploreInput{}),
+    OutputType: reflect.TypeOf(ExploreResult{}),
+})
+```
+
+```go
+// typegen.go — new function needed
+func schemaToTS(schema *jsonschema.Schema, defs map[string]*jsonschema.Schema, depth int) string {
+    if schema.Ref != "" {
+        // Resolve $ref against $defs
+        refName := strings.TrimPrefix(schema.Ref, "#/$defs/")
+        if resolved, ok := defs[refName]; ok {
+            return schemaToTS(resolved, defs, depth+1)
+        }
+        return "unknown"
+    }
+    if schema.Type == "object" && schema.Properties != nil {
+        // Recurse into properties
+        ...
+    }
+    if schema.Type == "array" && schema.Items != nil {
+        return schemaToTS(schema.Items, defs, depth+1) + "[]"
+    }
+    // primitives
+    ...
+}
+```
+
+`invopop/jsonschema.Reflect(&ExploreResult{})` produces:
+```json
+{
+  "properties": {
+    "description": { "type": "string" },
+    "branch": { "type": "string" },
+    "files": { "type": "array", "items": { "$ref": "#/$defs/FileEntry" } },
+    "readme": { "type": "string" }
+  },
+  "$defs": {
+    "FileEntry": { "properties": { "name": { "type": "string" }, "type": { "type": "string" } } }
+  }
+}
+```
+
+`schemaToTS()` resolves `$ref`, recurses into `FileEntry`, produces:
+```typescript
+{ description: string; branch: string; files: { name: string; type: string }[]; readme: string }
+```
+
+Identical to the current hand-written string — but generated from Go structs.
+
+---
 
 ## Prior Art
 
