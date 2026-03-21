@@ -4,6 +4,10 @@ set -euo pipefail
 
 REPO="gkoreli/ghx"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+TMPDIR_CLEANUP=""
+
+cleanup() { [[ -n "$TMPDIR_CLEANUP" ]] && rm -rf "$TMPDIR_CLEANUP"; }
+trap cleanup EXIT
 
 mkdir -p "$INSTALL_DIR"
 
@@ -18,35 +22,27 @@ install_binary() {
   [[ "$os" == "windows" ]] && ext="zip"
 
   local url="https://github.com/$REPO/releases/latest/download/ghx_${os}_${arch}.${ext}"
-  if curl -sfL --head "$url" >/dev/null 2>&1; then
-    echo "Downloading ghx ($os/$arch)..."
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' EXIT
-    curl -sfL "$url" -o "$tmpdir/ghx.tar.gz"
-    tar xzf "$tmpdir/ghx.tar.gz" -C "$tmpdir"
-    cp "$tmpdir/ghx" "$INSTALL_DIR/ghx"
-    chmod +x "$INSTALL_DIR/ghx"
-    # Copy skill files if present in archive
-    for f in SKILL.md MCP-SKILL.md; do
-      [[ -f "$tmpdir/$f" ]] && cp "$tmpdir/$f" "$INSTALL_DIR/$f"
-    done
-    return 0
-  fi
-  return 1
+  curl -sfL --head "$url" >/dev/null 2>&1 || return 1
+
+  echo "Downloading ghx ($os/$arch)..."
+  TMPDIR_CLEANUP="$(mktemp -d)"
+  curl -sfL "$url" -o "$TMPDIR_CLEANUP/ghx.tar.gz"
+  tar xzf "$TMPDIR_CLEANUP/ghx.tar.gz" -C "$TMPDIR_CLEANUP"
+  cp "$TMPDIR_CLEANUP/ghx" "$INSTALL_DIR/ghx"
+  chmod +x "$INSTALL_DIR/ghx"
+  for f in SKILL.md MCP-SKILL.md; do
+    [[ -f "$TMPDIR_CLEANUP/$f" ]] && cp "$TMPDIR_CLEANUP/$f" "$INSTALL_DIR/$f"
+    [[ -f "$TMPDIR_CLEANUP/v2/$f" ]] && cp "$TMPDIR_CLEANUP/v2/$f" "$INSTALL_DIR/$f"
+  done
+  return 0
 }
 
 install_source() {
-  if ! command -v go &>/dev/null; then
-    echo "❌ No prebuilt binary and Go not found. Install Go: https://go.dev/dl/"
-    exit 1
-  fi
+  command -v go &>/dev/null || { echo "❌ No prebuilt binary and Go not found. Install Go: https://go.dev/dl/"; exit 1; }
   echo "Building ghx from source..."
-  local tmpdir
-  tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' EXIT
-  git clone --depth 1 "https://github.com/$REPO.git" "$tmpdir/ghx"
-  (cd "$tmpdir/ghx/v2" && go build -o "$INSTALL_DIR/ghx" .)
+  TMPDIR_CLEANUP="$(mktemp -d)"
+  git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR_CLEANUP/ghx"
+  (cd "$TMPDIR_CLEANUP/ghx/v2" && go build -o "$INSTALL_DIR/ghx" .)
 }
 
 echo "Installing ghx to $INSTALL_DIR..."
