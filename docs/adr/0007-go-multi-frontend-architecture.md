@@ -287,9 +287,42 @@ Rather than hardcoding codemode bindings into ghx, we build a thin, reusable Go 
 4. **Agents don't commit.** Must be done by the orchestrator between waves.
 5. **~200s per agent** for Go file creation tasks. Consistent across all 10.
 
-## Open Questions
+## Open Questions — Resolved
 
-- Should codemode be a separate binary (`ghx-codemode`) or a subcommand (`ghx codemode`)?
-- Should the MCP server support streamable HTTP transport or just stdio?
-- Should type stubs be generated at build time or runtime?
-- Is goja sufficient or will we need async/await (which would push toward embedding quickjs)?
+All resolved in ADR-0008:
+
+| Question | Answer | ADR-0008 section |
+|----------|--------|-----------------|
+| Separate binary or subcommand? | Subcommand: `ghx serve` | §5 Distribution |
+| Streamable HTTP or just stdio? | Both (stdio primary, HTTP secondary) | §7 MCP Transport |
+| Type stubs: build time or runtime? | Runtime (~1ms for 5 tools) | §6 Type Stubs |
+| goja sufficient or need async/await? | goja + esbuild transpilation (modern JS → ES2015) | §1 Script Runtime |
+
+### Wave 5 results (3 agents, 3/3 ✅)
+
+| Task | File | Before → After | Result |
+|------|------|----------------|--------|
+| TASK-0536 | `pkg/codemode/executor.go` | 4 → 92 lines | ✅ Full goja sandbox |
+| TASK-0537 | `pkg/codemode/registry.go` | 8 → 78 lines | ✅ Full tool registry |
+| TASK-0538 | `cmd/ghx.go` | ~500 → 245 lines | ✅ Thin wrapper over pkg/ghx/ |
+
+**Cumulative: 16 agents, 14 delivered first try (87.5%)**
+
+Net effect of wave 5: -231 lines. Codebase got smaller while gaining a core library + codemode SDK.
+
+### Build order progress
+
+1. ✅ **Extract core** (`pkg/ghx/`) — 5 files, 629 lines, all compile
+2. ✅ **Wire CLI** — cmd/ghx.go calls pkg/ghx/, 245 lines
+3. ✅ **Go codemode package** — executor (92), registry (78), normalize (26), typegen (107) = 303 lines
+4. 🔄 **MCP server** — `ghx serve` command, mark3labs/mcp-go (ADR-0008 §2)
+5. 🔄 **Wire codemode** — register ghx core functions, expose via MCP
+
+### Gap: executor.go needs upgrade to ADR-0008 contract
+
+Wave 5's executor.go is a working goja sandbox but doesn't match ADR-0008's interface contract (§11):
+- Missing: `context.Context` timeout, `ToolCallRecord` observability, code size limit, max tool call limit, IIFE wrapping
+- Missing: `transpile.go` (esbuild modern JS → ES2015)
+- Current: `NewExecutor(tools) + Exec(code)` → Target: `Execute(ctx, code, []Tool)`
+
+Wave 6 will upgrade executor + add transpiler + MCP server + wiring.
