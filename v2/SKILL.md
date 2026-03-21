@@ -68,18 +68,19 @@ ghx code --list   # See all available tools with type stubs
 
 ```typescript
 declare const codemode: {
-  explore: (input: { repo: string; path?: string }) => Promise<any>;
-  read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => Promise<any>;
-  repos: (input: { query: string; limit?: number }) => Promise<any>;
-  search: (input: { query: string; limit?: number; fullMode?: boolean }) => Promise<any>;
-  tree: (input: { repo: string; path?: string }) => Promise<any>;
+  explore: (input: { repo: string; path?: string }) => any;
+  read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => any;
+  repos: (input: { query: string; limit?: number }) => any;
+  search: (input: { query: string; limit?: number; fullMode?: boolean }) => any;
+  tree: (input: { repo: string; path?: string }) => any;
 }
 ```
 
 ### Codemode Rules
 
 - Write plain JavaScript, not TypeScript (no type annotations)
-- `codemode.*` calls are synchronous (no `await` needed, but harmless if included)
+- `codemode.*` calls are synchronous — no `await` needed
+- Must `return` a value — bare expressions don't auto-return (except simple identifiers)
 - Must `return` a value — bare expressions don't auto-return (except simple identifiers)
 - Console output goes to stderr, return value goes to stdout
 - Max 20 tool calls per execution, 64KB code size limit

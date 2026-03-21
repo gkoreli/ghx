@@ -110,10 +110,11 @@ Available:
 
 %s
 
-Write an async arrow function in JavaScript that returns the result.
+Write a plain JavaScript function body that returns the result.
+Do NOT use await — all codemode calls are synchronous.
 Do NOT use TypeScript syntax — no type annotations, interfaces, or generics.
 
-Example: async () => { const r = await codemode.explore({ repo: "vercel/next.js" }); return r.files; }`, stubs)
+Example: var r = codemode.explore({ repo: "vercel/next.js" }); return r.files;`, stubs)
 
 	codeTool := mcp.NewTool("code",
 		mcp.WithDescription(codeDescription),

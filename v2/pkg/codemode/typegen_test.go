@@ -43,7 +43,7 @@ func TestGenerateTypes(t *testing.T) {
 	if !strings.Contains(result, "type ReposInput") {
 		t.Error("Missing ReposInput type")
 	}
-	if !strings.Contains(result, "repos: (input: ReposInput) => Promise<any>;") {
+	if !strings.Contains(result, "repos: (input: ReposInput) => any;") {
 		t.Error("Missing repos tool entry")
 	}
 	if !strings.Contains(result, "query: string") {

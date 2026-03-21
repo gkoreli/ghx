@@ -57,11 +57,11 @@ type SearchInput = { query: string; limit?: number; fullMode?: boolean }
 type TreeInput = { repo: string; path?: string }
 
 declare const codemode: {
-  explore: (input: ExploreInput) => Promise<any>;
-  read: (input: ReadInput) => Promise<any>;
-  repos: (input: ReposInput) => Promise<any>;
-  search: (input: SearchInput) => Promise<any>;
-  tree: (input: TreeInput) => Promise<any>;
+  explore: (input: ExploreInput) => any;
+  read: (input: ReadInput) => any;
+  repos: (input: ReposInput) => any;
+  search: (input: SearchInput) => any;
+  tree: (input: TreeInput) => any;
 }
 ```
 
@@ -70,18 +70,15 @@ Use `search_tools` to get the latest type stubs at runtime.
 ### Writing Code
 
 ```javascript
-// ✅ Correct: plain JavaScript, return a value
+// ✅ Correct: plain JavaScript, synchronous calls, return a value
 var repo = codemode.explore({ repo: "dop251/goja" });
 return { branch: repo.branch, fileCount: repo.files.length };
 
-// ✅ Also correct: async arrow function (await is harmless but unnecessary)
-async () => {
-  const r = await codemode.explore({ repo: "dop251/goja" });
-  return r.files.filter(f => f.name.endsWith(".go"));
-}
+// ❌ Wrong: await (tools are synchronous, await causes transpile error)
+const r = await codemode.explore(...)  // top-level await not supported
 
 // ❌ Wrong: TypeScript syntax
-const r: ExploreResult = await codemode.explore(...)  // no type annotations
+const r: ExploreResult = codemode.explore(...)  // no type annotations
 
 // ❌ Wrong: no return value
 codemode.explore({ repo: "dop251/goja" });  // result is lost
@@ -90,7 +87,7 @@ codemode.explore({ repo: "dop251/goja" });  // result is lost
 ### Rules
 
 - Write plain JavaScript, not TypeScript (no type annotations, interfaces, generics)
-- `codemode.*` calls are synchronous — `await` is accepted but not required
+- `codemode.*` calls are synchronous — do NOT use `await`
 - Must `return` a value — the return value is what you see in the response
 - `console.log()` output appears in the response under "Console:" (useful for debugging)
 - Max 20 tool calls per execution
