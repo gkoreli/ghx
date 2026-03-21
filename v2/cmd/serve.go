@@ -95,14 +95,29 @@ func serveMCP(cmd *cobra.Command) error {
 		mcp.WithString("path", mcp.Description("subdirectory path")),
 	)
 
-	codemodeSearchTool := mcp.NewTool("codemode_search",
-		mcp.WithDescription("Search available tools and get TypeScript type stubs for writing codemode scripts"),
+	searchToolsMeta := mcp.NewTool("search_tools",
+		mcp.WithDescription("Search available tools and get TypeScript type stubs for writing code scripts"),
 		mcp.WithString("query", mcp.Description("search query (optional, returns all if empty)")),
 	)
 
-	codemodeExecuteTool := mcp.NewTool("codemode_execute",
-		mcp.WithDescription("Execute JavaScript code with access to all ghx tools via callTool(name, args)"),
-		mcp.WithString("code", mcp.Required(), mcp.Description("JavaScript code to execute")),
+	reg := buildRegistry()
+	tools := reg.List()
+	stubs := codemode.GenerateTypes(tools)
+
+	codeDescription := fmt.Sprintf(`Execute code to achieve a goal.
+
+Available:
+
+%s
+
+Write an async arrow function in JavaScript that returns the result.
+Do NOT use TypeScript syntax — no type annotations, interfaces, or generics.
+
+Example: async () => { const r = await codemode.explore({ repo: "vercel/next.js" }); return r.files; }`, stubs)
+
+	codeTool := mcp.NewTool("code",
+		mcp.WithDescription(codeDescription),
+		mcp.WithString("code", mcp.Required(), mcp.Description("JavaScript async arrow function to execute")),
 	)
 
 	// Register tools with handlers
@@ -111,8 +126,8 @@ func serveMCP(cmd *cobra.Command) error {
 	s.AddTool(searchTool, handleSearch)
 	s.AddTool(readTool, handleRead)
 	s.AddTool(treeTool, handleTree)
-	s.AddTool(codemodeSearchTool, handleCodemodeSearch)
-	s.AddTool(codemodeExecuteTool, handleCodemodeExecute)
+	s.AddTool(searchToolsMeta, handleSearchTools)
+	s.AddTool(codeTool, handleCode)
 
 	// Select and use transport
 	transport := selectTransport(cmd)
@@ -234,7 +249,7 @@ func buildRegistry() *codemode.Registry {
 	return reg
 }
 
-func handleCodemodeSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleSearchTools(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query := request.GetString("query", "")
 
 	reg := buildRegistry()
@@ -250,13 +265,13 @@ func handleCodemodeSearch(ctx context.Context, request mcp.CallToolRequest) (*mc
 	result := map[string]interface{}{
 		"tools":     tools,
 		"typeStubs": stubs,
-		"usage":     "Pass code to codemode_execute. Use callTool(name, args) to invoke tools.",
+		"usage":     "Pass code to code tool. Use callTool(name, args) to invoke tools.",
 	}
 	data, _ := json.Marshal(result)
 	return mcp.NewToolResultText(string(data)), nil
 }
 
-func handleCodemodeExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleCode(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	code, err := request.RequireString("code")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -267,6 +282,11 @@ func handleCodemodeExecute(ctx context.Context, request mcp.CallToolRequest) (*m
 	result, err := executor.Execute(ctx, code, reg.Tools())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	const maxChars = 24000
+	if len(result.Value) > maxChars {
+		result.Value = result.Value[:maxChars] + fmt.Sprintf("\n\n[truncated — result was %d chars, showing first %d]", len(result.Value), maxChars)
 	}
 
 	data, _ := json.Marshal(result)

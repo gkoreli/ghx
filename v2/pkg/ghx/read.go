@@ -2,7 +2,6 @@ package ghx
 
 import (
 	"fmt"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -54,7 +53,7 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 			break
 		}
 		alias := fmt.Sprintf("f%d", i)
-		escapedPath := url.QueryEscape(f)
+		escapedPath := f
 		aliases = append(aliases, fmt.Sprintf(`%s: object(expression: "HEAD:%s") { ... on Blob { text byteSize } }`, alias, escapedPath))
 	}
 
