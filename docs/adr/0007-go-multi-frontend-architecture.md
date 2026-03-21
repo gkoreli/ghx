@@ -355,8 +355,60 @@ After reading all wave 5-6 output, three integration issues were found and fixed
 
 ### Remaining work
 
-| Task | What | Why |
-|------|------|-----|
-| Codemode meta-tools | Add `codemode_search` + `codemode_execute` to serve.go | Core value prop — agent writes JS that composes operations |
-| Executor tests | Test all ADR-0008 §8 cases | Validate security posture + correctness |
-| Streamable HTTP | `--http :8080` flag on `ghx serve` | Remote/multi-agent scenarios (ADR-0008 §7) |
+All build order steps complete. Remaining work tracked in ADR-0010 (research directions) and ADR-0008 (implementation status).
+
+### Wave 7 results (3 agents, 3/3 ✅)
+
+| Task | File | What | Result |
+|------|------|------|--------|
+| TASK-0543 | `cmd/serve.go` | Codemode meta-tools (`code` + `search_tools`) in MCP server | ✅ |
+| TASK-0544 | `pkg/codemode/executor_test.go` | 12 executor tests (happy path, timeout, ACL, console, IIFE) | ✅ |
+| TASK-0545 | `cmd/serve.go` | `--http :8080` streamable HTTP transport flag | ✅ |
+
+Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `vm.Interrupt()`).
+
+### Wave 8 results (3 agents, 3/3 ✅)
+
+| Task | File | What | Result |
+|------|------|------|--------|
+| TASK-0546 | `pkg/codemode/typegen.go` | `declare const codemode: { ... }` output format (ADR-0009) | ✅ |
+| TASK-0547 | `pkg/codemode/executor.go` | `codemode` object injection (per-tool methods via closure) | ✅ |
+| TASK-0548 | `pkg/ghx/read.go` | Batch file reads — 1 GraphQL call with aliases instead of N | ✅ |
+
+### Wave 9 results (2 agents, 2/2 ✅)
+
+| Task | File | What | Result |
+|------|------|------|--------|
+| TASK-0549 | `cmd/serve.go` | Rename to `code`/`search_tools`, type stubs in description, 24K truncation | ✅ |
+| TASK-0550 | `pkg/codemode/normalize.go` | Handle named functions + bare expressions (not just fences) | ✅ |
+
+### Wave 10 results (1 agent, 1/1 ✅)
+
+| Task | File | What | Result |
+|------|------|------|--------|
+| TASK-0551 | `cmd/code.go` | `ghx code` CLI command — ADR-0010 CLI-first invariant | ✅ |
+
+### P0/P1 bugs found and fixed (between waves)
+
+| Bug | Severity | Fix | Commit |
+|-----|----------|-----|--------|
+| `url.QueryEscape` in read.go | P0 | Removed — GraphQL takes raw paths | `7680489` |
+| Capitalized Go fields in JS | P0 | JSON roundtrip via `normalizeForJS()` + json tags on all structs | `167c690` |
+| `LoaderJS` → `LoaderTS` | P1 | transpile.go fixed per ADR-0009 | `9bc5349` |
+| `callTool` → `codemode.explore()` | P1 | Executor injects `codemode` object with per-tool methods | `9bc5349` |
+| typegen output format | P1 | Now produces `declare const codemode: { ... }` | `9bc5349` |
+| Batch file reads | P1 | read.go uses 1 GraphQL call with aliases instead of N | `9bc5349` |
+
+### Cumulative swarm results
+
+| Wave | Agents | Success | Key deliverables |
+|------|--------|---------|-----------------|
+| 4a (core) | 6 | 6/6 | pkg/ghx/ — 5 core functions |
+| 4b (codemode) | 4 | 2/4 | normalize.go, typegen.go |
+| 5 (respawn) | 3 | 3/3 | executor.go, registry.go, cmd/ghx.go |
+| 6 (MCP+wiring) | 4 | 4/4 | serve.go, transpile.go, register.go |
+| 7 (meta-tools) | 3 | 3/3 | codemode meta-tools, executor tests, HTTP transport |
+| 8 (ADR-0009) | 3 | 3/3 | typegen, codemode object, batch reads |
+| 9 (ADR-0010) | 2 | 2/2 | code/search_tools rename, normalize upgrade |
+| 10 (CLI-first) | 1 | 1/1 | `ghx code` CLI command |
+| **Total** | **26** | **24 (92%)** | **2,351 lines, 14 files, 13 commits** |

@@ -238,6 +238,100 @@ For ghx: adopt the same cap. If the executor result exceeds 24K chars, truncate 
 | Response cap | 24K chars (6K tokens) | Prevent context window blowout on return path |
 | Namespacing | Single `codemode` namespace (extensible) | Sufficient for ghx, supports multi-provider later |
 
+## Implementation Status (Wave 10 complete)
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| CLI `ghx code "..."` | ✅ | `cmd/code.go` (65 lines), commit `678ff22` |
+| CLI `ghx code -` (stdin) | ✅ | Same file, tested: `echo 'return 1+1' \| ./ghx code -` → `2` |
+| CLI `ghx code --list` | ✅ | Prints `declare const codemode: { ... }` type stubs |
+| MCP `code` tool | ✅ | `cmd/serve.go`, commit `9bc5349` (wave 8-9) |
+| MCP `search_tools` tool | ✅ | Same file, returns type stubs + tool descriptions |
+| `codemode` object injection | ✅ | `executor.go` — `codemode.explore()` not `callTool()` |
+| Type stubs in description | ✅ | `typegen.go` → `declare const codemode: { ... }` injected into tool description |
+| 24K response truncation | ✅ | `serve.go` — MCP only (CLI outputs full result) |
+| Code normalization | ✅ Partial | `normalize.go` (63 lines) — fences, named functions, bare expressions. Not full AST (acorn). |
+| CLI-first invariant | ✅ | Every MCP capability has a CLI equivalent |
+
+### Verified smoke tests
+
+```bash
+# CLI inline
+./ghx code "return 1 + 1"                                    # → 2
+# CLI stdin
+echo 'return 1 + 1' | ./ghx code -                           # → 2
+# CLI list
+./ghx code --list                                             # → declare const codemode: { ... }
+# CLI real API
+./ghx code "var r = codemode.explore({repo: 'dop251/goja'}); return {branch: r.branch, fileCount: r.files.length};"
+                                                              # → {"branch":"master","fileCount":107}
+# MCP code tool
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code","arguments":{"code":"..."}}}' | ghx serve
+                                                              # → {"branch":"master","fileCount":107}
+```
+
+### Codebase (2,351 lines total)
+
+```
+cmd/code.go          65   ← NEW (wave 10) — CLI frontend for codemode
+cmd/serve.go        302   ← MCP server (code + search_tools + 5 direct tools)
+cmd/ghx.go          245   ← CLI frontend (repos, explore, read, search, tree)
+pkg/codemode/       955   ← executor (296), registry (78), normalize (63), transpile (21), typegen (128), tests (369)
+pkg/ghx/            784   ← core library: explore, read, search, repos, tree, register
+```
+
+### Remaining gaps
+
+| Gap | Severity | Notes |
+|-----|----------|-------|
+| Normalization depth | Low | Current: regex (fences, named funcs, bare expressions). Cloudflare uses acorn AST. Regex covers top 3 LLM output patterns — sufficient for now. |
+| `export default` handling | Low | normalize.go doesn't unwrap `export default function`. Rare in LLM output for tool orchestration. |
+| CLI `--timeout` flag | Low | MCP has context timeout. CLI uses `context.Background()` — no user-configurable timeout. |
+
+---
+
+## What's Next — Research Directions
+
+### 1. Real-world agent accuracy testing
+
+The entire premise of ADR-0010 is that LLMs write better code than tool calls. This is claimed by Cloudflare and measured by Ben Gurion (~98% token reduction). But we haven't tested it with ghx's specific tools.
+
+**Research question**: Given ghx's 5 tools and type stubs, does an LLM (Claude, GPT-4) actually produce correct `codemode.explore()` / `codemode.read()` calls on first try? What's the error rate? What patterns fail?
+
+**Method**: Feed the `code` tool description (with type stubs) to an LLM. Give it 10 tasks of increasing complexity. Measure: correct on first try, needed retry, failed entirely.
+
+### 2. Normalization: regex vs AST
+
+Current `normalize.go` is 63 lines of regex. Cloudflare's `normalizeCode` uses acorn (full JS parser). The question is whether the regex approach breaks on real LLM output.
+
+**Research question**: Collect 50+ real LLM code outputs from agent sessions. How many does regex normalize correctly vs incorrectly? Is the failure rate high enough to justify an AST parser?
+
+### 3. Distribution pipeline (ADR-0007)
+
+GoReleaser + npm wrapper + Homebrew tap. The architecture is defined in ADR-0007 but none of it is implemented. This is the path from "works on my machine" to "anyone can install it."
+
+### 4. Phase 2 executor: parallel tool calls (ADR-0008 §13)
+
+`Promise.all([codemode.explore(...), codemode.search(...)])` — fan-out patterns. Requires goja event loop integration. gridctl doesn't do this yet. Would be novel for a Go codemode SDK.
+
+**Research question**: How does goja's event loop work? Can we wire goroutine-backed promises? What's the concurrency model?
+
+### 5. Streaming results mid-execution (ADR-0008 §13 Phase 3)
+
+`stream(partialResult)` binding that emits results while the script is still running. Requires streamable HTTP transport (already supported by mcp-go). Enables progressive disclosure for large reads.
+
+### 6. Persistent sessions (ADR-0008 §13 Phase 4)
+
+VM persists across multiple `Execute` calls. State carries over. Enables conversational codemode: "now filter those results by stars > 1000." Requires session management, memory limits, GC strategy.
+
+### 7. Multi-provider namespacing
+
+ADR-0010 mentions `codemode.*` as the single namespace. But the executor supports `vm.Set("namespace", obj)` for any number of providers. If ghx integrates filesystem tools, database tools, or other MCP servers, they'd get their own namespace.
+
+**Research question**: What's the right abstraction for multi-provider registration? How do type stubs compose across namespaces?
+
+---
+
 ## Prior Art
 
 | Source | Key pattern adopted |
