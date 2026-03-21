@@ -412,3 +412,54 @@ Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `v
 | 9 (ADR-0010) | 2 | 2/2 | code/search_tools rename, normalize upgrade |
 | 10 (CLI-first) | 1 | 1/1 | `ghx code` CLI command |
 | **Total** | **26** | **24 (92%)** | **2,351 lines, 14 files, 13 commits** |
+
+---
+
+## Distribution (v2.0)
+
+### Shipped channels
+
+| Channel | Command | Mechanism |
+|---------|---------|-----------|
+| npm | `npm install -g @gkoreli/ghx` | `postinstall.js` downloads Go binary from GitHub release |
+| Homebrew | `brew install gkoreli/tap/ghx` | goreleaser pushes formula to `gkoreli/homebrew-tap` |
+| Go | `go install github.com/gkoreli/ghx/v2@latest` | Standard Go toolchain |
+| Direct | `curl -fsSL .../install.sh \| bash` | Shell script downloads from GitHub release |
+
+### npm: Pattern 2 (postinstall download) — shipped
+
+`postinstall.js` (59 lines) downloads the platform binary from GitHub releases at `npm install` time. Simple, works today.
+
+**Known limitations**: Fails behind corporate proxies, fails offline, npm audit flags postinstall scripts, some CI blocks network during install.
+
+### npm: Pattern 1 (platform optionalDependencies) — future upgrade
+
+The industry standard for native binaries via npm. Used by esbuild, turbo, biome, lefthook.
+
+```
+@gkoreli/ghx                        ← main package (no binary)
+├── optionalDependencies:
+│   ├── @gkoreli/ghx-darwin-arm64    ← just the binary + package.json
+│   ├── @gkoreli/ghx-darwin-x64
+│   ├── @gkoreli/ghx-linux-arm64
+│   ├── @gkoreli/ghx-linux-x64
+│   └── @gkoreli/ghx-win32-x64
+├── bin/index.js                     ← require.resolve(`@gkoreli/ghx-${os}-${arch}`)
+└── postinstall.js                   ← fallback download if platform pkg missing
+```
+
+npm only downloads the binary for your platform. No network call at install time. Works offline, behind proxies, in locked-down CI.
+
+**What's needed**: 6 platform `package.json` files (trivial — `os` + `cpu` fields only), CI step to extract goreleaser binaries into platform packages, atomic publish of all 7 packages. Lefthook's implementation is the simplest reference (12-line `get-exe.js`).
+
+**When to upgrade**: When someone complains about npm install failing behind a proxy. Primary install paths (brew, curl) don't have this problem.
+
+### Prior art
+
+| Project | Language | npm pattern | Platform packages |
+|---------|----------|-------------|-------------------|
+| esbuild | Go | Pattern 1 | 26 (`@esbuild/darwin-arm64`, etc.) |
+| turbo | Go | Pattern 1 | 10 (`@turbo/darwin-arm64`, etc.) |
+| biome | Rust | Pattern 1 | 10 (`@biomejs/cli-darwin-arm64`, etc.) |
+| lefthook | Go | Pattern 1 | 10 (`lefthook-darwin-arm64`, etc.) |
+| ghx | Go | Pattern 2 (now) | 0 (postinstall download) |
