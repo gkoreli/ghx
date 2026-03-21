@@ -12,7 +12,7 @@ func Transpile(code string) (string, error) {
 	result := api.Transform(code, api.TransformOptions{
 		Target: api.ES2015,
 		Format: api.FormatDefault,
-		Loader: api.LoaderJS,
+		Loader: api.LoaderTS, // Accepts both TS and JS input (ADR-0009)
 	})
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("transpile: %s", result.Errors[0].Text)

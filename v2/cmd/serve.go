@@ -3,23 +3,59 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
+	"github.com/gkoreli/ghx/v2/pkg/codemode"
 	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
 )
+
+// Transport defines the interface for MCP server transports
+type Transport interface {
+	Serve(s *server.MCPServer) error
+}
+
+// StdioTransport implements Transport for stdio communication
+type StdioTransport struct{}
+
+func (t *StdioTransport) Serve(s *server.MCPServer) error {
+	return server.ServeStdio(s)
+}
+
+// HTTPTransport implements Transport for streamable HTTP communication
+type HTTPTransport struct {
+	Address string
+}
+
+func (t *HTTPTransport) Serve(s *server.MCPServer) error {
+	httpServer := server.NewStreamableHTTPServer(s)
+	fmt.Fprintf(os.Stderr, "ghx MCP server listening on %s\n", t.Address)
+	return http.ListenAndServe(t.Address, httpServer)
+}
+
+// selectTransport returns the appropriate transport based on CLI flags
+func selectTransport(cmd *cobra.Command) Transport {
+	httpAddr, _ := cmd.Flags().GetString("http")
+	if httpAddr != "" {
+		return &HTTPTransport{Address: httpAddr}
+	}
+	return &StdioTransport{}
+}
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server (stdio)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return serveMCP()
+		return serveMCP(cmd)
 	},
 }
 
-func serveMCP() error {
+func serveMCP(cmd *cobra.Command) error {
 	s := server.NewMCPServer("ghx", VERSION,
 		server.WithToolCapabilities(true),
 	)
@@ -59,14 +95,28 @@ func serveMCP() error {
 		mcp.WithString("path", mcp.Description("subdirectory path")),
 	)
 
+	codemodeSearchTool := mcp.NewTool("codemode_search",
+		mcp.WithDescription("Search available tools and get TypeScript type stubs for writing codemode scripts"),
+		mcp.WithString("query", mcp.Description("search query (optional, returns all if empty)")),
+	)
+
+	codemodeExecuteTool := mcp.NewTool("codemode_execute",
+		mcp.WithDescription("Execute JavaScript code with access to all ghx tools via callTool(name, args)"),
+		mcp.WithString("code", mcp.Required(), mcp.Description("JavaScript code to execute")),
+	)
+
 	// Register tools with handlers
 	s.AddTool(exploreTool, handleExplore)
 	s.AddTool(reposTool, handleRepos)
 	s.AddTool(searchTool, handleSearch)
 	s.AddTool(readTool, handleRead)
 	s.AddTool(treeTool, handleTree)
+	s.AddTool(codemodeSearchTool, handleCodemodeSearch)
+	s.AddTool(codemodeExecuteTool, handleCodemodeExecute)
 
-	return server.ServeStdio(s)
+	// Select and use transport
+	transport := selectTransport(cmd)
+	return transport.Serve(s)
 }
 
 func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -178,6 +228,52 @@ func handleTree(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	return mcp.NewToolResultText(string(data)), nil
 }
 
+func buildRegistry() *codemode.Registry {
+	reg := codemode.NewRegistry()
+	ghxlib.RegisterTools(reg)
+	return reg
+}
+
+func handleCodemodeSearch(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query := request.GetString("query", "")
+
+	reg := buildRegistry()
+	var tools []codemode.Tool
+	if query == "" {
+		tools = reg.List()
+	} else {
+		tools = reg.Search(query)
+	}
+
+	stubs := codemode.GenerateTypes(tools)
+
+	result := map[string]interface{}{
+		"tools":     tools,
+		"typeStubs": stubs,
+		"usage":     "Pass code to codemode_execute. Use callTool(name, args) to invoke tools.",
+	}
+	data, _ := json.Marshal(result)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func handleCodemodeExecute(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	code, err := request.RequireString("code")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	reg := buildRegistry()
+	executor := codemode.NewExecutor()
+	result, err := executor.Execute(ctx, code, reg.Tools())
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	data, _ := json.Marshal(result)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
 func init() {
+	serveCmd.Flags().String("http", "", "Start streamable HTTP server on address (e.g., :8080)")
 	RootCmd.AddCommand(serveCmd)
 }

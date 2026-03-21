@@ -89,6 +89,13 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 	wrappedCode := fmt.Sprintf("(function(){%s})()", code)
 
 	vm := goja.New()
+
+	// Watch context for cancellation/timeout — interrupt VM if triggered
+	go func() {
+		<-ctx.Done()
+		vm.Interrupt(ctx.Err())
+	}()
+
 	var logs []string
 	var calls []ToolCallRecord
 	callCount := 0
