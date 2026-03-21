@@ -41,8 +41,8 @@ for archive in "${!PLATFORMS[@]}"; do
   chmod +x "npm/$pkg/$bin"
   node -e "const p=require('./npm/$pkg/package.json'); p.version='$VERSION'; require('fs').writeFileSync('./npm/$pkg/package.json', JSON.stringify(p,null,2)+'\n')"
 
-  # Publish from repo root so .npmrc auth is found
-  npm publish "./npm/$pkg" --access public --provenance
+  # Publish — use userconfig to find auth from setup-node
+  npm publish "./npm/$pkg" --access public
 
   rm -f "$TMPDIR/archive" "$TMPDIR/$bin"
 done
@@ -55,6 +55,6 @@ p.version='$VERSION';
 for (const [k] of Object.entries(p.optionalDependencies||{})) p.optionalDependencies[k]='$VERSION';
 require('fs').writeFileSync('./package.json', JSON.stringify(p,null,2)+'\n');
 "
-npm publish --access public --provenance
+npm publish --access public
 
 echo "Done — @gkoreli/ghx@${VERSION} published with all platform packages"
