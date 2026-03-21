@@ -232,3 +232,80 @@ func TestExecute_ToolCallRecords(t *testing.T) {
 		t.Errorf("expected tool name 'slow', got %s", result.Calls[0].Tool)
 	}
 }
+
+// TestExecute_CodemodeObject tests the new codemode object with per-tool methods.
+func TestExecute_CodemodeObject(t *testing.T) {
+	tools := []Tool{{
+		Name: "multiply",
+		Func: func(args map[string]any) (any, error) {
+			toFloat := func(v any) float64 {
+				switch x := v.(type) {
+				case float64:
+					return x
+				case int64:
+					return float64(x)
+				default:
+					return 0
+				}
+			}
+			a := toFloat(args["a"])
+			b := toFloat(args["b"])
+			return a * b, nil
+		},
+	}}
+	exec := NewExecutor()
+	result, err := exec.Execute(context.Background(), `
+		return codemode.multiply({a: 3, b: 4});
+	`, tools)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Value != "12" {
+		t.Errorf("expected value 12, got %s", result.Value)
+	}
+	if len(result.Calls) != 1 {
+		t.Errorf("expected 1 tool call, got %d", len(result.Calls))
+	}
+	if result.Calls[0].Tool != "multiply" {
+		t.Errorf("expected tool name 'multiply', got %s", result.Calls[0].Tool)
+	}
+}
+
+// TestExecute_CodemodeAndCallToolBackwardCompat tests both codemode and callTool work together.
+func TestExecute_CodemodeAndCallToolBackwardCompat(t *testing.T) {
+	tools := []Tool{{
+		Name: "add",
+		Func: func(args map[string]any) (any, error) {
+			toFloat := func(v any) float64 {
+				switch x := v.(type) {
+				case float64:
+					return x
+				case int64:
+					return float64(x)
+				default:
+					return 0
+				}
+			}
+			a := toFloat(args["a"])
+			b := toFloat(args["b"])
+			return a + b, nil
+		},
+	}}
+	exec := NewExecutor()
+	result, err := exec.Execute(context.Background(), `
+		const r1 = callTool("add", {a: 1, b: 2});
+		const r2 = codemode.add({a: 3, b: 4});
+		return r1 + r2;
+	`, tools)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Value != "10" {
+		t.Errorf("expected value 10 (3 + 7), got %s", result.Value)
+	}
+	if len(result.Calls) != 2 {
+		t.Errorf("expected 2 tool calls, got %d", len(result.Calls))
+	}
+}

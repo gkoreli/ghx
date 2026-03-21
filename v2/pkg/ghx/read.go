@@ -32,7 +32,7 @@ type ReadOpts struct {
 	Map   bool   // structural signatures only
 }
 
-// Read fetches 1-10 files from a GitHub repo in one API call.
+// Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.
 // Returns one FileResult per requested file.
 func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 	parts := strings.Split(repo, "/")
@@ -47,43 +47,64 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}
 
+	// Build batched query with aliases (max 10 files per call)
+	var aliases []string
+	for i, f := range files {
+		if i >= 10 {
+			break
+		}
+		alias := fmt.Sprintf("f%d", i)
+		escapedPath := url.QueryEscape(f)
+		aliases = append(aliases, fmt.Sprintf(`%s: object(expression: "HEAD:%s") { ... on Blob { text byteSize } }`, alias, escapedPath))
+	}
+
+	query := fmt.Sprintf(`{
+		repository(owner: %q, name: %q) {
+			%s
+		}
+	}`, owner, name, strings.Join(aliases, "\n"))
+
+	var resp struct {
+		Repository map[string]interface{} `json:"repository"`
+	}
+
+	if err := gql.Do(query, nil, &resp); err != nil {
+		// Return NotFound for all files on error
+		var results []FileResult
+		for _, f := range files {
+			results = append(results, FileResult{Path: f, NotFound: true})
+		}
+		return results, nil
+	}
+
 	var results []FileResult
-
-	// Process each file individually
-	for _, f := range files {
-		fileQuery := fmt.Sprintf(`{
-			repository(owner: %q, name: %q) {
-				object(expression: "HEAD:%s") {
-					... on Blob { text byteSize }
-				}
-			}
-		}`, owner, name, url.QueryEscape(f))
-
-		var fileData struct {
-			Repository struct {
-				Object struct {
-					Text     string `json:"text"`
-					ByteSize int    `json:"byteSize"`
-				} `json:"object"`
-			} `json:"repository"`
+	for i, f := range files {
+		if i >= 10 {
+			break
 		}
 
-		if err := gql.Do(fileQuery, nil, &fileData); err != nil {
-			results = append(results, FileResult{
-				Path:     f,
-				NotFound: true,
-			})
+		alias := fmt.Sprintf("f%d", i)
+		fileData, ok := resp.Repository[alias]
+		if !ok || fileData == nil {
+			results = append(results, FileResult{Path: f, NotFound: true})
 			continue
 		}
 
-		text := fileData.Repository.Object.Text
-		byteSize := fileData.Repository.Object.ByteSize
+		// Parse the blob data
+		blobMap, ok := fileData.(map[string]interface{})
+		if !ok {
+			results = append(results, FileResult{Path: f, NotFound: true})
+			continue
+		}
+
+		text, _ := blobMap["text"].(string)
+		byteSize := 0
+		if bs, ok := blobMap["byteSize"].(float64); ok {
+			byteSize = int(bs)
+		}
 
 		if text == "" {
-			results = append(results, FileResult{
-				Path:     f,
-				NotFound: true,
-			})
+			results = append(results, FileResult{Path: f, NotFound: true})
 			continue
 		}
 

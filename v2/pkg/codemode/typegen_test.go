@@ -1,6 +1,7 @@
 package codemode
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -36,32 +37,22 @@ func TestGenerateTypes(t *testing.T) {
 	result := GenerateTypes(tools)
 
 	// Verify output contains expected patterns
-	if !contains(result, "declare function repos") {
-		t.Error("Missing repos function declaration")
+	if !strings.Contains(result, "declare const codemode") {
+		t.Error("Missing declare const codemode")
 	}
-	if !contains(result, "declare function search") {
-		t.Error("Missing search function declaration")
+	if !strings.Contains(result, "type ReposInput") {
+		t.Error("Missing ReposInput type")
 	}
-	if !contains(result, "query: string") {
+	if !strings.Contains(result, "repos: (input: ReposInput) => Promise<any>;") {
+		t.Error("Missing repos tool entry")
+	}
+	if !strings.Contains(result, "query: string") {
 		t.Error("Missing required query parameter")
 	}
-	if !contains(result, "limit?: number") {
+	if !strings.Contains(result, "limit?: number") {
 		t.Error("Missing optional limit parameter")
 	}
-	if !contains(result, "Search repos with README preview") {
+	if !strings.Contains(result, "Search repos with README preview") {
 		t.Error("Missing JSDoc comment")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

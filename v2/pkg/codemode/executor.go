@@ -106,30 +106,18 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 		toolMap[t.Name] = t
 	}
 
-	// Inject callTool binding
-	vm.Set("callTool", func(call goja.FunctionCall) goja.Value {
-		defer func() {
-			if r := recover(); r != nil {
-				panic(r)
-			}
-		}()
-
+	// Helper to execute a tool call with ACL, timeout, and recording
+	executeToolCall := func(toolName string, argsVal any) goja.Value {
 		// Check call limit
 		if callCount >= e.maxToolCalls {
 			panic(vm.NewGoError(fmt.Errorf("exceeded maximum tool calls (%d)", e.maxToolCalls)))
 		}
 		callCount++
 
-		// Extract tool name and args
-		if len(call.Arguments) < 2 {
-			panic(vm.NewGoError(fmt.Errorf("callTool requires 2 arguments: name and args")))
-		}
-
-		toolName := call.Argument(0).String()
-		argsVal := call.Argument(1).Export()
+		// Validate args
 		args, ok := argsVal.(map[string]any)
 		if !ok {
-			panic(vm.NewGoError(fmt.Errorf("callTool args must be an object")))
+			panic(vm.NewGoError(fmt.Errorf("tool args must be an object")))
 		}
 
 		// ACL check
@@ -183,7 +171,46 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 		}
 
 		return vm.ToValue(result)
+	}
+
+	// Inject callTool binding (backward compatibility)
+	vm.Set("callTool", func(call goja.FunctionCall) goja.Value {
+		defer func() {
+			if r := recover(); r != nil {
+				panic(r)
+			}
+		}()
+
+		// Extract tool name and args
+		if len(call.Arguments) < 2 {
+			panic(vm.NewGoError(fmt.Errorf("callTool requires 2 arguments: name and args")))
+		}
+
+		toolName := call.Argument(0).String()
+		argsVal := call.Argument(1).Export()
+		return executeToolCall(toolName, argsVal)
 	})
+
+	// Inject codemode object with per-tool methods
+	codemodeObj := vm.NewObject()
+	for _, t := range tools {
+		tool := t // capture for closure
+		codemodeObj.Set(tool.Name, func(call goja.FunctionCall) goja.Value {
+			defer func() {
+				if r := recover(); r != nil {
+					panic(r)
+				}
+			}()
+
+			if len(call.Arguments) < 1 {
+				panic(vm.NewGoError(fmt.Errorf("codemode.%s requires 1 argument: args", tool.Name)))
+			}
+
+			argsVal := call.Argument(0).Export()
+			return executeToolCall(tool.Name, argsVal)
+		})
+	}
+	vm.Set("codemode", codemodeObj)
 
 	// Inject console object
 	console := vm.NewObject()

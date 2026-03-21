@@ -9,21 +9,42 @@ import (
 // GenerateTypes produces TypeScript type declarations from registered tools.
 // Output is a string suitable for injecting into LLM system prompts.
 func GenerateTypes(tools []Tool) string {
-	var declarations []string
+	// Sort tools alphabetically for deterministic output
+	sortedTools := make([]Tool, len(tools))
+	copy(sortedTools, tools)
+	sort.Slice(sortedTools, func(i, j int) bool {
+		return sortedTools[i].Name < sortedTools[j].Name
+	})
 
-	for _, tool := range tools {
-		// JSDoc comment
-		decl := fmt.Sprintf("/** %s */\n", tool.Description)
-
-		// Build args type from schema
+	// Generate input types for each tool
+	var typeDecls []string
+	for _, tool := range sortedTools {
 		argsType := buildArgsType(tool.Schema)
-
-		// Function declaration
-		decl += fmt.Sprintf("declare function %s(args: %s): any;", tool.Name, argsType)
-		declarations = append(declarations, decl)
+		typeDecl := fmt.Sprintf("type %sInput = %s", capitalize(tool.Name), argsType)
+		typeDecls = append(typeDecls, typeDecl)
 	}
 
-	return strings.Join(declarations, "\n\n")
+	// Generate codemode object with all tools
+	var toolEntries []string
+	for _, tool := range sortedTools {
+		entry := fmt.Sprintf("  /** %s */\n  %s: (input: %sInput) => Promise<any>;", tool.Description, tool.Name, capitalize(tool.Name))
+		toolEntries = append(toolEntries, entry)
+	}
+
+	result := strings.Join(typeDecls, "\n") + "\n\n"
+	result += "declare const codemode: {\n"
+	result += strings.Join(toolEntries, "\n")
+	result += "\n}"
+
+	return result
+}
+
+// capitalize returns the string with first letter uppercase.
+func capitalize(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // buildArgsType constructs TypeScript object type from JSON schema.
