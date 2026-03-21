@@ -57,11 +57,11 @@ type SearchInput = { query: string; limit?: number; fullMode?: boolean }
 type TreeInput = { repo: string; path?: string }
 
 declare const codemode: {
-  explore: (input: ExploreInput) => any;
-  read: (input: ReadInput) => any;
-  repos: (input: ReposInput) => any;
-  search: (input: SearchInput) => any;
-  tree: (input: TreeInput) => any;
+  explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
+  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean }[];
+  repos: (input: ReposInput) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
+  search: (input: SearchInput) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
+  tree: (input: TreeInput) => string[];
 }
 ```
 

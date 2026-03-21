@@ -68,11 +68,11 @@ ghx code --list   # See all available tools with type stubs
 
 ```typescript
 declare const codemode: {
-  explore: (input: { repo: string; path?: string }) => any;
-  read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => any;
-  repos: (input: { query: string; limit?: number }) => any;
-  search: (input: { query: string; limit?: number; fullMode?: boolean }) => any;
-  tree: (input: { repo: string; path?: string }) => any;
+  explore: (input: { repo: string; path?: string }) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
+  read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => { path: string; content: string; byteSize: number; notFound: boolean }[];
+  repos: (input: { query: string; limit?: number }) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
+  search: (input: { query: string; limit?: number; fullMode?: boolean }) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
+  tree: (input: { repo: string; path?: string }) => string[];
 }
 ```
 
