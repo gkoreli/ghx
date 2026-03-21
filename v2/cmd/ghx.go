@@ -207,8 +207,13 @@ var treeCmd = &cobra.Command{
 var skillCmd = &cobra.Command{
 	Use:   "skill",
 	Short: "Output SKILL.md for agent context injection",
-	Run: func(cmd *cobra.Command, args []string) {
-		skill()
+	RunE: func(cmd *cobra.Command, args []string) error {
+		mcpFlag, _ := cmd.Flags().GetBool("mcp")
+		filename := "SKILL.md"
+		if mcpFlag {
+			filename = "MCP-SKILL.md"
+		}
+		return printSkill(filename)
 	},
 }
 
@@ -220,18 +225,22 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-func skill() error {
+func init() {
+	skillCmd.Flags().Bool("mcp", false, "Output MCP skill instead of CLI skill")
+}
+
+func printSkill(filename string) error {
 	scriptDir, _ := filepath.EvalSymlinks(os.Args[0])
 	dir := filepath.Dir(scriptDir)
 
 	paths := []string{
-		filepath.Join(dir, "SKILL.md"),
-		filepath.Join(dir, "..", "SKILL.md"),
-		filepath.Join(dir, "..", "v2", "SKILL.md"),
-		filepath.Join(dir, "..", "..", "SKILL.md"),
-		"SKILL.md",
-		"../SKILL.md",
-		"v2/SKILL.md",
+		filepath.Join(dir, filename),
+		filepath.Join(dir, "..", filename),
+		filepath.Join(dir, "..", "v2", filename),
+		filepath.Join(dir, "..", "..", filename),
+		filename,
+		filepath.Join("..", filename),
+		filepath.Join("v2", filename),
 	}
 
 	for _, p := range paths {
@@ -241,5 +250,5 @@ func skill() error {
 		}
 	}
 
-	return fmt.Errorf("SKILL.md not found")
+	return fmt.Errorf("%s not found", filename)
 }
