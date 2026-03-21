@@ -342,3 +342,21 @@ Wave 6 was 100% success (4/4) vs wave 4b's 50% (2/4 codemode stubs). The differe
 5. ✅ **Wire codemode** — pkg/ghx/register.go, 135 lines
 
 Total: 1736 lines of Go across 14 files. All compile. Tests pass.
+
+### Integration gaps found during code review
+
+After reading all wave 5-6 output, three integration issues were found and fixed manually:
+
+1. **Transpile not wired** — executor.go had `Transpile()` available but never called it. Fixed: normalize → transpile → IIFE → execute pipeline.
+2. **Dead method** — registry.go had `ToolFuncs()` returning `map[string]ToolFunc` but executor now takes `[]Tool`. Replaced with `Tools()`.
+3. **MCP server bypasses codemode** — serve.go calls `pkg/ghx/` directly, doesn't expose codemode meta-tools (`search` + `execute`). This is the key differentiator from a standard MCP server. Needs wave 7 agent.
+
+**Insight: agents build correct isolated components but don't wire cross-cutting concerns.** Each file was correct in isolation. The transpile→executor pipeline and the serve→codemode→executor chain required human integration review.
+
+### Remaining work
+
+| Task | What | Why |
+|------|------|-----|
+| Codemode meta-tools | Add `codemode_search` + `codemode_execute` to serve.go | Core value prop — agent writes JS that composes operations |
+| Executor tests | Test all ADR-0008 §8 cases | Validate security posture + correctness |
+| Streamable HTTP | `--http :8080` flag on `ghx serve` | Remote/multi-agent scenarios (ADR-0008 §7) |

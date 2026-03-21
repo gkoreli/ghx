@@ -73,6 +73,18 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 		return nil, fmt.Errorf("code exceeds maximum size of %d bytes", e.maxCodeSize)
 	}
 
+	// Strip markdown fences first (before transpilation)
+	code, err := Normalize(code)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transpile modern JS → ES2015 (goja only supports ES2015)
+	code, err = Transpile(code)
+	if err != nil {
+		return nil, fmt.Errorf("transpile: %w", err)
+	}
+
 	// Wrap code in IIFE for top-level return support
 	wrappedCode := fmt.Sprintf("(function(){%s})()", code)
 
@@ -196,18 +208,18 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 
 	// Execute code with panic recovery
 	var val goja.Value
-	var err error
+	var execErr error
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				err = fmt.Errorf("execution panic: %v", r)
+				execErr = fmt.Errorf("execution panic: %v", r)
 			}
 		}()
-		val, err = vm.RunString(wrappedCode)
+		val, execErr = vm.RunString(wrappedCode)
 	}()
 
-	if err != nil {
-		return nil, err
+	if execErr != nil {
+		return nil, execErr
 	}
 
 	// JSON-encode return value

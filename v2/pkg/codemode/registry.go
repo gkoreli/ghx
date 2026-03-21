@@ -68,11 +68,11 @@ func (r *Registry) Search(query string) []Tool {
 	return results
 }
 
-// ToolFuncs returns a map of tool names to their functions for passing to NewExecutor().
-func (r *Registry) ToolFuncs() map[string]ToolFunc {
-	funcs := make(map[string]ToolFunc, len(r.tools))
-	for name, t := range r.tools {
-		funcs[name] = t.Func
+// Tools returns a slice of all registered tools for passing to Executor.Execute().
+func (r *Registry) Tools() []Tool {
+	tools := make([]Tool, 0, len(r.tools))
+	for _, t := range r.tools {
+		tools = append(tools, t)
 	}
-	return funcs
+	return tools
 }

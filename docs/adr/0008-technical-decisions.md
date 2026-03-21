@@ -209,6 +209,43 @@ All pure Go. No CGO. Cross-compiles to all platforms.
 
 ---
 
+## Implementation Status (Wave 6 complete)
+
+| Section | Status | Notes |
+|---------|--------|-------|
+| §1 Script Runtime (goja + esbuild) | ✅ Implemented | executor.go: 237 lines, Transpile() wired into Execute() pipeline |
+| §2 MCP Library (mcp-go) | ✅ Implemented | serve.go: 183 lines, 5 direct tools via stdio |
+| §3 Module Structure | ✅ Implemented | Monorepo, pkg/codemode/ + pkg/ghx/ |
+| §4 Tool Registration | ✅ Implemented | register.go: 135 lines, hybrid pattern with JSON schemas |
+| §5 Distribution | ✅ Implemented | Single binary, `ghx serve` subcommand |
+| §6 Type Stubs | ✅ Implemented | typegen.go: 107 lines, runtime generation |
+| §7 MCP Transport | ⚠️ Partial | stdio only — `--http` flag for streamable HTTP not yet added |
+| §8 Testing Strategy | ⚠️ Partial | typegen_test.go only. Executor tests, MCP tests, golden files needed |
+| §9 Security Posture | ✅ Implemented | ACL, timeout, code size limit (64KB), max calls (20), fresh VM, no FS/net |
+| §10 Error Recovery | ✅ Implemented | No auto-retry, errors returned to caller with context |
+| §11 Executor Interface | ✅ Implemented | Full contract: ctx, ToolCallRecord, IIFE, callTool, JSON return |
+| §12 Observability | ✅ Implemented | ToolCallRecord (name, args, duration, error) + console capture |
+| §13 Evolution Pathway | Phase 1 only | Sequential executor. Parallel (Promise.all), streaming, sessions deferred |
+| §14 Risks | — | Tracking only |
+
+### Execution pipeline (as implemented)
+
+```
+LLM code → Normalize (strip fences) → Transpile (esbuild ES2015) → IIFE wrap → goja VM → JSON result
+```
+
+### Remaining gaps for wave 7
+
+1. **Codemode meta-tools in MCP server** — serve.go exposes direct tools only. ADR-0007 architecture requires `codemode_search` + `codemode_execute` meta-tools that let agents compose operations via JS.
+2. **Executor tests** — ADR-0008 §8 test cases: happy path, timeout, ACL, max calls, console, transpilation, IIFE, error messages.
+3. **Streamable HTTP** — `--http :8080` flag for remote/multi-agent scenarios.
+
+### Binary size
+
+Actual: 21MB (estimated 15-17MB). esbuild accounts for ~14MB. Acceptable for a developer tool.
+
+---
+
 ## 9. Security Posture
 
 The Ben Gurion CE-MCP study identified 16 attack classes across 5 execution phases. Our posture:
