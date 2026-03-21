@@ -318,11 +318,27 @@ Net effect of wave 5: -231 lines. Codebase got smaller while gaining a core libr
 4. 🔄 **MCP server** — `ghx serve` command, mark3labs/mcp-go (ADR-0008 §2)
 5. 🔄 **Wire codemode** — register ghx core functions, expose via MCP
 
-### Gap: executor.go needs upgrade to ADR-0008 contract
+### Wave 6 results (4 agents, 4/4 ✅)
 
-Wave 5's executor.go is a working goja sandbox but doesn't match ADR-0008's interface contract (§11):
-- Missing: `context.Context` timeout, `ToolCallRecord` observability, code size limit, max tool call limit, IIFE wrapping
-- Missing: `transpile.go` (esbuild modern JS → ES2015)
-- Current: `NewExecutor(tools) + Exec(code)` → Target: `Execute(ctx, code, []Tool)`
+| Task | File | Lines | Result |
+|------|------|-------|--------|
+| TASK-0539 | `pkg/codemode/executor.go` | 92 → 231 | ✅ Full ADR-0008 §11 contract (ctx, ToolCallRecord, limits, IIFE, callTool) |
+| TASK-0540 | `pkg/codemode/transpile.go` | 21 (new) | ✅ esbuild modern JS → ES2015 |
+| TASK-0541 | `cmd/serve.go` | 183 (new) | ✅ `ghx serve` MCP server via mark3labs/mcp-go |
+| TASK-0542 | `pkg/ghx/register.go` | 135 (new) | ✅ Wire 5 core functions to codemode registry |
 
-Wave 6 will upgrade executor + add transpiler + MCP server + wiring.
+**Cumulative: 20 agents, 18 delivered first try (90%)**
+
+### Key insight: ADR-driven tasks outperform description-only tasks
+
+Wave 6 was 100% success (4/4) vs wave 4b's 50% (2/4 codemode stubs). The difference: wave 6 tasks referenced ADR-0008's interface contracts with exact type signatures. Wave 4b tasks described what to build in prose. Agents with concrete interface specs deliver complete implementations. Agents with prose descriptions sometimes stub.
+
+### Build order: COMPLETE
+
+1. ✅ **Extract core** (`pkg/ghx/`) — 5 files, 629 lines
+2. ✅ **Wire CLI** — cmd/ghx.go, 245 lines
+3. ✅ **Go codemode package** — executor (231), registry (78), normalize (26), typegen (107), transpile (21) = 463 lines
+4. ✅ **MCP server** — cmd/serve.go, 183 lines, `ghx serve` command
+5. ✅ **Wire codemode** — pkg/ghx/register.go, 135 lines
+
+Total: 1736 lines of Go across 14 files. All compile. Tests pass.
