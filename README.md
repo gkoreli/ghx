@@ -17,17 +17,38 @@ ghx eliminates this by encoding the right defaults into every command. One call 
 ## Install
 
 ```bash
-# Build from source
-cd v2 && go build -o ghx .
+# Zero install — just run it
+npx @gkoreli/ghx explore vercel/next.js
 
 # Homebrew
 brew install gkoreli/tap/ghx
 
-# One-liner
-curl -sfL https://raw.githubusercontent.com/gkoreli/ghx/mainline/install.sh | bash
+# npm (global)
+npm install -g @gkoreli/ghx
+
+# Go
+go install github.com/gkoreli/ghx/v2@latest
+
+# Build from source
+cd v2 && go build -o ghx .
 ```
 
 Requires: [gh CLI](https://cli.github.com/) authenticated (`gh auth login`).
+
+### MCP Config (Claude Desktop, Cursor)
+
+```json
+{
+  "mcpServers": {
+    "ghx": {
+      "command": "npx",
+      "args": ["@gkoreli/ghx", "serve"]
+    }
+  }
+}
+```
+
+No install step — npx downloads and caches the binary on first run.
 
 ## Commands
 
