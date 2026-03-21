@@ -27,7 +27,11 @@ func GenerateTypes(tools []Tool) string {
 	// Generate codemode object with all tools
 	var toolEntries []string
 	for _, tool := range sortedTools {
-		entry := fmt.Sprintf("  /** %s */\n  %s: (input: %sInput) => any;", tool.Description, tool.Name, capitalize(tool.Name))
+		retType := "any"
+		if tool.Returns != "" {
+			retType = tool.Returns
+		}
+		entry := fmt.Sprintf("  /** %s */\n  %s: (input: %sInput) => %s;", tool.Description, tool.Name, capitalize(tool.Name), retType)
 		toolEntries = append(toolEntries, entry)
 	}
 

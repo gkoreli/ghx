@@ -10,6 +10,7 @@ func TestGenerateTypes(t *testing.T) {
 		{
 			Name:        "repos",
 			Description: "Search repos with README preview",
+			Returns:     "{ total: number; results: any[] }",
 			Schema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -43,7 +44,7 @@ func TestGenerateTypes(t *testing.T) {
 	if !strings.Contains(result, "type ReposInput") {
 		t.Error("Missing ReposInput type")
 	}
-	if !strings.Contains(result, "repos: (input: ReposInput) => any;") {
+	if !strings.Contains(result, "repos: (input: ReposInput) => { total: number; results: any[] };") {
 		t.Error("Missing repos tool entry")
 	}
 	if !strings.Contains(result, "query: string") {

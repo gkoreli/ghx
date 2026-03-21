@@ -8,6 +8,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "explore",
 		Description: "Explore a GitHub repo — returns branch, file tree, and README",
 		Func:        wrapExplore,
+		Returns:     "{ description: string; branch: string; files: { name: string; type: string }[]; readme: string }",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -22,6 +23,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "repos",
 		Description: "Search GitHub repositories with README preview",
 		Func:        wrapRepos,
+		Returns:     "{ results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number }",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -36,6 +38,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "search",
 		Description: "Search code via GitHub with text_matches and context",
 		Func:        wrapSearch,
+		Returns:     "{ total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] }",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,6 +54,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "read",
 		Description: "Read multiple files from a GitHub repo in one call",
 		Func:        wrapRead,
+		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean }[]",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -67,6 +71,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "tree",
 		Description: "Get full recursive file listing for a repo",
 		Func:        wrapTree,
+		Returns:     "string[]",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

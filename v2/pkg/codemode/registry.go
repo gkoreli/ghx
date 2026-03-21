@@ -12,6 +12,7 @@ type Tool struct {
 	Description string         `json:"description"`
 	Func        ToolFunc       `json:"-"`      // from executor.go
 	Schema      map[string]any `json:"schema"` // JSON schema for type generation
+	Returns     string         `json:"-"`      // TypeScript return type (e.g. "ExploreResult"), empty = "any"
 }
 
 // Registry holds registered tools.
