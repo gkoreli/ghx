@@ -117,6 +117,18 @@ One LLM round-trip instead of three separate tool calls.
 
 goja is the sweet spot: single binary, LLMs write JS well, sandboxed by default.
 
+### Resolved technical decisions (see ADR-0008 for full analysis)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| MCP library | `mark3labs/mcp-go` | Most adopted (~4800★), streamable HTTP, `mcptest` package |
+| JS runtime | `dop251/goja` + esbuild transpilation | Proven in gridctl, handles modern JS → ES2015 |
+| Module structure | Monorepo (extract codemode later if needed) | ~400 lines doesn't justify separate repo |
+| Distribution | Single binary with subcommands (`ghx serve`, not `ghx-mcp`) | One install, codemode exposed via MCP server |
+| Type stubs | Runtime generation | No build step, always in sync, ~1ms for 5 tools |
+| MCP transport | stdio (primary) + streamable HTTP (secondary) | Standard for local + remote |
+| Estimated binary | ~15-17MB | All pure Go, no CGO, cross-compiles cleanly |
+
 ## Build Order
 
 1. **Extract core** — Pull logic from `v2/cmd/ghx.go` into `pkg/ghx/`. Structured input/output, no formatting.
@@ -247,6 +259,33 @@ Rather than hardcoding codemode bindings into ghx, we build a thin, reusable Go 
 3. **Go codemode package** (`pkg/codemode/` or separate module) — Executor, transpiler, type gen, registry, normalizer
 4. **MCP server frontend** — Expose core as MCP tools via `mcp-golang`. Add codemode `search` + `execute` meta-tools.
 5. **Wire it together** — ghx registers its 5 core functions with the codemode registry. MCP server exposes both direct tools and codemode meta-tools.
+
+## Swarm Execution Evidence
+
+### Wave 4 results (10 agents, ~3 min each)
+
+| Task | File | Lines | Result |
+|------|------|-------|--------|
+| TASK-0526 | `pkg/ghx/repos.go` | 132 | ✅ Full implementation, compiles |
+| TASK-0527 | `pkg/ghx/search.go` | 89 | ✅ Full implementation, compiles |
+| TASK-0528 | `pkg/ghx/explore.go` | 122 | ✅ Full implementation, compiles |
+| TASK-0529 | `pkg/ghx/read.go` | 207 | ✅ Full implementation, grep break bug fixed |
+| TASK-0530 | `pkg/ghx/tree.go` | 79 | ✅ Full implementation, compiles |
+| TASK-0531 | Exit code 2 fix | — | ✅ Unknown flags now exit 2 |
+| TASK-0532 | `pkg/codemode/executor.go` | 4 | ❌ Stub only — agent wrote type alias, skipped implementation |
+| TASK-0533 | `pkg/codemode/registry.go` | 8 | ❌ Stub only — agent wrote struct, skipped implementation |
+| TASK-0534 | `pkg/codemode/normalize.go` | 26 | ✅ Full implementation |
+| TASK-0535 | `pkg/codemode/typegen.go` | 107 | ✅ Full implementation + test file |
+
+**Success rate**: 8/10 (80%). Both failures were codemode tasks where the agent had less concrete reference code to extract from. The ghx core extraction tasks (which had exact source code to reference) were 6/6.
+
+### Key swarm insights from wave 4
+
+1. **Extraction tasks > creation tasks.** When agents have existing code to extract from, they deliver 100%. When they need to create from a description, they sometimes stub.
+2. **Pre-installing dependencies prevents go.mod conflicts.** Running `go get github.com/dop251/goja` before spawning prevented 4 agents from racing on go.mod.
+3. **File isolation works.** Zero merge conflicts across 10 agents because each created a new file.
+4. **Agents don't commit.** Must be done by the orchestrator between waves.
+5. **~200s per agent** for Go file creation tasks. Consistent across all 10.
 
 ## Open Questions
 
