@@ -6,7 +6,6 @@ on:
       - mainline
     paths:
       - 'package.json'
-      - 'ghx'
 
 concurrency:
   group: publish
@@ -17,8 +16,11 @@ permissions:
   id-token: write
 
 jobs:
-  tag-and-publish:
+  tag:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.current }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,24 +32,11 @@ jobs:
           git fetch --tags
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
           if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Tag v$CURRENT_VERSION already exists, skipping"
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Tag v$CURRENT_VERSION does not exist, will create"
           fi
-
-      - uses: actions/setup-node@v4
-        if: steps.version.outputs.changed == 'true'
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Upgrade npm (required for OIDC trusted publishing)
-        if: steps.version.outputs.changed == 'true'
-        run: npm install -g npm@latest
 
       - name: Create and push tag
         if: steps.version.outputs.changed == 'true'
@@ -58,14 +47,42 @@ jobs:
           git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
 
-      - name: Create GitHub Release
-        if: steps.version.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="v${{ steps.version.outputs.current }}"
-          gh release create "$VERSION" ghx --title "$VERSION" --generate-notes
+  release:
+    needs: tag
+    if: needs.tag.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Publish to npm
-        if: steps.version.outputs.changed == 'true'
-        run: npm publish --provenance --access public
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: v2/go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  npm:
+    needs: tag
+    if: needs.tag.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install -g npm@latest
+      - run: npm publish --provenance --access public

@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const VERSION = "0.2.1"
+var VERSION = "dev"
 
 var RootCmd = &cobra.Command{
 	Use:   "ghx",

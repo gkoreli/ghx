@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ghx v2 installer — builds from source or downloads prebuilt binary
+# ghx installer — downloads prebuilt binary or builds from source
 set -euo pipefail
 
 REPO="gkoreli/ghx"
@@ -7,30 +7,38 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 mkdir -p "$INSTALL_DIR"
 
-# Try prebuilt binary from GitHub releases first
 install_binary() {
-  local os arch
+  local os arch ext="tar.gz"
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   arch="$(uname -m)"
   case "$arch" in
     x86_64) arch="amd64" ;;
     aarch64|arm64) arch="arm64" ;;
   esac
+  [[ "$os" == "windows" ]] && ext="zip"
 
-  local url="https://github.com/$REPO/releases/latest/download/ghx_${os}_${arch}"
+  local url="https://github.com/$REPO/releases/latest/download/ghx_${os}_${arch}.${ext}"
   if curl -sfL --head "$url" >/dev/null 2>&1; then
-    echo "Downloading ghx binary ($os/$arch)..."
-    curl -sfL "$url" -o "$INSTALL_DIR/ghx"
+    echo "Downloading ghx ($os/$arch)..."
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' EXIT
+    curl -sfL "$url" -o "$tmpdir/ghx.tar.gz"
+    tar xzf "$tmpdir/ghx.tar.gz" -C "$tmpdir"
+    cp "$tmpdir/ghx" "$INSTALL_DIR/ghx"
     chmod +x "$INSTALL_DIR/ghx"
+    # Copy skill files if present in archive
+    for f in SKILL.md MCP-SKILL.md; do
+      [[ -f "$tmpdir/$f" ]] && cp "$tmpdir/$f" "$INSTALL_DIR/$f"
+    done
     return 0
   fi
   return 1
 }
 
-# Fallback: build from source
 install_source() {
   if ! command -v go &>/dev/null; then
-    echo "❌ No prebuilt binary available and Go not found. Install Go first: https://go.dev/dl/"
+    echo "❌ No prebuilt binary and Go not found. Install Go: https://go.dev/dl/"
     exit 1
   fi
   echo "Building ghx from source..."
@@ -43,11 +51,6 @@ install_source() {
 
 echo "Installing ghx to $INSTALL_DIR..."
 install_binary || install_source
-
-# Copy skill files next to binary
-for f in SKILL.md MCP-SKILL.md; do
-  curl -sfL "https://raw.githubusercontent.com/$REPO/mainline/v2/$f" -o "$INSTALL_DIR/$f" 2>/dev/null || true
-done
 
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
   echo "⚠️  $INSTALL_DIR is not in PATH. Add it:"
