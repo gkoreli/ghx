@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/gkoreli/ghx/v2/cmd"
@@ -8,6 +9,7 @@ import (
 
 func main() {
 	if err := cmd.RootCmd.Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 }

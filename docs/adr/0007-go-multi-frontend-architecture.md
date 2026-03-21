@@ -121,10 +121,11 @@ goja is the sweet spot: single binary, LLMs write JS well, sandboxed by default.
 
 1. **Extract core** — Pull logic from `v2/cmd/ghx.go` into `pkg/ghx/`. Structured input/output, no formatting.
 2. **Wire CLI** — Refactor `cmd/ghx.go` to call core. Verify parity with bash version.
-3. **MCP server** — Add `ghx serve` command. Expose core as MCP tools.
-4. **Codemode** — Embed goja. Generate type stubs from core function signatures. Add `execute` tool.
+3. **Go codemode package** — Executor (goja), transpiler (esbuild), type generator, tool registry, code normalizer. ~400 lines.
+4. **MCP server** — Add `ghx serve` command. Expose core as MCP tools via `mcp-golang`. Include codemode `search` + `execute` meta-tools.
+5. **Wire codemode** — Register ghx's 5 core functions with codemode registry. MCP server exposes both direct tools and codemode.
 
-Steps 1-2 are the foundation. Steps 3-4 are the new capabilities bash can't do.
+Steps 1-2 are the foundation. Step 3 is the reusable package. Steps 4-5 are the new capabilities bash can't do.
 
 ## Why Go (revisited)
 
@@ -192,14 +193,60 @@ This preserves `npx @gkoreli/ghx` and `npm install -g @gkoreli/ghx` for existing
 - npm: same version in `package.json`, published by CI on tag push
 - Bash v0.x stays on npm as `@gkoreli/ghx@0.x` for backward compatibility until Go v2 reaches full parity
 
-## Scope: What We're NOT Building
+## Scope: Thin Go Codemode SDK — ghx as First Consumer
 
-- **Not a generic codemode SDK.** Cloudflare built `@cloudflare/codemode` as a framework for turning *any* tools into codemode targets. That's infrastructure. We're building a tool that does something useful (GitHub exploration) with codemode as one of its interfaces.
-- **Not a framework.** The goja executor, type stubs, and code normalization are ghx-specific — hardcoded bindings for 5 functions, not auto-generated from arbitrary tool schemas.
-- **Not a Go port of `@cloudflare/codemode`.** No `ToolProvider` interface, no `resolveProvider()`, no plugin system.
-- **Extract later if needed.** If the executor/type-gen/normalization code gets copy-pasted into a second project, extract a Go codemode SDK then. Let the framework emerge from real usage, don't design it upfront.
+Rather than hardcoding codemode bindings into ghx, we build a thin, reusable Go codemode package. ghx is the first consumer. The SDK is small enough to justify (~400 lines) and the patterns are proven in production Go projects.
 
-The build order reflects this: core package → CLI → MCP → codemode. Each step ships value. The codemode layer is ghx-specific glue, not a reusable SDK.
+### Why build the SDK now (not later)
+
+- The gap is real — no general-purpose Go codemode SDK exists. Every implementation is either JS/Python or application-specific Go.
+- The research is done — we know exactly what the interface looks like from studying Cloudflare, gridctl, and agent-go.
+- It's small — ~400 lines across 4 files. Not a framework, not a platform. A package.
+- ghx benefits immediately — codemode support comes from importing a package, not writing sandbox plumbing.
+
+### Prior art to draw from
+
+| Project | What it proves | Key reference |
+|---------|---------------|---------------|
+| [gridctl/gridctl](https://github.com/gridctl/gridctl) | goja sandbox + esbuild transpilation + tool ACLs work in production Go | `pkg/mcp/codemode_sandbox.go` (~150 lines), `codemode_transpile.go`, `codemode_search.go`, `codemode_tools.go` |
+| [liliang-cn/agent-go](https://github.com/liliang-cn/agent-go) | Full Go agent framework with PTC (Programmatic Tool Calling) via goja. LLM writes JS, `callTool()` injected | `pkg/ptc/runtime/goja/runtime.go` |
+| [imran31415/codemode-sqlite-mcp](https://github.com/imran31415/codemode-sqlite-mcp) | Go codemode with yaegi interpreter. Benchmarked: 5.9x fewer tokens, 2.1x faster than standard MCP | `codemode/agent.go`, `pkg/executor/executor.go` |
+| [metoro-io/mcp-golang](https://github.com/metoro-io/mcp-golang) (1,208★) | The Go MCP server library. Type-safe tool definitions, stdio transport | Use for MCP frontend |
+| [@cloudflare/codemode](https://github.com/cloudflare/agents/tree/main/packages/codemode) | The reference SDK design: `Executor` interface, `ToolProvider`, `normalizeCode`, `generateTypes` | Interface design inspiration |
+
+### SDK components (~400 lines total)
+
+| Component | ~Lines | What it does | Draws from |
+|-----------|--------|-------------|------------|
+| Executor | ~150 | goja sandbox: fresh runtime per execution, timeout via context, console capture, tool call routing | gridctl `codemode_sandbox.go` |
+| Transpiler | ~50 | Modern JS → ES2015 via esbuild (goja only supports ES2015) | gridctl `codemode_transpile.go` |
+| Type generator | ~100 | Go function signatures → TypeScript type stubs for LLM context | New — reflect over registered tools, emit TS interfaces |
+| Tool registry | ~80 | Register tools with name, description, typed schema. Search/list for discovery | gridctl `codemode_search.go` |
+| Code normalizer | ~30 | Strip markdown fences, handle various LLM output formats, validate structure | Cloudflare `normalizeCode` |
+
+### Known risks and mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| goja doesn't support async/await | Low | esbuild transpiles modern JS → ES2015. Proven in gridctl. |
+| LLMs generate invalid JS | Low | Code normalizer strips fences, fixes common patterns. Proven in Cloudflare SDK. |
+| Sandboxing gaps | Low | goja is sandboxed by default — no filesystem, no network. Only injected bindings are accessible. |
+| Type generation accuracy | Medium | Start simple (flat structs), iterate. LLMs are forgiving of imperfect types. |
+| esbuild dependency | Low | Pure Go alternative exists (esbuild has a Go API). Or skip transpilation and constrain to ES2015. |
+
+### What this is NOT
+
+- Not a framework with plugin systems and provider interfaces
+- Not a Go port of `@cloudflare/codemode` — simpler, smaller, opinionated
+- Not tied to any specific MCP library — the executor takes a `func(toolName string, args map[string]any) (any, error)` callback
+
+### Updated build order
+
+1. **Core ghx package** (`pkg/ghx/`) — Extract logic from `v2/cmd/ghx.go` into structured input/output functions
+2. **CLI frontend** — Refactor `cmd/` to call core. Verify parity with bash version.
+3. **Go codemode package** (`pkg/codemode/` or separate module) — Executor, transpiler, type gen, registry, normalizer
+4. **MCP server frontend** — Expose core as MCP tools via `mcp-golang`. Add codemode `search` + `execute` meta-tools.
+5. **Wire it together** — ghx registers its 5 core functions with the codemode registry. MCP server exposes both direct tools and codemode meta-tools.
 
 ## Open Questions
 
