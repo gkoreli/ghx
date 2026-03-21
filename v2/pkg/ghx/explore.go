@@ -8,15 +8,15 @@ import (
 )
 
 type FileEntry struct {
-	Name string
-	Type string // "blob" or "tree"
+	Name string `json:"name"`
+	Type string `json:"type"` // "blob" or "tree"
 }
 
 type ExploreResult struct {
-	Description string
-	Branch      string
-	Files       []FileEntry
-	Readme      string // full README text, empty if not found
+	Description string      `json:"description"`
+	Branch      string      `json:"branch"`
+	Files       []FileEntry `json:"files"`
+	Readme      string      `json:"readme"` // full README text, empty if not found
 }
 
 // Explore returns branch, tree, and README for a repo (or subdirectory listing).

@@ -289,8 +289,11 @@ func handleCode(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 		result.Value = result.Value[:maxChars] + fmt.Sprintf("\n\n[truncated — result was %d chars, showing first %d]", len(result.Value), maxChars)
 	}
 
-	data, _ := json.Marshal(result)
-	return mcp.NewToolResultText(string(data)), nil
+	output := result.Value
+	if len(result.Console) > 0 {
+		output = fmt.Sprintf("Console:\n%s\n\nResult:\n%s", strings.Join(result.Console, "\n"), result.Value)
+	}
+	return mcp.NewToolResultText(output), nil
 }
 
 func init() {

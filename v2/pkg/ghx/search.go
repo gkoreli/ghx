@@ -9,15 +9,15 @@ import (
 )
 
 type SearchMatch struct {
-	Repo     string // "owner/repo"
-	Path     string
-	Fragment string // matching line context
+	Repo     string `json:"repo"`     // "owner/repo"
+	Path     string `json:"path"`
+	Fragment string `json:"fragment"` // matching line context
 }
 
 type SearchResult struct {
-	Total      int
-	Incomplete bool
-	Matches    []SearchMatch
+	Total      int           `json:"total"`
+	Incomplete bool          `json:"incomplete"`
+	Matches    []SearchMatch `json:"matches"`
 }
 
 type SearchOpts struct {

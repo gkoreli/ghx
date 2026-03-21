@@ -10,11 +10,11 @@ import (
 
 // RepoResult holds one search result
 type RepoResult struct {
-	NameWithOwner string
-	Description   string
-	Stars         int
-	Language      string
-	ReadmePreview string // cleaned, truncated to 300 chars
+	NameWithOwner string `json:"nameWithOwner"`
+	Description   string `json:"description"`
+	Stars         int    `json:"stars"`
+	Language      string `json:"language"`
+	ReadmePreview string `json:"readmePreview"` // cleaned, truncated to 300 chars
 }
 
 type ReposOpts struct {

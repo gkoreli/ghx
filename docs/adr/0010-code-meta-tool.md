@@ -10,6 +10,24 @@ ADRs 0008-0009 built the executor and type system. This ADR defines how they're 
 
 ---
 
+## Invariant: Core Is the Source of Truth
+
+```
+pkg/ghx/       → defines what operations exist
+pkg/codemode/  → defines how code execution works
+cmd/ghx.go     → exposes EVERYTHING via CLI (including codemode)
+cmd/serve.go   → exposes the same things via MCP (no unique features)
+```
+
+If you can't do it from `ghx <command>`, it doesn't exist yet. MCP never gets capabilities that CLI doesn't have. CLI is the first frontend for every feature — MCP wraps the same core functions.
+
+This means:
+- `ghx code "..."` must exist before the MCP `code` tool
+- `ghx code --list` must exist before the MCP `search_tools` tool
+- Any new tool added to MCP must have a CLI equivalent
+
+---
+
 ## The Problem With Individual Tool Calls
 
 Today, `ghx serve` exposes 5 MCP tools. An LLM exploring a repo does:
@@ -49,7 +67,17 @@ The Ben Gurion CE-MCP paper measured it: ~98% token reduction, 60% faster execut
 
 ---
 
-## Design: Dual-Mode MCP Server
+## Design: Dual-Mode, CLI-First
+
+### CLI commands (source of truth)
+
+```bash
+ghx code "var r = codemode.explore({repo: 'dop251/goja'}); return r.Branch;"
+ghx code -                          # read code from stdin (for piping)
+ghx code --list                     # list available tools with type stubs
+```
+
+### MCP tools (thin wrappers over the same functions)
 
 ```
 ghx serve
@@ -58,7 +86,8 @@ ghx serve
 ├── search     (direct tool — simple queries)
 ├── repos      (direct tool — simple queries)
 ├── tree       (direct tool — simple queries)
-└── code       (meta-tool — complex multi-step operations)
+├── code       (meta-tool — wraps the same executor as ghx code)
+└── search_tools (wraps the same listing as ghx code --list)
 ```
 
 Both modes coexist. Simple queries ("explore this repo") use direct tools. Complex queries ("find all Go files that import GraphQL, read them, and summarize the patterns") use the `code` tool.
@@ -200,7 +229,9 @@ For ghx: adopt the same cap. If the executor result exceeds 24K chars, truncate 
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
+| Source of truth | Core → CLI → MCP (never MCP-only features) | CLI is testable without MCP, agents with shell access use CLI directly |
 | Exposure pattern | Dual-mode: 5 direct tools + 1 `code` meta-tool | Simple queries stay simple, complex queries use codemode |
+| CLI command | `ghx code "..."` / `ghx code -` / `ghx code --list` | CLI-first, MCP wraps the same functions |
 | LLM API surface | `codemode.toolName(args)` object | Matches type stubs, clean namespace, implicit ACL |
 | Code format | Async arrow function in JS | Cloudflare's proven pattern, LLMs generate this naturally |
 | Normalization | Strip fences + wrap bare code in async arrow | Handle common LLM output formats |

@@ -10,19 +10,19 @@ import (
 )
 
 type GrepMatch struct {
-	LineNum int
-	Line    string
-	IsMatch bool // true for the matching line, false for context lines
+	LineNum int    `json:"lineNum"`
+	Line    string `json:"line"`
+	IsMatch bool   `json:"isMatch"` // true for the matching line, false for context lines
 }
 
 type FileResult struct {
-	Path     string
-	Content  string       // full text (empty if using grep/map)
-	ByteSize int
-	NotFound bool
-	GrepHits []GrepMatch  // populated when Grep is set
-	MapLines []string     // populated when Map is true
-	MapChars int          // original char count (for reduction stats)
+	Path     string      `json:"path"`
+	Content  string      `json:"content"`  // full text (empty if using grep/map)
+	ByteSize int         `json:"byteSize"`
+	NotFound bool        `json:"notFound"`
+	GrepHits []GrepMatch `json:"grepHits,omitempty"` // populated when Grep is set
+	MapLines []string    `json:"mapLines,omitempty"` // populated when Map is true
+	MapChars int         `json:"mapChars,omitempty"` // original char count (for reduction stats)
 }
 
 type ReadOpts struct {

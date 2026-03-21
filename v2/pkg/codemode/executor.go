@@ -170,7 +170,11 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 			panic(vm.NewGoError(err))
 		}
 
-		return vm.ToValue(result)
+		// JSON roundtrip: Go structs have capitalized fields (Branch, Files),
+		// but JS/TS expects lowercase (branch, files). Marshal→Unmarshal
+		// normalizes via json tags. Same pattern as agent-go's normalizeForJS.
+		normalized := normalizeForJS(result)
+		return vm.ToValue(normalized)
 	}
 
 	// Inject callTool binding (backward compatibility)
@@ -274,4 +278,19 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 		Console: logs,
 		Calls:   calls,
 	}, nil
+}
+
+// normalizeForJS converts Go structs/values to JS-friendly form via JSON roundtrip.
+// Go struct fields are capitalized (Branch, Files) but json tags produce lowercase (branch, files).
+// The roundtrip: Go value → JSON bytes → map[string]any gives JS-friendly keys.
+func normalizeForJS(v any) any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return v
+	}
+	return out
 }
