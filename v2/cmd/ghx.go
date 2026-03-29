@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
 	"github.com/spf13/cobra"
@@ -229,26 +228,14 @@ func init() {
 	skillCmd.Flags().Bool("mcp", false, "Output MCP skill instead of CLI skill")
 }
 
+var SkillMD string
+var MCPSkillMD string
+
 func printSkill(filename string) error {
-	scriptDir, _ := filepath.EvalSymlinks(os.Args[0])
-	dir := filepath.Dir(scriptDir)
-
-	paths := []string{
-		filepath.Join(dir, filename),
-		filepath.Join(dir, "..", filename),
-		filepath.Join(dir, "..", "v2", filename),
-		filepath.Join(dir, "..", "..", filename),
-		filename,
-		filepath.Join("..", filename),
-		filepath.Join("v2", filename),
+	if filename == "MCP-SKILL.md" {
+		fmt.Print(MCPSkillMD)
+	} else {
+		fmt.Print(SkillMD)
 	}
-
-	for _, p := range paths {
-		if data, err := os.ReadFile(p); err == nil {
-			fmt.Print(string(data))
-			return nil
-		}
-	}
-
-	return fmt.Errorf("%s not found", filename)
+	return nil
 }
