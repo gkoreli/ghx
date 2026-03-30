@@ -121,6 +121,9 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 			pat := getMapPattern(ext)
 			result.MapLines = mapLines(text, pat)
 			result.MapChars = len(text)
+			if len(result.MapLines) == 0 {
+				result.MapLines = []string{"(no signatures detected)"}
+			}
 		} else {
 			result.Content = text
 		}
@@ -135,25 +138,42 @@ func grepLines(text string, pattern string) []GrepMatch {
 	lines := strings.Split(text, "\n")
 	var matches []GrepMatch
 	patternLower := strings.ToLower(pattern)
+	emitted := make(map[int]bool)
 
+	// First pass: find all matching line indices
+	var matchIndices []int
 	for j, line := range lines {
 		if strings.Contains(strings.ToLower(line), patternLower) {
-			start := j - 2
-			if start < 0 {
-				start = 0
-			}
-			end := j + 3
-			if end > len(lines) {
-				end = len(lines)
-			}
+			matchIndices = append(matchIndices, j)
+		}
+	}
 
-			for k := start; k < end; k++ {
-				matches = append(matches, GrepMatch{
-					LineNum: k + 1,
-					Line:    lines[k],
-					IsMatch: k == j,
-				})
+	// Second pass: emit context windows, skipping already-emitted lines
+	for _, j := range matchIndices {
+		start := j - 2
+		if start < 0 {
+			start = 0
+		}
+		end := j + 3
+		if end > len(lines) {
+			end = len(lines)
+		}
+
+		// Add separator if there's a gap from previous output
+		if len(matches) > 0 && !emitted[start] {
+			matches = append(matches, GrepMatch{LineNum: -1, Line: "--", IsMatch: false})
+		}
+
+		for k := start; k < end; k++ {
+			if emitted[k] {
+				continue
 			}
+			emitted[k] = true
+			matches = append(matches, GrepMatch{
+				LineNum: k + 1,
+				Line:    lines[k],
+				IsMatch: k == j,
+			})
 		}
 	}
 
@@ -185,9 +205,9 @@ func mapLines(text string, pattern string) []string {
 	var result []string
 	fullLines := strings.Split(text, "\n")
 
-	for _, line := range fullLines {
+	for i, line := range fullLines {
 		if match, _ := regexp.MatchString(pattern, line); match {
-			result = append(result, line)
+			result = append(result, fmt.Sprintf("%d: %s", i+1, line))
 		}
 	}
 

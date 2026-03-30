@@ -19,7 +19,8 @@ ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
 ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
 ghx search "<query>"                        # Code search (AND matching, shows matching lines)
 ghx search --full "<query>"                 # Code search without line truncation
-ghx tree <owner/repo> [path]                # Full recursive tree listing
+ghx tree <owner/repo> [path]                # Full recursive tree (default: all files, no depth limit)
+ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels (includes dirs with /)
 ghx code "<js>"                             # Execute JS with access to all ghx tools
 ghx code -                                  # Read code from stdin
 ghx code --list                             # List available tools with type stubs
@@ -72,7 +73,7 @@ declare const codemode: {
   read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => { path: string; content: string; byteSize: number; notFound: boolean }[];
   repos: (input: { query: string; limit?: number }) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: { query: string; limit?: number; fullMode?: boolean }) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
-  tree: (input: { repo: string; path?: string }) => string[];
+  tree: (input: { repo: string; path?: string; depth?: number }) => string[];
 }
 ```
 

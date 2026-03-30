@@ -93,6 +93,7 @@ func serveMCP(cmd *cobra.Command) error {
 		mcp.WithDescription("Full recursive file tree listing for a repo"),
 		mcp.WithString("repo", mcp.Required(), mcp.Description("owner/repo")),
 		mcp.WithString("path", mcp.Description("subdirectory path")),
+		mcp.WithNumber("depth", mcp.Description("limit tree depth (0 = full recursive)")),
 	)
 
 	searchToolsMeta := mcp.NewTool("search_tools",
@@ -234,8 +235,9 @@ func handleTree(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	}
 
 	path := request.GetString("path", "")
+	depth := request.GetInt("depth", 0)
 
-	results, err := ghxlib.Tree(repo, path, ghxlib.TreeOpts{})
+	results, err := ghxlib.Tree(repo, path, ghxlib.TreeOpts{Depth: depth})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

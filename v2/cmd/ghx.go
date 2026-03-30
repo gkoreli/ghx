@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
 	"github.com/spf13/cobra"
@@ -124,6 +125,10 @@ var readCmd = &cobra.Command{
 			fmt.Printf("=== %s (%d bytes) ===\n", r.Path, r.ByteSize)
 			if len(r.GrepHits) > 0 {
 				for _, hit := range r.GrepHits {
+					if hit.LineNum == -1 {
+						fmt.Println("--")
+						continue
+					}
 					prefix := "  "
 					if hit.IsMatch {
 						prefix = "> "
@@ -134,7 +139,8 @@ var readCmd = &cobra.Command{
 				for _, line := range r.MapLines {
 					fmt.Println(line)
 				}
-				fmt.Printf("# map: %d/%d chars\n", r.MapChars, len(r.Content))
+				mapOutput := strings.Join(r.MapLines, "\n")
+				fmt.Printf("# map: %d/%d chars (~%d tokens full, ~%d tokens map)\n", len(mapOutput), r.MapChars, r.MapChars/4, len(mapOutput)/4)
 			} else {
 				fmt.Println(r.Content)
 			}
@@ -192,7 +198,11 @@ var treeCmd = &cobra.Command{
 		if len(args) > 1 {
 			path = args[1]
 		}
-		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{})
+		depth, _ := cmd.Flags().GetInt("depth")
+		if depth < 0 {
+			return fmt.Errorf("--depth must be a positive integer")
+		}
+		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
 			return err
 		}
@@ -201,6 +211,10 @@ var treeCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func init() {
+	treeCmd.Flags().IntP("depth", "d", 0, "Limit tree depth (0 = full recursive)")
 }
 
 var skillCmd = &cobra.Command{

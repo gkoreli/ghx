@@ -75,8 +75,9 @@ func RegisterTools(r *codemode.Registry) {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"repo": map[string]any{"type": "string", "description": "owner/repo"},
-				"path": map[string]any{"type": "string", "description": "path prefix filter (optional)"},
+				"repo":  map[string]any{"type": "string", "description": "owner/repo"},
+				"path":  map[string]any{"type": "string", "description": "path prefix filter (optional)"},
+				"depth": map[string]any{"type": "number", "description": "limit tree depth (0 = full recursive)"},
 			},
 			"required": []string{"repo"},
 		},
@@ -136,5 +137,9 @@ func wrapRead(args map[string]any) (any, error) {
 func wrapTree(args map[string]any) (any, error) {
 	repo, _ := args["repo"].(string)
 	path, _ := args["path"].(string)
-	return Tree(repo, path, TreeOpts{})
+	depth := 0
+	if d, ok := args["depth"].(float64); ok {
+		depth = int(d)
+	}
+	return Tree(repo, path, TreeOpts{Depth: depth})
 }

@@ -59,6 +59,7 @@ ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files (GraphQL batching)
 ghx search "<query>"                        # Code search with matching lines
 ghx repos "<query>"                         # Repo search with README preview
 ghx tree <owner/repo> [path]                # Full recursive tree
+ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels
 ```
 
 ## Codemode

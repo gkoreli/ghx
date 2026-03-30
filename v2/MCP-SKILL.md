@@ -17,7 +17,7 @@ description: GitHub code exploration via MCP. 7 tools — 5 direct + code meta-t
 | `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. `map` = signatures only (~92% reduction) |
 | `search` | `query` (required), `limit`, `full` | Code search with AND matching + matching lines |
 | `repos` | `query` (required), `limit` | Search repos with README preview |
-| `tree` | `repo` (required), `path` | Full recursive file tree |
+| `tree` | `repo` (required), `path`, `depth` | File tree listing (default: all files, no depth limit. With depth: includes dirs with /) |
 
 ### Meta-Tools (compose operations)
 
@@ -54,7 +54,7 @@ type ExploreInput = { repo: string; path?: string }
 type ReadInput = { repo: string; files: string[]; grep?: string; map?: boolean }
 type ReposInput = { query: string; limit?: number }
 type SearchInput = { query: string; limit?: number; fullMode?: boolean }
-type TreeInput = { repo: string; path?: string }
+type TreeInput = { repo: string; path?: string; depth?: number }
 
 declare const codemode: {
   explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };

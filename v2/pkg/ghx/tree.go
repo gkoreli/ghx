@@ -8,16 +8,16 @@ import (
 )
 
 type TreeOpts struct {
-	// reserved for future options (depth, filter)
+	Depth int // 0 = full recursive (default), N = limit to N levels
 }
 
-// Tree returns full recursive file listing for a repo, optionally filtered to a path prefix.
-// Returns list of file paths (blobs only, no directories).
+// Tree returns file listing for a repo, optionally filtered to a path prefix.
+// Without Depth: returns blobs only (backward compatible).
+// With Depth: returns both blobs and directories (dirs suffixed with "/"), filtered to N levels.
 func Tree(repo string, path string, opts TreeOpts) ([]string, error) {
 	owner := strings.Split(repo, "/")[0]
 	name := strings.Split(repo, "/")[1]
 
-	// Get default branch
 	gql, err := api.DefaultGraphQLClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
@@ -46,7 +46,6 @@ func Tree(repo string, path string, opts TreeOpts) ([]string, error) {
 		return nil, fmt.Errorf("could not determine default branch")
 	}
 
-	// Use REST client for tree API
 	rest, err := api.DefaultRESTClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST client: %w", err)
@@ -64,16 +63,30 @@ func Tree(repo string, path string, opts TreeOpts) ([]string, error) {
 		return nil, fmt.Errorf("failed to get tree: %w", err)
 	}
 
-	var files []string
+	var results []string
 	for _, entry := range resp.Tree {
-		if entry.Type == "blob" {
-			if path != "" && strings.HasPrefix(entry.Path, path+"/") {
-				files = append(files, strings.TrimPrefix(entry.Path, path+"/"))
-			} else if path == "" {
-				files = append(files, entry.Path)
+		rel := entry.Path
+		if path != "" {
+			if !strings.HasPrefix(entry.Path, path+"/") {
+				continue
 			}
+			rel = strings.TrimPrefix(entry.Path, path+"/")
+		}
+
+		depth := strings.Count(rel, "/") + 1
+		if opts.Depth > 0 && depth > opts.Depth {
+			continue
+		}
+
+		if entry.Type == "tree" {
+			if opts.Depth > 0 {
+				results = append(results, rel+"/")
+			}
+			// Without --depth, skip directories (backward compatible)
+		} else {
+			results = append(results, rel)
 		}
 	}
 
-	return files, nil
+	return results, nil
 }
