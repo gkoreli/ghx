@@ -134,18 +134,65 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 	return results, nil
 }
 
+// normalizeBRE converts BRE-style escaped metacharacters to their ERE equivalents.
+// In BRE (grep default), \| means alternation; in ERE/RE2, bare | does.
+// Handles escaped backslashes: \\| (literal backslash + alternation) is left alone.
+func normalizeBRE(pattern string) string {
+	// BRE metacharacters that are special when escaped, but literal when bare.
+	// In ERE/RE2 these are the opposite: special when bare, literal when escaped.
+	breMetachars := map[byte]bool{'|': true, '(': true, ')': true, '{': true, '}': true, '+': true, '?': true}
+
+	var out []byte
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == '\\' && i+1 < len(pattern) {
+			next := pattern[i+1]
+			if next == '\\' {
+				// Escaped backslash — emit both, skip ahead
+				out = append(out, '\\', '\\')
+				i++
+			} else if breMetachars[next] {
+				// BRE escape like \| → emit bare metachar (ERE style)
+				out = append(out, next)
+				i++
+			} else {
+				// Some other escape like \n, \d — pass through
+				out = append(out, '\\', next)
+				i++
+			}
+		} else {
+			out = append(out, pattern[i])
+		}
+	}
+	return string(out)
+}
+
 func grepLines(text string, pattern string) []GrepMatch {
 	lines := strings.Split(text, "\n")
 	var matches []GrepMatch
-	patternLower := strings.ToLower(pattern)
 	emitted := make(map[int]bool)
+
+	// Normalize BRE-style escapes to ERE (agents trained on grep write \| for alternation).
+	// Only converts \x when the backslash isn't itself escaped (\\| stays as literal backslash + pipe).
+	pattern = normalizeBRE(pattern)
+
+	// Compile as case-insensitive regex; fall back to literal match on invalid pattern
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		re = regexp.MustCompile("(?i)" + regexp.QuoteMeta(pattern))
+	}
 
 	// First pass: find all matching line indices
 	var matchIndices []int
 	for j, line := range lines {
-		if strings.Contains(strings.ToLower(line), patternLower) {
+		if re.MatchString(line) {
 			matchIndices = append(matchIndices, j)
 		}
+	}
+
+	// Build set of matching line indices for O(1) lookup
+	matchSet := make(map[int]bool, len(matchIndices))
+	for _, j := range matchIndices {
+		matchSet[j] = true
 	}
 
 	// Second pass: emit context windows, skipping already-emitted lines
@@ -172,7 +219,7 @@ func grepLines(text string, pattern string) []GrepMatch {
 			matches = append(matches, GrepMatch{
 				LineNum: k + 1,
 				Line:    lines[k],
-				IsMatch: k == j,
+				IsMatch: matchSet[k],
 			})
 		}
 	}

@@ -14,7 +14,7 @@ ghx explore <owner/repo>                    # Branch + tree + README in 1 API ca
 ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (GraphQL batching)
 ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
-ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context)
+ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context, regex)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
 ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
 ghx search "<query>"                        # Code search (AND matching, shows matching lines)
@@ -111,6 +111,7 @@ ghx search "path:llms.txt"                                # Find files by name
 3. **Flag ordering in `read`.** `ghx read owner/repo file --map` works. `ghx read --map owner/repo file` does NOT.
 4. **Not all repos use `main`.** ghx handles this automatically.
 5. **Unknown flags are rejected.** Exit 2 with clear error. Intentional — prevents silent query corruption.
+6. **`--grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `--grep "ref|defs|definition"`.
 
 ## Anti-Patterns
 
