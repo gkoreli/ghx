@@ -2,6 +2,141 @@ package ghx
 
 import "testing"
 
+func TestParseFileResponse_Directory(t *testing.T) {
+	data := map[string]interface{}{
+		"entries": []interface{}{
+			map[string]interface{}{"name": "index.ts", "type": "blob"},
+			map[string]interface{}{"name": "utils", "type": "tree"},
+		},
+	}
+	r := parseFileResponse("src/lib", data, "", &ReadOpts{})
+	if r.NotFound {
+		t.Fatal("directory reported as not found")
+	}
+	if len(r.DirEntries) != 2 {
+		t.Fatalf("got %d dir entries, want 2", len(r.DirEntries))
+	}
+	if r.DirEntries[0].Name != "index.ts" || r.DirEntries[0].Type != "blob" {
+		t.Errorf("entry[0] = %+v, want {index.ts blob}", r.DirEntries[0])
+	}
+	if r.DirEntries[1].Name != "utils" || r.DirEntries[1].Type != "tree" {
+		t.Errorf("entry[1] = %+v, want {utils tree}", r.DirEntries[1])
+	}
+}
+
+func TestParseFileResponse_EmptyDirectory(t *testing.T) {
+	data := map[string]interface{}{
+		"entries": []interface{}{},
+	}
+	r := parseFileResponse("empty-dir", data, "", &ReadOpts{})
+	if r.NotFound {
+		t.Fatal("empty directory reported as not found")
+	}
+	if r.DirEntries == nil {
+		t.Fatal("DirEntries is nil for empty directory")
+	}
+	if len(r.DirEntries) != 0 {
+		t.Fatalf("got %d entries, want 0", len(r.DirEntries))
+	}
+}
+
+func TestParseFileResponse_Blob(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "hello world\n",
+		"byteSize": float64(12),
+	}
+	r := parseFileResponse("file.txt", data, "", &ReadOpts{})
+	if r.NotFound {
+		t.Fatal("file reported as not found")
+	}
+	if r.Content != "hello world\n" {
+		t.Errorf("content = %q, want %q", r.Content, "hello world\n")
+	}
+	if r.ByteSize != 12 {
+		t.Errorf("byteSize = %d, want 12", r.ByteSize)
+	}
+}
+
+func TestParseFileResponse_BlobWithGrep(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "line one\nfoo bar\nline three\n",
+		"byteSize": float64(28),
+	}
+	r := parseFileResponse("file.txt", data, "", &ReadOpts{Grep: "foo"})
+	if r.NotFound {
+		t.Fatal("file reported as not found")
+	}
+	if len(r.GrepHits) == 0 {
+		t.Fatal("no grep hits")
+	}
+	found := false
+	for _, h := range r.GrepHits {
+		if h.IsMatch && h.Line == "foo bar" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected matching line 'foo bar' not found in grep hits")
+	}
+}
+
+func TestParseFileResponse_BlobWithMap(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "import React from 'react'\nexport const App = () => {}\nconst x = 1\n",
+		"byteSize": float64(70),
+	}
+	r := parseFileResponse("app.tsx", data, "", &ReadOpts{Map: true})
+	if r.NotFound {
+		t.Fatal("file reported as not found")
+	}
+	if len(r.MapLines) == 0 {
+		t.Fatal("no map lines")
+	}
+	if r.MapChars == 0 {
+		t.Error("mapChars should be > 0")
+	}
+}
+
+func TestParseFileResponse_BlobWithLines(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "line1\nline2\nline3\nline4\nline5\n",
+		"byteSize": float64(30),
+	}
+	r := parseFileResponse("file.txt", data, "", &ReadOpts{Lines: "2-4"})
+	if r.Content != "line2\nline3\nline4" {
+		t.Errorf("content = %q, want %q", r.Content, "line2\nline3\nline4")
+	}
+}
+
+func TestParseFileResponse_BlobWithGlobPattern(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "content\n",
+		"byteSize": float64(8),
+	}
+	r := parseFileResponse("src/index.ts", data, "src/*.ts", &ReadOpts{})
+	if r.GlobPattern != "src/*.ts" {
+		t.Errorf("globPattern = %q, want %q", r.GlobPattern, "src/*.ts")
+	}
+}
+
+func TestParseFileResponse_NilData(t *testing.T) {
+	r := parseFileResponse("missing.txt", "not a map", "", &ReadOpts{})
+	if !r.NotFound {
+		t.Error("expected NotFound for non-map data")
+	}
+}
+
+func TestParseFileResponse_EmptyText(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "",
+		"byteSize": float64(0),
+	}
+	r := parseFileResponse("empty.txt", data, "", &ReadOpts{})
+	if !r.NotFound {
+		t.Error("expected NotFound for empty text")
+	}
+}
+
 func TestNormalizeBRE(t *testing.T) {
 	tests := []struct {
 		name string

@@ -4,9 +4,23 @@ One command does what takes 3-5 API calls. Batch file reads, code maps, search �
 
 ## Why
 
-AI agents exploring GitHub face a reliability gap: *"Did I find nothing because nothing exists, or because I used the tool wrong?"* Raw `gh` commands have silent failure modes — `gh search code` wraps in quotes without telling you, `gh api contents/` returns base64, README requires a separate call. The agent can't distinguish "no results" from "wrong flags."
+An agent wants to understand `packages/shadcn/src/utils/` in [shadcn-ui/ui](https://github.com/shadcn-ui/ui):
 
-ghx eliminates this by encoding the right defaults into every command. One call returns enough context to decide the next action.
+**With `gh` CLI** — 4 turns, 4 API calls, reads 3 full files (3,761 tokens), sees 3 of 34 files:
+```
+gh api /repos/shadcn-ui/ui/contents/packages/shadcn/src/utils       → JSON with shas, urls, links (480 tokens for a file list)
+gh api /repos/.../get-config.ts --jq '.content' | base64 -d         → full file (1,981 tokens — agent only needed exports)
+gh api /repos/.../registries.ts --jq '.content' | base64 -d         → full file (676 tokens)
+gh api /repos/.../frameworks.ts --jq '.content' | base64 -d         → full file (624 tokens)
+```
+
+**With ghx** — 2 turns, 2 API calls, maps 10 files (3,058 tokens), sees signatures of all 10:
+```
+ghx read shadcn-ui/ui packages/shadcn/src/utils                     → directory listing (199 tokens)
+ghx read shadcn-ui/ui "packages/shadcn/src/utils/*.ts" --map        → signatures of 10 files (2,859 tokens)
+```
+
+Same token budget. The `gh` agent read 3 full files. The ghx agent saw the structure of 10 — imports, exports, function signatures — and knows which ones to drill into. Pass a file, get content. Pass a directory, get a listing. Pass a glob, get matching files. Same command, always useful output.
 
 | Tool | Files per call | Matching context | Programmable | Dependencies |
 |------|---------------|-----------------|-------------|-------------|
@@ -56,6 +70,7 @@ No install step — npx downloads and caches the binary on first run.
 ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
 ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files (GraphQL batching)
+ghx read <owner/repo> <dir>                 # Directory path → returns file listing
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns with structural map
 ghx read <owner/repo> --map <f1> [f2]       # Signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --grep "pat" <f>      # Matching lines only (ERE regex, 2 lines context)
@@ -114,11 +129,11 @@ Designed for eager context injection via spawn hooks — the agent always has th
 
 ## How It Was Built
 
-23 agent sessions, 2,500+ conversation turns, 3 rewrites, 10 ADRs. The full story: **[Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)**
+23 agent sessions, 2,500+ conversation turns, 3 rewrites, 12 ADRs. The full story: **[Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)**
 
 ## How It Works
 
-Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call. Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
+Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call — and if a path is a directory, returns its file listing instead of "not found" (via `... on Tree` inline fragments in the same query, zero extra API calls). Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
 
 Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox with esbuild TypeScript transpilation. Tools are injected as synchronous functions on a `codemode` global object. Max 20 tool calls per execution, 64KB code size limit.
 

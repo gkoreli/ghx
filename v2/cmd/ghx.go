@@ -38,7 +38,7 @@ var reposCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "%d repos found\n", total)
+		fmt.Printf("%d repos found\n", total)
 		if len(results) == 0 {
 			os.Exit(1)
 		}
@@ -137,6 +137,18 @@ var readCmd = &cobra.Command{
 				fmt.Printf("=== %s (not found) ===\n\n", r.Path)
 				continue
 			}
+			if len(r.DirEntries) > 0 {
+				fmt.Printf("=== %s (directory, %d entries) ===\n", r.Path, len(r.DirEntries))
+				for _, e := range r.DirEntries {
+					suffix := ""
+					if e.Type == "tree" {
+						suffix = "/"
+					}
+					fmt.Printf("  %s%s\n", e.Name, suffix)
+				}
+				fmt.Printf("→ use: ghx read %s \"%s/*\" --map\n\n", args[0], r.Path)
+				continue
+			}
 			// Skip files with no grep matches (avoid empty headers)
 			if grepPattern != "" && len(r.GrepHits) == 0 {
 				continue
@@ -203,9 +215,14 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Fprintf(os.Stderr, "%d results (showing %d)\n", result.Total, len(result.Matches))
+		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
 		if result.Incomplete {
-			fmt.Fprintln(os.Stderr, "⚠ Results may be incomplete (query timed out)")
+			fmt.Println("⚠ Results may be incomplete (query timed out)")
+		}
+
+		if len(result.Matches) == 0 {
+			fmt.Println("→ To search repos by topic, use: ghx repos \"<query>\"")
+			os.Exit(1)
 		}
 
 		for _, m := range result.Matches {

@@ -14,7 +14,7 @@ description: GitHub code exploration via MCP. 7 tools — 5 direct + code meta-t
 | Tool | Input | What it does |
 |------|-------|-------------|
 | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call |
-| `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). `map` = signatures only (~92% reduction) |
+| `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). Directory paths return file listing. `map` = signatures only (~92% reduction) |
 | `search` | `query` (required), `limit`, `full` | Code search with AND matching + matching lines |
 | `repos` | `query` (required), `limit` | Search repos with README preview |
 | `tree` | `repo` (required), `path`, `depth` | File tree listing (default: all files, no depth limit. With depth: includes dirs with /) |
@@ -58,7 +58,7 @@ type TreeInput = { repo: string; path?: string; depth?: number }
 
 declare const codemode: {
   explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[] }[];
+  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[] }[];
   repos: (input: ReposInput) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: SearchInput) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: TreeInput) => string[];
@@ -132,25 +132,43 @@ return { lang: "unknown", files: repo.files.slice(0, 10) };
 
 ## Chain of Thought
 
-**Always start surgical, escalate only when needed.**
+**Don't follow a sequence. Pick the right starting point based on what you already know.**
 
+**Know what you're looking for?** Start with `search` or direct `read`:
 ```
-1. explore({ repo: "owner/repo" })                    → What's in this repo?
-2. read({ repo: "...", paths: "f1,f2", map: true })   → What do these files define? (92% fewer tokens)
-3. read({ repo: "...", paths: "f1", grep: "pattern" }) → Where exactly is X?
-4. read({ repo: "...", paths: "f1" })                  → Full file (only when needed)
+search({ query: "pattern repo:owner/repo" })              → Find files by content
+read({ repo: "...", paths: "src/utils", map: true })       → Works for files AND directories
+read({ repo: "...", paths: "src/**/*.ts", map: true })     → Glob to scan many files at once
 ```
 
-**When to escalate to `code`:**
-- Step 1 result determines what to do in step 2 → use `code` (one round-trip)
+**Don't know the repo at all?** Start with `explore`:
+```
+explore({ repo: "owner/repo" })                            → Structure + README (orientation)
+```
+
+**Then drill in — map before reading, grep before full read:**
+```
+read({ repo: "...", paths: "f1,f2", map: true })           → Signatures of many files (92% fewer tokens)
+read({ repo: "...", paths: "f1", grep: "pattern" })        → Just the matching lines
+read({ repo: "...", paths: "f1" })                         → Full file (only when needed)
+```
+
+`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Spend the same budget, learn more.
+
+**When to use `code` instead of direct tools:**
+- Result of tool A determines what to call for tool B → use `code` (one round-trip)
 - Need to filter/transform results before returning → use `code`
 - Simple single query → use direct tool
 
 ## Search Query Syntax
 
-Same as GitHub REST code search API. Every word is AND'd — a file must contain ALL words to match. More words = fewer results, not better results. Search 1-2 terms, not 5.
+`search` searches **inside file contents** — use it to find code patterns, not to discover repos. To discover repos by topic, use `repos`.
+
+Every word is AND'd — a file must contain ALL words to match. More words = fewer results, not better results. Search 1-2 terms, not 5.
 
 **Valid qualifiers:** `repo:`, `org:`, `path:`, `filename:`, `extension:`, `language:`, `in:file`, `in:path`
+
+`path:` filters by file path, not by "repos containing this file." `path:src` = only search files under `src/`. Use `filename:` to find files by name.
 
 **DO NOT USE (web-only, silently wrong):** `OR`, `NOT`, `symbol:`, `content:`, `is:`, regex
 
@@ -159,13 +177,14 @@ Same as GitHub REST code search API. Every word is AND'd — a file must contain
 ## Gotchas
 
 1. **`read` paths are comma-separated.** `paths: "f1.go,f2.go"` not `paths: ["f1.go", "f2.go"]`.
-2. **Response truncation at 24K chars.** Use `map: true` or `grep` to keep results small. The `code` tool is especially prone to this when reading multiple full files.
-3. **`search` uses AND matching.** `"foo bar"` finds files with both words anywhere. For exact phrase, wrap in escaped quotes: `"\"foo bar\""`.
-4. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT` are treated as literal text in the REST API.
-5. **`code` tool: no TypeScript.** Type stubs are for your reference. Write plain JS.
-6. **`code` tool: return is required.** Bare expressions don't auto-return (except simple identifiers). Always use `return`.
-7. **`grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `grep: "ref|defs|definition"`.
-8. **Glob + grep skips non-matching files.** Like `grep -r --include`, only files with hits are shown.
+2. **`read` handles directories.** If a path is a directory, returns `dirEntries` (file listing) instead of `notFound`. No wasted round-trips.
+3. **Response truncation at 24K chars.** Use `map: true` or `grep` to keep results small. The `code` tool is especially prone to this when reading multiple full files.
+4. **`search` uses AND matching.** `"foo bar"` finds files with both words anywhere. For exact phrase, wrap in escaped quotes: `"\"foo bar\""`.
+5. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT` are treated as literal text in the REST API.
+6. **`code` tool: no TypeScript.** Type stubs are for your reference. Write plain JS.
+7. **`code` tool: return is required.** Bare expressions don't auto-return (except simple identifiers). Always use `return`.
+8. **`grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `grep: "ref|defs|definition"`.
+9. **Glob + grep skips non-matching files.** Like `grep -r --include`, only files with hits are shown.
 
 ## Anti-Patterns
 

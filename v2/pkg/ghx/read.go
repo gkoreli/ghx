@@ -20,9 +20,10 @@ type FileResult struct {
 	Content     string      `json:"content"`  // full text (empty if using grep/map)
 	ByteSize    int         `json:"byteSize"`
 	NotFound    bool        `json:"notFound"`
-	GrepHits    []GrepMatch `json:"grepHits,omitempty"` // populated when Grep is set
-	MapLines    []string    `json:"mapLines,omitempty"` // populated when Map is true
-	MapChars    int         `json:"mapChars,omitempty"` // original char count (for reduction stats)
+	DirEntries  []FileEntry `json:"dirEntries,omitempty"` // populated when path is a directory
+	GrepHits    []GrepMatch `json:"grepHits,omitempty"`   // populated when Grep is set
+	MapLines    []string    `json:"mapLines,omitempty"`   // populated when Map is true
+	MapChars    int         `json:"mapChars,omitempty"`   // original char count (for reduction stats)
 	GlobPattern string      `json:"globPattern,omitempty"` // the glob that matched this file (empty for exact paths)
 }
 
@@ -89,7 +90,7 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 		}
 		alias := fmt.Sprintf("f%d", i)
 		escapedPath := f
-		aliases = append(aliases, fmt.Sprintf(`%s: object(expression: "HEAD:%s") { ... on Blob { text byteSize } }`, alias, escapedPath))
+		aliases = append(aliases, fmt.Sprintf(`%s: object(expression: "HEAD:%s") { ... on Blob { text byteSize } ... on Tree { entries { name type } } }`, alias, escapedPath))
 	}
 
 	query := fmt.Sprintf(`{
@@ -124,50 +125,67 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 			continue
 		}
 
-		// Parse the blob data
-		blobMap, ok := fileData.(map[string]interface{})
-		if !ok {
-			results = append(results, FileResult{Path: f, NotFound: true})
-			continue
-		}
-
-		text, _ := blobMap["text"].(string)
-		byteSize := 0
-		if bs, ok := blobMap["byteSize"].(float64); ok {
-			byteSize = int(bs)
-		}
-
-		if text == "" {
-			results = append(results, FileResult{Path: f, NotFound: true})
-			continue
-		}
-
-		result := FileResult{
-			Path:        f,
-			ByteSize:    byteSize,
-			GlobPattern: globOrigin[f],
-		}
-
-		if opts.Grep != "" {
-			result.GrepHits = grepLines(text, opts.Grep)
-		} else if opts.Lines != "" {
-			result.Content = extractLines(text, opts.Lines)
-		} else if opts.Map {
-			ext := getFileExtension(f)
-			pat := getMapPattern(ext)
-			result.MapLines = mapLines(text, pat)
-			result.MapChars = len(text)
-			if len(result.MapLines) == 0 {
-				result.MapLines = []string{"(no signatures detected)"}
-			}
-		} else {
-			result.Content = text
-		}
-
+		result := parseFileResponse(f, fileData, globOrigin[f], opts)
 		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+// parseFileResponse converts a raw GraphQL response for a single file/directory into a FileResult.
+func parseFileResponse(path string, data interface{}, globPattern string, opts *ReadOpts) FileResult {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return FileResult{Path: path, NotFound: true}
+	}
+
+	// Directory (Tree)
+	if entries, ok := m["entries"].([]interface{}); ok {
+		dirEntries := make([]FileEntry, 0, len(entries))
+		for _, e := range entries {
+			if em, ok := e.(map[string]interface{}); ok {
+				name, _ := em["name"].(string)
+				typ, _ := em["type"].(string)
+				dirEntries = append(dirEntries, FileEntry{Name: name, Type: typ})
+			}
+		}
+		return FileResult{Path: path, DirEntries: dirEntries}
+	}
+
+	// File (Blob)
+	text, _ := m["text"].(string)
+	byteSize := 0
+	if bs, ok := m["byteSize"].(float64); ok {
+		byteSize = int(bs)
+	}
+
+	if text == "" {
+		return FileResult{Path: path, NotFound: true}
+	}
+
+	result := FileResult{
+		Path:        path,
+		ByteSize:    byteSize,
+		GlobPattern: globPattern,
+	}
+
+	if opts.Grep != "" {
+		result.GrepHits = grepLines(text, opts.Grep)
+	} else if opts.Lines != "" {
+		result.Content = extractLines(text, opts.Lines)
+	} else if opts.Map {
+		ext := getFileExtension(path)
+		pat := getMapPattern(ext)
+		result.MapLines = mapLines(text, pat)
+		result.MapChars = len(text)
+		if len(result.MapLines) == 0 {
+			result.MapLines = []string{"(no signatures detected)"}
+		}
+	} else {
+		result.Content = text
+	}
+
+	return result
 }
 
 // normalizeBRE converts BRE-style escaped metacharacters to their ERE equivalents.

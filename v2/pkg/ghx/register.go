@@ -54,7 +54,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "read",
 		Description: "Read multiple files from a GitHub repo in one call",
 		Func:        wrapRead,
-		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number }[]",
+		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number }[]",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
