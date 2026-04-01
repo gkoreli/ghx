@@ -154,3 +154,69 @@ All three entry points (CLI, MCP, codemode) call `Read()` — glob expansion hap
 ### Dependencies
 
 - `github.com/bmatcuk/doublestar/v4` — battle-tested glob matcher (285K+ downloads, zero transitive deps). Supports `**`, `{alts}`, `[classes]`, `?`.
+
+
+## Future Vision & Adjacent Ideas
+
+### Meta-Principle: Training-Data Alignment
+
+Today's session revealed a pattern: every flag name, parameter, and behavior carries implicit expectations from 50 years of Unix tooling and billions of lines of training data. When ghx violates those expectations, agents can't self-correct — they can't distinguish "I used the tool wrong" from "the data doesn't exist." The design principle going forward: **align with what agents already know, don't invent new semantics.**
+
+- `--grep` must behave like grep → fixed (ERE regex + BRE normalization)
+- Glob patterns must work like filesystem globs → fixed (doublestar)
+- Search must not silently degrade → partially addressed (web-only qualifier warnings)
+- Output format must match tool conventions → grep skips non-matching files, hints use `→` at end
+
+### Grep Flag Parity
+
+Agents write `grep -c`, `grep -l`, `grep -v` from muscle memory. Currently `--grep` only supports the default mode (matching lines + context).
+
+- `--grep-count` or `--grep -c` — count of matches per file, no content. Useful with glob to survey a codebase
+- `--grep-files` or `--grep -l` — list files with matches only. Pairs with glob for discovery
+- `--grep-invert` or `--grep -v` — invert match. Agents use this to exclude patterns
+- Decision: single-letter flags (`-c`, `-l`, `-v`) are most aligned with training data but conflict with cobra's flag style. Could use `--grep-mode count|files|invert` as compromise
+
+### Glob Negation
+
+Agents write `!**/*.test.ts` to exclude test files. doublestar doesn't support negation natively.
+
+- Approach: split patterns on `!` prefix, expand positive globs, then filter out negative matches
+- Common patterns: `!**/*_test.go`, `!**/node_modules/**`, `!**/*.test.ts`
+- Low complexity, high agent alignment
+
+### Codemode Tree Caching
+
+When an agent runs multiple glob reads in codemode, each one fetches the tree independently.
+
+- `codemode.read({files: ["src/**/*.ts"]})` → fetches tree
+- `codemode.read({files: ["src/**/*.go"]})` → fetches tree again (same repo, same data)
+- Solution: cache tree per repo within a codemode execution session (max 20 tool calls, short-lived)
+- Saves 1 API call per subsequent glob read on the same repo
+
+### Branch Support in Read
+
+Agents exploring PRs need to read from non-default branches. Currently `read` always uses HEAD.
+
+- Syntax option: `ghx read owner/repo@branch file` — natural, git-like
+- Syntax option: `--branch` / `--ref` flag
+- Affects: read, tree, explore (all use `HEAD:` in GraphQL expressions)
+- GitHub MCP server supports `ref` parameter — we should too
+
+### Output Modes
+
+- `--json` flag for structured JSON output on all commands (not just codemode)
+- Agents parsing text output is fragile — structured output eliminates regex parsing
+- MCP already returns JSON; CLI should optionally match
+- Low priority — codemode already provides structured access
+
+### Adjacent Problem Space
+
+- **`read` on directories**: `ghx read repo src/` silently returns "not found." Should either redirect to `explore` behavior or error with hint
+- **Rate limit resilience**: search hits 9 req/min. Auto-wait + retry instead of failing. Agents can't handle rate limits gracefully
+- **Diff support**: `ghx diff repo branch1..branch2 file` — agents comparing versions across branches/PRs. GitHub has compare API
+- **Blame**: `ghx blame repo file` — who wrote this line? Useful for agent investigation workflows
+- **Search result piping**: `ghx search "pattern" --format read | xargs ghx read` — connect search discovery to file reading without codemode
+
+### Competitive Landscape
+
+GitHub's official MCP server (`github/github-mcp-server`) has `get_file_contents` (single file, no batching), `search_code` (no matching context), `get_repository_tree`. No grep, no map, no glob, no batching, no codemode. ghx's value prop remains strong: **one command does what takes 3-5 API calls, with agent-aligned defaults.**
