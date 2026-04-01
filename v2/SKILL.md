@@ -122,12 +122,12 @@ ghx search "path:llms.txt"                                # Find files by name
 - ❌ Multiple `gh api` calls for explore — use `ghx explore` (1 call)
 - ❌ Using web-only qualifiers in search — silently wrong results
 - ❌ Paginating broad searches — refine with `repo:`, `language:`, `path:` instead
-- ❌ `gh search code` for multi-word queries — silently wraps in quotes, returns nothing
+- ❌ Broad globs like `**/*.ts` on large repos — matches thousands, reads only 10. Narrow the pattern first
 
 ## Best Practices
 
 - **Batch reads.** `ghx read repo f1 f2 f3` = 1 API call. Three separate reads = 3 calls.
-- **Glob to scan.** `ghx read repo "src/**/*.ts" --map` = tree + read in 2 API calls. Max 10 files.
+- **Glob to scan.** `ghx read repo "src/**/*.ts" --map` = tree + read in 2 API calls. Max 10 files; shows all matched paths if 11-50, hint to narrow if more.
 - **Map before reading.** `--map` first, then `--grep` or `--lines` for specifics.
 - **Refine search, don't paginate.** Add qualifiers instead of fetching page 2.
 - **Use `ghx code` for multi-step workflows.** One round-trip beats three sequential commands.

@@ -215,7 +215,7 @@ func handleRead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	lineRange := request.GetString("lines", "")
 	mapMode := request.GetBool("map", false)
 
-	results, err := ghxlib.Read(repo, paths, ghxlib.ReadOpts{
+	results, err := ghxlib.Read(repo, paths, &ghxlib.ReadOpts{
 		Grep:  grepPattern,
 		Lines: lineRange,
 		Map:   mapMode,

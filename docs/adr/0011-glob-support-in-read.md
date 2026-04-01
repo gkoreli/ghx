@@ -138,6 +138,15 @@ pkg/ghx/
 
 When `--grep` is combined with globs, files with zero grep matches are silently skipped in CLI output. This matches `grep -r --include='*.ts' pattern` behavior — 50 years of convention: only show files with matches.
 
+### Truncation Output
+
+When a glob matches more files than the 10-file read limit, CLI output follows a three-tier approach:
+- **≤ 10 matches**: no summary, just results
+- **11–50 matches**: file list at top (all matched paths), content for first 10, hint at bottom to narrow
+- **> 50 matches**: count only at top (listing 2000+ paths is wasteful), content for first 10, hint at bottom
+
+The `→` hint at the end follows ghx's existing hint convention. The `ReadOpts.Globs` field (populated after `Read()`) gives callers access to the full `GlobResult` data for custom rendering.
+
 ### Entry Points
 
 All three entry points (CLI, MCP, codemode) call `Read()` — glob expansion happens inside `Read()` transparently. No caller changes needed.

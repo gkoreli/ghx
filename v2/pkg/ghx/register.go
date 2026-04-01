@@ -131,7 +131,7 @@ func wrapRead(args map[string]any) (any, error) {
 	if m, ok := args["map"].(bool); ok {
 		mapMode = m
 	}
-	return Read(repo, files, ReadOpts{Grep: grep, Map: mapMode})
+	return Read(repo, files, &ReadOpts{Grep: grep, Map: mapMode})
 }
 
 func wrapTree(args map[string]any) (any, error) {

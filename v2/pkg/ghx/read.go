@@ -30,11 +30,14 @@ type ReadOpts struct {
 	Grep  string // filter to matching lines with 2 lines context
 	Lines string // line range "N-M"
 	Map   bool   // structural signatures only
+
+	// Output: populated after Read() when globs are used
+	Globs []GlobResult
 }
 
 // Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.
 // Returns one FileResult per requested file.
-func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
+func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid repo format, use owner/repo")
@@ -60,6 +63,7 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 			return nil, fmt.Errorf("glob expansion failed: %w", err)
 		}
 		expanded, globs := expandGlobs(files, tree, 10)
+		opts.Globs = globs
 		for _, gr := range globs {
 			for _, m := range gr.Matches {
 				globOrigin[m] = gr.Pattern

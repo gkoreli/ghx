@@ -175,3 +175,4 @@ Same as GitHub REST code search API. Every word is AND'd — a file must contain
 - ❌ Writing TypeScript in the `code` tool — stripped by transpiler but may cause subtle issues
 - ❌ Forgetting `return` in `code` — you get `undefined` back
 - ❌ Reading 10 full files in `code` — hits 24K truncation. Use `map: true` first
+- ❌ Broad globs like `**/*.ts` on large repos — matches thousands, reads only 10. Narrow the pattern first

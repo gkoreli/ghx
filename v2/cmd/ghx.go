@@ -108,13 +108,28 @@ var readCmd = &cobra.Command{
 		lineRange, _ := cmd.Flags().GetString("lines")
 		mapMode, _ := cmd.Flags().GetBool("map")
 
-		results, err := ghxlib.Read(args[0], args[1:], ghxlib.ReadOpts{
+		opts := &ghxlib.ReadOpts{
 			Grep:  grepPattern,
 			Lines: lineRange,
 			Map:   mapMode,
-		})
+		}
+		results, err := ghxlib.Read(args[0], args[1:], opts)
 		if err != nil {
 			return err
+		}
+
+		// Show glob summary when matches were truncated
+		for _, gr := range opts.Globs {
+			n := len(gr.Matches)
+			if n > len(results) {
+				fmt.Printf("# glob %q matched %d files (reading first %d)\n", gr.Pattern, n, len(results))
+				if n <= 50 {
+					for _, m := range gr.Matches {
+						fmt.Printf("#   %s\n", m)
+					}
+				}
+				fmt.Println()
+			}
 		}
 
 		for _, r := range results {
@@ -154,6 +169,14 @@ var readCmd = &cobra.Command{
 			}
 			fmt.Println()
 		}
+
+		// Hint at the end when glob matched more than we could read
+		for _, gr := range opts.Globs {
+			if len(gr.Matches) > len(results) {
+				fmt.Printf("→ glob %q matched %d files, showing %d. Narrow the pattern to see others.\n", gr.Pattern, len(gr.Matches), len(results))
+			}
+		}
+
 		return nil
 	},
 }
