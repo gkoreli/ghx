@@ -42,7 +42,13 @@ func Explore(repo string, path string) (*ExploreResult, error) {
 				tree: object(expression: "HEAD:") {
 					... on Tree { entries { name type } }
 				}
-				readme: object(expression: "HEAD:README.md") {
+				readme1: object(expression: "HEAD:README.md") {
+					... on Blob { text }
+				}
+				readme2: object(expression: "HEAD:readme.md") {
+					... on Blob { text }
+				}
+				readme3: object(expression: "HEAD:Readme.md") {
 					... on Blob { text }
 				}
 			}
@@ -60,9 +66,15 @@ func Explore(repo string, path string) (*ExploreResult, error) {
 						Type string `json:"type"`
 					} `json:"entries"`
 				} `json:"tree"`
-				Readme struct {
+				Readme1 struct {
 					Text string `json:"text"`
-				} `json:"readme"`
+				} `json:"readme1"`
+				Readme2 struct {
+					Text string `json:"text"`
+				} `json:"readme2"`
+				Readme3 struct {
+					Text string `json:"text"`
+				} `json:"readme3"`
 			} `json:"repository"`
 		}
 
@@ -75,11 +87,20 @@ func Explore(repo string, path string) (*ExploreResult, error) {
 			files[i] = FileEntry{Name: e.Name, Type: e.Type}
 		}
 
+		// Pick first non-empty README variant
+		readme := resp.Repository.Readme1.Text
+		if readme == "" {
+			readme = resp.Repository.Readme2.Text
+		}
+		if readme == "" {
+			readme = resp.Repository.Readme3.Text
+		}
+
 		return &ExploreResult{
 			Description: resp.Repository.Description,
 			Branch:      resp.Repository.DefaultBranchRef.Name,
 			Files:       files,
-			Readme:      resp.Repository.Readme.Text,
+			Readme:      readme,
 		}, nil
 	}
 
