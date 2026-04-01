@@ -56,6 +56,10 @@ No install step — npx downloads and caches the binary on first run.
 ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
 ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files (GraphQL batching)
+ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns with structural map
+ghx read <owner/repo> --map <f1> [f2]       # Signatures, imports, types (~92% token reduction)
+ghx read <owner/repo> --grep "pat" <f>      # Matching lines only (ERE regex, 2 lines context)
+ghx read <owner/repo> --lines 42-80 <f>     # Specific line range
 ghx search "<query>"                        # Code search with matching lines
 ghx repos "<query>"                         # Repo search with README preview
 ghx tree <owner/repo> [path]                # Full recursive tree
@@ -110,7 +114,7 @@ Designed for eager context injection via spawn hooks — the agent always has th
 
 ## How It Works
 
-Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call. `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
+Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call. Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
 
 Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox with esbuild TypeScript transpilation. Tools are injected as synchronous functions on a `codemode` global object. Max 20 tool calls per execution, 64KB code size limit.
 
@@ -118,7 +122,7 @@ Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox wit
 
 ```
 v2/
-├── pkg/ghx/       — core library (Explore, Read, Search, Repos, Tree)
+├── pkg/ghx/       — core library (Explore, Read, Search, Repos, Tree, Glob)
 ├── pkg/codemode/  — JS executor (goja sandbox, TS transpilation, type generation)
 └── cmd/           — CLI frontend (cobra) + MCP server (mcp-go)
 ```
