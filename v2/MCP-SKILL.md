@@ -14,7 +14,7 @@ description: GitHub code exploration via MCP. 7 tools — 5 direct + code meta-t
 | Tool | Input | What it does |
 |------|-------|-------------|
 | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call |
-| `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. `map` = signatures only (~92% reduction) |
+| `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). `map` = signatures only (~92% reduction) |
 | `search` | `query` (required), `limit`, `full` | Code search with AND matching + matching lines |
 | `repos` | `query` (required), `limit` | Search repos with README preview |
 | `tree` | `repo` (required), `path`, `depth` | File tree listing (default: all files, no depth limit. With depth: includes dirs with /) |
@@ -58,7 +58,7 @@ type TreeInput = { repo: string; path?: string; depth?: number }
 
 declare const codemode: {
   explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean }[];
+  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[] }[];
   repos: (input: ReposInput) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: SearchInput) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: TreeInput) => string[];
@@ -148,7 +148,7 @@ return { lang: "unknown", files: repo.files.slice(0, 10) };
 
 ## Search Query Syntax
 
-Same as GitHub REST code search API. Multi-word = AND matching.
+Same as GitHub REST code search API. Every word is AND'd — a file must contain ALL words to match. More words = fewer results, not better results. Search 1-2 terms, not 5.
 
 **Valid qualifiers:** `repo:`, `org:`, `path:`, `filename:`, `extension:`, `language:`, `in:file`, `in:path`
 
@@ -164,6 +164,8 @@ Same as GitHub REST code search API. Multi-word = AND matching.
 4. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT` are treated as literal text in the REST API.
 5. **`code` tool: no TypeScript.** Type stubs are for your reference. Write plain JS.
 6. **`code` tool: return is required.** Bare expressions don't auto-return (except simple identifiers). Always use `return`.
+7. **`grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `grep: "ref|defs|definition"`.
+8. **Glob + grep skips non-matching files.** Like `grep -r --include`, only files with hits are shown.
 
 ## Anti-Patterns
 
