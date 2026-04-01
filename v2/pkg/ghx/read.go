@@ -41,6 +41,13 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 	owner := parts[0]
 	name := parts[1]
 
+	// GitHub API requires exact file paths — reject globs early with actionable error
+	for _, f := range files {
+		if strings.ContainsAny(f, "*?[") {
+			return nil, fmt.Errorf("glob patterns not supported (got %q) — GitHub API requires exact paths. Use 'ghx tree' to list files, then read specific paths", f)
+		}
+	}
+
 	gql, err := api.DefaultGraphQLClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)

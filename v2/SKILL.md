@@ -88,7 +88,7 @@ declare const codemode: {
 
 ## Search Query Syntax
 
-`ghx search` uses GitHub REST code search API. Multi-word = AND matching (both words anywhere in file).
+`ghx search` uses GitHub REST code search API. Every word is AND'd — a file must contain ALL words to match. More words = fewer results, not better results. Search 1-2 terms, not 5.
 
 ```bash
 ghx search "addClass repo:jquery/jquery"                  # Scoped to repo
