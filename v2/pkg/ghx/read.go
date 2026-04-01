@@ -16,13 +16,14 @@ type GrepMatch struct {
 }
 
 type FileResult struct {
-	Path     string      `json:"path"`
-	Content  string      `json:"content"`  // full text (empty if using grep/map)
-	ByteSize int         `json:"byteSize"`
-	NotFound bool        `json:"notFound"`
-	GrepHits []GrepMatch `json:"grepHits,omitempty"` // populated when Grep is set
-	MapLines []string    `json:"mapLines,omitempty"` // populated when Map is true
-	MapChars int         `json:"mapChars,omitempty"` // original char count (for reduction stats)
+	Path        string      `json:"path"`
+	Content     string      `json:"content"`  // full text (empty if using grep/map)
+	ByteSize    int         `json:"byteSize"`
+	NotFound    bool        `json:"notFound"`
+	GrepHits    []GrepMatch `json:"grepHits,omitempty"` // populated when Grep is set
+	MapLines    []string    `json:"mapLines,omitempty"` // populated when Map is true
+	MapChars    int         `json:"mapChars,omitempty"` // original char count (for reduction stats)
+	GlobPattern string      `json:"globPattern,omitempty"` // the glob that matched this file (empty for exact paths)
 }
 
 type ReadOpts struct {
@@ -41,11 +42,34 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 	owner := parts[0]
 	name := parts[1]
 
-	// GitHub API requires exact file paths — reject globs early with actionable error
+	// Expand globs: detect glob patterns, fetch tree, resolve to exact paths
+	hasGlobs := false
 	for _, f := range files {
-		if strings.ContainsAny(f, "*?[") {
-			return nil, fmt.Errorf("glob patterns not supported (got %q) — GitHub API requires exact paths. Use 'ghx tree' to list files, then read specific paths", f)
+		if isGlob(f) {
+			hasGlobs = true
+			break
 		}
+	}
+
+	// Track which glob each file came from (empty string for exact paths)
+	globOrigin := make(map[string]string)
+
+	if hasGlobs {
+		tree, err := fetchTree(repo)
+		if err != nil {
+			return nil, fmt.Errorf("glob expansion failed: %w", err)
+		}
+		expanded, globs := expandGlobs(files, tree, 10)
+		for _, gr := range globs {
+			for _, m := range gr.Matches {
+				globOrigin[m] = gr.Pattern
+			}
+		}
+		files = expanded
+	}
+
+	if len(files) == 0 {
+		return nil, nil
 	}
 
 	gql, err := api.DefaultGraphQLClient()
@@ -115,8 +139,9 @@ func Read(repo string, files []string, opts ReadOpts) ([]FileResult, error) {
 		}
 
 		result := FileResult{
-			Path:     f,
-			ByteSize: byteSize,
+			Path:        f,
+			ByteSize:    byteSize,
+			GlobPattern: globOrigin[f],
 		}
 
 		if opts.Grep != "" {

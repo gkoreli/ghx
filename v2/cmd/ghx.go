@@ -122,7 +122,15 @@ var readCmd = &cobra.Command{
 				fmt.Printf("=== %s (not found) ===\n\n", r.Path)
 				continue
 			}
-			fmt.Printf("=== %s (%d bytes) ===\n", r.Path, r.ByteSize)
+			// Skip files with no grep matches (avoid empty headers)
+			if grepPattern != "" && len(r.GrepHits) == 0 {
+				continue
+			}
+			header := fmt.Sprintf("=== %s (%d bytes) ===", r.Path, r.ByteSize)
+			if r.GlobPattern != "" {
+				header = fmt.Sprintf("=== %s (%d bytes, via %s) ===", r.Path, r.ByteSize, r.GlobPattern)
+			}
+			fmt.Println(header)
 			if len(r.GrepHits) > 0 {
 				for _, hit := range r.GrepHits {
 					if hit.LineNum == -1 {

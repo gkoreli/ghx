@@ -13,6 +13,7 @@ Use `ghx` via `execute_bash` for anything on GitHub — repos, files, code searc
 ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
 ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (GraphQL batching)
+ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns: auto-expands via tree (2 API calls)
 ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context, regex)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
@@ -34,7 +35,7 @@ ghx code --list                             # List available tools with type stu
 
 ```
 1. ghx explore owner/repo          → What's in this repo? (structure + README)
-2. ghx read owner/repo --map *.ts  → What do these files define? (signatures only, 92% fewer tokens)
+2. ghx read owner/repo "src/**/*.ts" --map → What do these files define? (glob + signatures, 92% fewer tokens)
 3. ghx read owner/repo --grep "X" f → Where exactly is X in this file? (targeted lines)
 4. ghx read owner/repo f            → Show me the full file (only when needed)
 ```
@@ -112,6 +113,7 @@ ghx search "path:llms.txt"                                # Find files by name
 4. **Not all repos use `main`.** ghx handles this automatically.
 5. **Unknown flags are rejected.** Exit 2 with clear error. Intentional — prevents silent query corruption.
 6. **`--grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `--grep "ref|defs|definition"`.
+7. **Glob + grep skips non-matching files.** Like `grep -r --include`, only files with hits are shown.
 
 ## Anti-Patterns
 
@@ -125,6 +127,7 @@ ghx search "path:llms.txt"                                # Find files by name
 ## Best Practices
 
 - **Batch reads.** `ghx read repo f1 f2 f3` = 1 API call. Three separate reads = 3 calls.
+- **Glob to scan.** `ghx read repo "src/**/*.ts" --map` = tree + read in 2 API calls. Max 10 files.
 - **Map before reading.** `--map` first, then `--grep` or `--lines` for specifics.
 - **Refine search, don't paginate.** Add qualifiers instead of fetching page 2.
 - **Use `ghx code` for multi-step workflows.** One round-trip beats three sequential commands.

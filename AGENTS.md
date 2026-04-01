@@ -9,7 +9,7 @@ ghx — GitHub code exploration for AI agents. Go binary distributed via npm, Ho
 ```
 v2/              — Go source (main binary)
   cmd/           — CLI commands (cobra)
-  pkg/ghx/       — core library (explore, read, search, repos, tree)
+  pkg/ghx/       — core library (explore, read, search, repos, tree, glob)
   pkg/codemode/  — JS executor (goja sandbox, esbuild transpilation, type generation)
   SKILL.md       — CLI agent skill (embedded into binary via go:embed in main.go)
   MCP-SKILL.md   — MCP agent skill (embedded into binary via go:embed in main.go)

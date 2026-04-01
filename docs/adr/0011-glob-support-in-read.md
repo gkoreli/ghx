@@ -106,32 +106,42 @@ Reject glob patterns with a clear error message pointing to `ghx tree`.
 
 ## Implementation Notes
 
+### Architecture
+
+```
+pkg/ghx/
+├── glob.go       — fetchTree(), isGlob(), expandGlobs()  [shared infrastructure]
+├── tree.go       — Tree()  [refactored to use fetchTree()]
+├── read.go       — Read()  [glob expansion as preprocessing, then existing logic]
+├── glob_test.go  — 12 test cases for glob expansion
+└── read_test.go  — 19 test cases for grep/BRE normalization
+```
+
+- `fetchTree(repo)` extracted from `Tree()` into `glob.go` as shared helper — DRY, used by both `Tree()` and `Read()`
+- `tree.go` reduced from 92 to 45 lines by delegating to `fetchTree()`
+- Glob expansion is a ~20-line preprocessing block at the top of `Read()` — the rest of the function is untouched
+- `GlobPattern` field added to `FileResult` so callers can show provenance without changing the return type
+
 ### Glob Detection
 
-A file path is a glob if it contains any of: `*`, `?`, `[`, `{`. Check with `strings.ContainsAny(f, "*?[{")`.
-
-If ANY path in the files list is a glob, fetch the tree once and expand all globs. Non-glob paths pass through unchanged.
+`isGlob(path)` checks for `*`, `?`, `[`, `{` via `strings.ContainsAny`. If ANY path in the files list is a glob, fetch the tree once and expand all globs. Non-glob paths pass through unchanged — zero overhead for exact paths.
 
 ### Tree Fetch
 
-Reuse the existing Git Trees API call from `Tree()`, but we need the raw path list without depth filtering. Extract the tree-fetching logic into a shared helper or call `Tree()` with depth=0 (full recursive).
+`fetchTree(repo)` returns `[]treeEntry` (path + type). Two API calls: GraphQL for default branch name, REST Git Trees API with `?recursive=1` for full tree. Same calls `Tree()` was already making, now shared.
 
 ### Matching
 
-Use `doublestar.Match(pattern, path)` against each tree entry. Collect matches, cap at 10, warn if truncated.
+`doublestar.Match(pattern, path)` against each blob entry (tree entries filtered out — globs match files, not directories). Results are deduplicated and capped at 10 (existing `Read()` limit).
 
-### Output
+### Grep + Glob Composition
 
-When glob expands to N files, print a header: `# glob "src/**/*.ts" matched N files (showing M)`. This tells the agent exactly what happened — no silent truncation.
+When `--grep` is combined with globs, files with zero grep matches are silently skipped in CLI output. This matches `grep -r --include='*.ts' pattern` behavior — 50 years of convention: only show files with matches.
 
 ### Entry Points
 
 All three entry points (CLI, MCP, codemode) call `Read()` — glob expansion happens inside `Read()` transparently. No caller changes needed.
 
-### Codemode Type Stubs
+### Dependencies
 
-Update the `read` type stub to document that `files` accepts glob patterns:
-```typescript
-read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => ...
-// files: exact paths or glob patterns (e.g. "src/**/*.ts")
-```
+- `github.com/bmatcuk/doublestar/v4` — battle-tested glob matcher (285K+ downloads, zero transitive deps). Supports `**`, `{alts}`, `[classes]`, `?`.
