@@ -112,6 +112,10 @@ ghx skill --mcp                             # MCP skill
 
 Designed for eager context injection via spawn hooks — the agent always has the latest ghx knowledge without loading it mid-conversation.
 
+## How It Was Built
+
+23 agent sessions, 2,500+ conversation turns, 3 rewrites, 10 ADRs. The full story: **[Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)**
+
 ## How It Works
 
 Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call. Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
