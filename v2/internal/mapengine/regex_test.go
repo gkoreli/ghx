@@ -122,6 +122,60 @@ func TestTreeSitterMapperKindFilter(t *testing.T) {
 	}
 }
 
+func TestTreeSitterLanguageConfigControlsRegexMerge(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"package ghx",
+		"import \"fmt\"",
+		"func Explore() {}",
+	}, "\n"))
+
+	mapper := TreeSitterMapper{
+		Languages: map[string]TreeSitterLanguageConfig{
+			"go": {
+				MergeRegex: false,
+			},
+		},
+	}
+
+	result, err := mapper.Map("explore.go", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	got := strings.Join(result.Lines, "\n")
+	if strings.Contains(got, "package ghx") || strings.Contains(got, "import") {
+		t.Fatalf("regex-only package/import symbols leaked into tree-sitter result: %#v", result.Lines)
+	}
+	if !strings.Contains(got, "func Explore") {
+		t.Fatalf("lines = %#v, want func Explore", result.Lines)
+	}
+}
+
+func TestTreeSitterLanguageConfigControlsTagKinds(t *testing.T) {
+	mapper := TreeSitterMapper{
+		Languages: map[string]TreeSitterLanguageConfig{
+			"go": {
+				MergeRegex: false,
+				TagKinds: map[string]Kind{
+					"definition.function": KindOther,
+				},
+			},
+		},
+	}
+
+	result, err := mapper.Map("explore.go", []byte("package ghx\n\nfunc Explore() {}\n"), Options{Kind: KindOther})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	if got, want := len(result.Lines), 1; got != want {
+		t.Fatalf("got %d lines, want %d: %#v", got, want, result.Lines)
+	}
+	if result.Symbols[0].Kind != KindOther {
+		t.Fatalf("kind = %q, want %q", result.Symbols[0].Kind, KindOther)
+	}
+}
+
 func TestTreeSitterEngineFallsBackToRegex(t *testing.T) {
 	result, err := Map("README.md", []byte("# readme\n"), Options{Engine: EngineTreeSitter})
 	if err != nil {

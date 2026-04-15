@@ -262,18 +262,26 @@ The map feature should be engineered as a replaceable engine architecture, not a
 2. Keep `pkg/ghx/read.go` focused on GitHub fetching, glob expansion, and result assembly. It should call `mapengine.Map(...)` and should not know whether extraction came from regex, Go AST, or Tree-sitter.
 3. Ship the current regex mapper as `RegexMapper`, but treat it as the default fallback rather than the long-term quality bar.
 4. Add `TreeSitterMapper` behind the same engine interface. `auto` should try Tree-sitter for supported languages and fall back to regex; `--map-engine regex` forces the old behavior.
-5. Keep engine selection resilient:
+5. Keep Tree-sitter language behavior configurable inside `TreeSitterMapper`, not in `read.go`. Each language can define:
+   - grammar detection key
+   - tags query resolver
+   - tag-kind normalization (`definition.method` → `func`, etc.)
+   - signature trimming strategy
+   - whether regex symbols are merged for coverage
+   - which regex symbol kinds may be merged
+   - token source factory override
+6. Keep engine selection resilient:
    - `auto`: best available stable engine, fallback to regex
    - `regex`: force regex mapper
    - `tree-sitter`: try Tree-sitter, fallback to regex with a warning if unavailable
-6. Normalize all engine output into the same `MapSymbol` model before rendering. CLI, MCP, codemode, and future `ghx map` should consume the same result shape.
-7. Add map metadata to results:
+7. Normalize all engine output into the same `MapSymbol` model before rendering. CLI, MCP, codemode, and future `ghx map` should consume the same result shape.
+8. Add map metadata to results:
    - engine used
    - fallback status
    - warnings
    - original chars
    - mapped chars
-8. Keep benchmarks and quality fixtures separate from engine code so parser implementations can be swapped without rewriting tests.
+9. Keep benchmarks and quality fixtures separate from engine code so parser implementations can be swapped without rewriting tests.
 
 Initial package shape:
 
@@ -281,10 +289,51 @@ Initial package shape:
 v2/internal/mapengine/
   types.go            # Mapper, Options, Result, Symbol, enums
   regex.go            # current fallback implementation
-  treesitter.go       # pure-Go Tree-sitter engine through gotreesitter
-  fixtures/           # map-quality fixtures per language
-  benchmarks_test.go  # parse/render performance tests
+  treesitter.go       # pure-Go Tree-sitter engine + per-language config
+  regex_test.go       # unit and integration tests for both engines
+  fixtures/           # map-quality fixtures per language (future)
+  benchmarks_test.go  # parse/render performance tests (future)
 ```
+
+### `TreeSitterLanguageConfig` — per-language hook points
+
+Each language entry in `TreeSitterMapper.Languages` carries a `TreeSitterLanguageConfig`. Nil fields fall back to engine-wide defaults so a minimal config only overrides what the language actually needs:
+
+```go
+type TreeSitterLanguageConfig struct {
+    TagsQuery       func(grammars.LangEntry) string          // nil → grammars.ResolveTagsQuery
+    TagKinds        map[string]Kind                           // nil → defaultTreeSitterTagKinds()
+    Signature       func(string, []byte, gotreesitter.Range) string // nil → brace/newline trimmer
+    MergeRegex      bool                                      // merge RegexMapper output after Tree-sitter pass
+    MergeRegexKinds map[Kind]bool                             // nil → accept all regex kinds
+    TokenSource     func([]byte, *gotreesitter.Language) gotreesitter.TokenSource // nil → entry default
+}
+```
+
+Default tag-kind mapping shared by all languages unless overridden:
+
+| Tree-sitter capture | ghx Kind |
+|---------------------|----------|
+| `definition.function` | `func` |
+| `definition.method` | `func` |
+| `definition.constructor` | `func` |
+| `definition.class` | `type` |
+| `definition.interface` | `type` |
+| `definition.type` | `type` |
+| `definition.constant` | `const` |
+| `definition.variable` | `var` |
+
+Default language configs shipped in `defaultTreeSitterLanguageConfigs()`:
+
+| Language | `MergeRegex` | `MergeRegexKinds` | Custom signature |
+|----------|-------------|-------------------|------------------|
+| `go` | true | package, import, func, type, const, var | — |
+| `typescript` | true | all | — |
+| `tsx` | true | all | — |
+| `javascript` | true | all | — |
+| `python` | true | all | colon-stop trimmer |
+
+The colon-stop trimmer for Python captures `def f(x: int) -> str:` without including the body, which the brace-stop default cannot do.
 
 The first parser-backed implementation targets four language families:
 
@@ -435,13 +484,14 @@ Tradeoff: importing the bundled grammar package increases binary size substantia
 
 ## Open questions
 
-1. Does `gotreesitter` build reliably in ghx's GoReleaser matrix?
+1. Does `gotreesitter` build reliably in ghx's GoReleaser matrix? _(CI confirmation still needed across darwin/linux/windows × amd64/arm64)_
 2. Can ghx prune or externalize grammar blobs so the binary does not carry every bundled grammar?
 3. Should `ghx map` be added as a top-level command, or should `read --map` remain the only command surface?
 4. What's the right default for `--max-files` in repo-wide mode?
 5. Should ghx use `go-enry` for language detection and generated/vendor/test filtering?
 6. How should map output represent nested symbols and parent relationships?
-7. Should parser-backed map be opt-in initially (`--engine tree-sitter`) before becoming default?
+7. ~~Should parser-backed map be opt-in initially?~~ **Resolved**: Tree-sitter is now the default (`auto`) for supported languages; regex is the fallback. No opt-in flag needed.
+8. What are cold-parse and per-file parse times under realistic load? _(benchmarks not yet written)_
 
 ## References
 
