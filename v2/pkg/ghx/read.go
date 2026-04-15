@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/gkoreli/ghx/v2/internal/mapengine"
 )
 
 type GrepMatch struct {
@@ -17,20 +18,25 @@ type GrepMatch struct {
 
 type FileResult struct {
 	Path        string      `json:"path"`
-	Content     string      `json:"content"`  // full text (empty if using grep/map)
+	Content     string      `json:"content"` // full text (empty if using grep/map)
 	ByteSize    int         `json:"byteSize"`
 	NotFound    bool        `json:"notFound"`
-	DirEntries  []FileEntry `json:"dirEntries,omitempty"` // populated when path is a directory
-	GrepHits    []GrepMatch `json:"grepHits,omitempty"`   // populated when Grep is set
-	MapLines    []string    `json:"mapLines,omitempty"`   // populated when Map is true
-	MapChars    int         `json:"mapChars,omitempty"`   // original char count (for reduction stats)
+	DirEntries  []FileEntry `json:"dirEntries,omitempty"`  // populated when path is a directory
+	GrepHits    []GrepMatch `json:"grepHits,omitempty"`    // populated when Grep is set
+	MapLines    []string    `json:"mapLines,omitempty"`    // populated when Map is true
+	MapChars    int         `json:"mapChars,omitempty"`    // original char count (for reduction stats)
+	MapEngine   string      `json:"mapEngine,omitempty"`   // mapper engine used when Map is true
+	MapWarnings []string    `json:"mapWarnings,omitempty"` // fallback/quality warnings from mapper
 	GlobPattern string      `json:"globPattern,omitempty"` // the glob that matched this file (empty for exact paths)
 }
 
 type ReadOpts struct {
-	Grep  string // filter to matching lines with 2 lines context
-	Lines string // line range "N-M"
-	Map   bool   // structural signatures only
+	Grep      string // filter to matching lines with 2 lines context
+	Lines     string // line range "N-M"
+	Map       bool   // structural signatures only
+	MapLevel  string // map detail level: outline|minimal|compact|standard
+	MapKind   string // map symbol kind filter: func|type|import|const|var
+	MapEngine string // map engine: auto|regex|tree-sitter
 
 	// Output: populated after Read() when globs are used
 	Globs []GlobResult
@@ -39,6 +45,10 @@ type ReadOpts struct {
 // Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.
 // Returns one FileResult per requested file.
 func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
+	if opts == nil {
+		opts = &ReadOpts{}
+	}
+
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid repo format, use owner/repo")
@@ -174,10 +184,18 @@ func parseFileResponse(path string, data interface{}, globPattern string, opts *
 	} else if opts.Lines != "" {
 		result.Content = extractLines(text, opts.Lines)
 	} else if opts.Map {
-		ext := getFileExtension(path)
-		pat := getMapPattern(ext)
-		result.MapLines = mapLines(text, pat)
-		result.MapChars = len(text)
+		mapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{
+			Engine: mapengine.Engine(opts.MapEngine),
+			Level:  mapengine.Level(opts.MapLevel),
+			Kind:   mapengine.Kind(opts.MapKind),
+		})
+		result.MapLines = mapResult.Lines
+		result.MapChars = mapResult.OriginalChars
+		result.MapEngine = string(mapResult.Engine)
+		result.MapWarnings = mapResult.Warnings
+		if err != nil {
+			result.MapWarnings = append(result.MapWarnings, err.Error())
+		}
 		if len(result.MapLines) == 0 {
 			result.MapLines = []string{"(no signatures detected)"}
 		}
@@ -300,46 +318,6 @@ func extractLines(text string, lineRange string) string {
 	}
 
 	return strings.Join(lines[start:end], "\n")
-}
-
-func mapLines(text string, pattern string) []string {
-	var result []string
-	fullLines := strings.Split(text, "\n")
-
-	for i, line := range fullLines {
-		if match, _ := regexp.MatchString(pattern, line); match {
-			result = append(result, fmt.Sprintf("%d: %s", i+1, line))
-		}
-	}
-
-	return result
-}
-
-func getFileExtension(path string) string {
-	parts := strings.Split(path, ".")
-	if len(parts) > 1 {
-		return parts[len(parts)-1]
-	}
-	return ""
-}
-
-func getMapPattern(ext string) string {
-	patterns := map[string]string{
-		"ts":   `^(import |export |const |let |var |function |class |interface |type |enum )`,
-		"tsx":  `^(import |export |const |let |var |function |class |interface |type |enum )`,
-		"js":   `^(import |export |const |let |var |function |class |interface |type |enum )`,
-		"jsx":  `^(import |export |const |let |var |function |class |interface |type |enum )`,
-		"py":   `^(import |from |class |def |    def |        def |@)`,
-		"go":   `^(package |import |func |type |var |const )`,
-		"rs":   `^(use |pub |fn |struct |enum |trait |impl |type |mod |const )`,
-		"java": `^(import |public |private |protected |class |interface |enum |@)`,
-		"kt":   `^(import |public |private |protected |class |interface |enum |@)`,
-		"rb":   `^(require |class |module |def |  def |    def )`,
-	}
-	if p, ok := patterns[ext]; ok {
-		return p
-	}
-	return `^(import |export |function |class |def |func |type |const |pub )`
 }
 
 func parseInt(s string) int {

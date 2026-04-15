@@ -95,6 +95,40 @@ func TestParseFileResponse_BlobWithMap(t *testing.T) {
 	if r.MapChars == 0 {
 		t.Error("mapChars should be > 0")
 	}
+	if r.MapEngine != "tree-sitter" {
+		t.Errorf("mapEngine = %q, want tree-sitter", r.MapEngine)
+	}
+}
+
+func TestParseFileResponse_BlobWithMapKind(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "package ghx\nimport \"fmt\"\ntype FileEntry struct {}\nfunc Explore() {}\n",
+		"byteSize": float64(70),
+	}
+	r := parseFileResponse("explore.go", data, "", &ReadOpts{Map: true, MapKind: "func"})
+	if r.NotFound {
+		t.Fatal("file reported as not found")
+	}
+	if len(r.MapLines) != 1 {
+		t.Fatalf("got %d map lines, want 1: %#v", len(r.MapLines), r.MapLines)
+	}
+	if r.MapLines[0] != "4: func Explore() {" {
+		t.Errorf("map line = %q, want function only", r.MapLines[0])
+	}
+}
+
+func TestParseFileResponse_BlobWithTreeSitterFallback(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "# readme\n",
+		"byteSize": float64(18),
+	}
+	r := parseFileResponse("README.md", data, "", &ReadOpts{Map: true, MapEngine: "tree-sitter"})
+	if r.MapEngine != "regex" {
+		t.Errorf("mapEngine = %q, want regex fallback", r.MapEngine)
+	}
+	if len(r.MapWarnings) == 0 {
+		t.Fatal("expected fallback warning")
+	}
 }
 
 func TestParseFileResponse_BlobWithLines(t *testing.T) {

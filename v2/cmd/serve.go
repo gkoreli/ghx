@@ -8,11 +8,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gkoreli/ghx/v2/pkg/codemode"
+	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
-	"github.com/gkoreli/ghx/v2/pkg/codemode"
-	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
 )
 
 // Transport defines the interface for MCP server transports
@@ -87,6 +87,9 @@ func serveMCP(cmd *cobra.Command) error {
 		mcp.WithString("grep", mcp.Description("filter to matching lines with context")),
 		mcp.WithString("lines", mcp.Description("line range (e.g., 42-80)")),
 		mcp.WithBoolean("map", mcp.Description("structural signatures only")),
+		mcp.WithString("level", mcp.Description("map detail level: outline|minimal|compact|standard")),
+		mcp.WithString("kind", mcp.Description("map symbol kind filter: func|type|import|const|var|package")),
+		mcp.WithString("mapEngine", mcp.Description("map engine: auto|regex|tree-sitter")),
 	)
 
 	treeTool := mcp.NewTool("tree",
@@ -214,11 +217,17 @@ func handleRead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	grepPattern := request.GetString("grep", "")
 	lineRange := request.GetString("lines", "")
 	mapMode := request.GetBool("map", false)
+	mapLevel := request.GetString("level", "")
+	mapKind := request.GetString("kind", "")
+	mapEngine := request.GetString("mapEngine", "")
 
 	results, err := ghxlib.Read(repo, paths, &ghxlib.ReadOpts{
-		Grep:  grepPattern,
-		Lines: lineRange,
-		Map:   mapMode,
+		Grep:      grepPattern,
+		Lines:     lineRange,
+		Map:       mapMode,
+		MapLevel:  mapLevel,
+		MapKind:   mapKind,
+		MapEngine: mapEngine,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

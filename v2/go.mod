@@ -3,17 +3,18 @@ module github.com/gkoreli/ghx/v2
 go 1.25.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/cli/go-gh/v2 v2.13.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/evanw/esbuild v0.27.4
 	github.com/mark3labs/mcp-go v0.45.0
+	github.com/odvcencio/gotreesitter v0.13.4
 	github.com/spf13/cobra v1.10.2
 )
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/cli/safeexec v1.0.0 // indirect
 	github.com/cli/shurcooL-graphql v0.0.4 // indirect

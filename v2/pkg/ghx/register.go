@@ -42,8 +42,8 @@ func RegisterTools(r *codemode.Registry) {
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":     map[string]any{"type": "string", "description": "search query"},
-				"limit":     map[string]any{"type": "number", "description": "max results (default 30, max 100)"},
+				"query":    map[string]any{"type": "string", "description": "search query"},
+				"limit":    map[string]any{"type": "number", "description": "max results (default 30, max 100)"},
 				"fullMode": map[string]any{"type": "boolean", "description": "disable 200-char truncation"},
 			},
 			"required": []string{"query"},
@@ -54,14 +54,18 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "read",
 		Description: "Read multiple files from a GitHub repo in one call",
 		Func:        wrapRead,
-		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number }[]",
+		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number; mapEngine?: string; mapWarnings?: string[] }[]",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"repo":  map[string]any{"type": "string", "description": "owner/repo"},
-				"files": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "file paths or glob patterns (e.g. src/**/*.ts)"},
-				"grep":  map[string]any{"type": "string", "description": "filter to matching lines with context"},
-				"map":   map[string]any{"type": "boolean", "description": "extract code structure only"},
+				"repo":      map[string]any{"type": "string", "description": "owner/repo"},
+				"files":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "file paths or glob patterns (e.g. src/**/*.ts)"},
+				"grep":      map[string]any{"type": "string", "description": "filter to matching lines with context"},
+				"lines":     map[string]any{"type": "string", "description": "line range (e.g. 42-80)"},
+				"map":       map[string]any{"type": "boolean", "description": "extract code structure only"},
+				"level":     map[string]any{"type": "string", "description": "map detail level: outline|minimal|compact|standard"},
+				"kind":      map[string]any{"type": "string", "description": "map symbol kind filter: func|type|import|const|var|package"},
+				"mapEngine": map[string]any{"type": "string", "description": "map engine: auto|regex|tree-sitter"},
 			},
 			"required": []string{"repo", "files"},
 		},
@@ -127,11 +131,22 @@ func wrapRead(args map[string]any) (any, error) {
 		}
 	}
 	grep, _ := args["grep"].(string)
+	lines, _ := args["lines"].(string)
+	level, _ := args["level"].(string)
+	kind, _ := args["kind"].(string)
+	mapEngine, _ := args["mapEngine"].(string)
 	mapMode := false
 	if m, ok := args["map"].(bool); ok {
 		mapMode = m
 	}
-	return Read(repo, files, &ReadOpts{Grep: grep, Map: mapMode})
+	return Read(repo, files, &ReadOpts{
+		Grep:      grep,
+		Lines:     lines,
+		Map:       mapMode,
+		MapLevel:  level,
+		MapKind:   kind,
+		MapEngine: mapEngine,
+	})
 }
 
 func wrapTree(args map[string]any) (any, error) {

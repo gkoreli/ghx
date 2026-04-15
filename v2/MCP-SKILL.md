@@ -14,7 +14,7 @@ description: GitHub code exploration via MCP. 7 tools — 5 direct + code meta-t
 | Tool | Input | What it does |
 |------|-------|-------------|
 | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call |
-| `read` | `repo` + `paths` (required), `grep`, `lines`, `map` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). Directory paths return file listing. `map` = signatures only (~92% reduction) |
+| `read` | `repo` + `paths` (required), `grep`, `lines`, `map`, `level`, `kind`, `mapEngine` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). Directory paths return file listing. `map` = parser-backed structural map with optional level/kind filters |
 | `search` | `query` (required), `limit`, `full` | Code search with AND matching + matching lines |
 | `repos` | `query` (required), `limit` | Search repos with README preview |
 | `tree` | `repo` (required), `path`, `depth` | File tree listing (default: all files, no depth limit. With depth: includes dirs with /) |
@@ -51,14 +51,14 @@ return contents;
 
 ```typescript
 type ExploreInput = { repo: string; path?: string }
-type ReadInput = { repo: string; files: string[]; grep?: string; map?: boolean }
+type ReadInput = { repo: string; files: string[]; grep?: string; lines?: string; map?: boolean; level?: "outline" | "minimal" | "compact" | "standard"; kind?: "func" | "type" | "import" | "const" | "var" | "package"; mapEngine?: "auto" | "regex" | "tree-sitter" }
 type ReposInput = { query: string; limit?: number }
 type SearchInput = { query: string; limit?: number; fullMode?: boolean }
 type TreeInput = { repo: string; path?: string; depth?: number }
 
 declare const codemode: {
   explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[] }[];
+  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapEngine?: string; mapWarnings?: string[] }[];
   repos: (input: ReposInput) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: SearchInput) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: TreeInput) => string[];
@@ -153,7 +153,7 @@ read({ repo: "...", paths: "f1", grep: "pattern" })        → Just the matching
 read({ repo: "...", paths: "f1" })                         → Full file (only when needed)
 ```
 
-`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Spend the same budget, learn more.
+`map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. It uses Tree-sitter for Go/TS/JS/Python and falls back to regex when needed.
 
 **When to use `code` instead of direct tools:**
 - Result of tool A determines what to call for tool B → use `code` (one round-trip)

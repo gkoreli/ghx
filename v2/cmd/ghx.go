@@ -107,11 +107,17 @@ var readCmd = &cobra.Command{
 		grepPattern, _ := cmd.Flags().GetString("grep")
 		lineRange, _ := cmd.Flags().GetString("lines")
 		mapMode, _ := cmd.Flags().GetBool("map")
+		mapLevel, _ := cmd.Flags().GetString("level")
+		mapKind, _ := cmd.Flags().GetString("kind")
+		mapEngine, _ := cmd.Flags().GetString("map-engine")
 
 		opts := &ghxlib.ReadOpts{
-			Grep:  grepPattern,
-			Lines: lineRange,
-			Map:   mapMode,
+			Grep:      grepPattern,
+			Lines:     lineRange,
+			Map:       mapMode,
+			MapLevel:  mapLevel,
+			MapKind:   mapKind,
+			MapEngine: mapEngine,
 		}
 		results, err := ghxlib.Read(args[0], args[1:], opts)
 		if err != nil {
@@ -174,6 +180,9 @@ var readCmd = &cobra.Command{
 				for _, line := range r.MapLines {
 					fmt.Println(line)
 				}
+				for _, warning := range r.MapWarnings {
+					fmt.Printf("# map warning: %s\n", warning)
+				}
 				mapOutput := strings.Join(r.MapLines, "\n")
 				fmt.Printf("# map: %d/%d chars (~%d tokens full, ~%d tokens map)\n", len(mapOutput), r.MapChars, r.MapChars/4, len(mapOutput)/4)
 			} else {
@@ -197,6 +206,9 @@ func init() {
 	readCmd.Flags().String("grep", "", "Filter output to matching lines")
 	readCmd.Flags().String("lines", "", "Extract specific line range (e.g., 42-80)")
 	readCmd.Flags().Bool("map", false, "Structural signatures only")
+	readCmd.Flags().String("level", "compact", "Map detail level: outline|minimal|compact|standard")
+	readCmd.Flags().String("kind", "", "Map symbol kind filter: func|type|import|const|var|package")
+	readCmd.Flags().String("map-engine", "auto", "Map engine: auto|regex|tree-sitter")
 }
 
 var searchCmd = &cobra.Command{

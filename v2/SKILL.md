@@ -15,7 +15,9 @@ ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (GraphQL batching)
 ghx read <owner/repo> <dir>                 # Directory path → returns file listing (not "not found")
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns: auto-expands via tree (2 API calls)
-ghx read <owner/repo> --map <f1> [f2]       # Structural map: signatures, imports, types (~92% token reduction)
+ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map: signatures, imports, types (~92% token reduction)
+ghx read <owner/repo> --map --kind func <f> # Map only function/method signatures
+ghx read <owner/repo> --map --level minimal <f> # Map symbol names only
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context, regex)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
 ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
@@ -53,7 +55,7 @@ ghx read owner/repo --grep "X" f             → Just the matching lines
 ghx read owner/repo f                        → Full file (only when needed)
 ```
 
-`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Spend the same budget, learn more.
+`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. It uses Tree-sitter for Go/TS/JS/Python and falls back to regex when needed.
 
 ## When to Use `ghx code`
 
@@ -84,7 +86,7 @@ ghx code --list   # See all available tools with type stubs
 ```typescript
 declare const codemode: {
   explore: (input: { repo: string; path?: string }) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: { repo: string; files: string[]; grep?: string; map?: boolean }) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[] }[];
+  read: (input: { repo: string; files: string[]; grep?: string; lines?: string; map?: boolean; level?: "outline" | "minimal" | "compact" | "standard"; kind?: "func" | "type" | "import" | "const" | "var" | "package"; mapEngine?: "auto" | "regex" | "tree-sitter" }) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapEngine?: string; mapWarnings?: string[] }[];
   repos: (input: { query: string; limit?: number }) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: { query: string; limit?: number; fullMode?: boolean }) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: { repo: string; path?: string; depth?: number }) => string[];
