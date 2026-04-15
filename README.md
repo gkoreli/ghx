@@ -72,7 +72,10 @@ ghx explore <owner/repo> <path>             # Subdirectory listing
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files (GraphQL batching)
 ghx read <owner/repo> <dir>                 # Directory path → returns file listing
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns with structural map
-ghx read <owner/repo> --map <f1> [f2]       # Signatures, imports, types (~92% token reduction)
+ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map (~92% token reduction)
+ghx read <owner/repo> --map --kind func <f> # Map only functions/methods
+ghx read <owner/repo> --map --kind type <f> # Map only types/structs/interfaces
+ghx read <owner/repo> --map --level minimal <f> # Symbol names only (e.g. UserService.GetUser)
 ghx read <owner/repo> --grep "pat" <f>      # Matching lines only (ERE regex, 2 lines context)
 ghx read <owner/repo> --lines 42-80 <f>     # Specific line range
 ghx search "<query>"                        # Code search with matching lines
@@ -135,15 +138,18 @@ Designed for eager context injection via spawn hooks — the agent always has th
 
 Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call — and if a path is a directory, returns its file listing instead of "not found" (via `... on Tree` inline fragments in the same query, zero extra API calls). Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
 
+`--map` runs a dedicated parser engine on the fetched content — no extra API calls. Engine selection is automatic: **Go** uses `go/ast` (top-level declarations only, full multi-line signatures, generics preserved), **TypeScript, JavaScript, Python, Rust** use [gotreesitter](https://github.com/odvcencio/gotreesitter) (captures class/impl methods that regex cannot reach), everything else falls back to regex. Methods carry a parent reference (`UserService.GetUser`) visible at `--level minimal`. `--map-engine regex` forces the fallback for any file.
+
 Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox with esbuild TypeScript transpilation. Tools are injected as synchronous functions on a `codemode` global object. Max 20 tool calls per execution, 64KB code size limit.
 
 ## Architecture
 
 ```
 v2/
-├── pkg/ghx/       — core library (Explore, Read, Search, Repos, Tree, Glob)
-├── pkg/codemode/  — JS executor (goja sandbox, TS transpilation, type generation)
-└── cmd/           — CLI frontend (cobra) + MCP server (mcp-go)
+├── internal/mapengine/ — parser-backed map engine (GoAST, TreeSitter, Regex, engine routing)
+├── pkg/ghx/            — core library (Explore, Read, Search, Repos, Tree, Glob)
+├── pkg/codemode/       — JS executor (goja sandbox, TS transpilation, type generation)
+└── cmd/                — CLI frontend (cobra) + MCP server (mcp-go)
 ```
 
 See [docs/adr/](docs/adr/) for architectural decisions.

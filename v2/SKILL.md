@@ -17,7 +17,8 @@ ghx read <owner/repo> <dir>                 # Directory path → returns file li
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns: auto-expands via tree (2 API calls)
 ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map: signatures, imports, types (~92% token reduction)
 ghx read <owner/repo> --map --kind func <f> # Map only function/method signatures
-ghx read <owner/repo> --map --level minimal <f> # Map symbol names only
+ghx read <owner/repo> --map --kind type <f> # Map only types/structs/interfaces/classes
+ghx read <owner/repo> --map --level minimal <f> # Symbol names only — methods show as UserService.GetUser
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context, regex)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
 ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
@@ -55,7 +56,7 @@ ghx read owner/repo --grep "X" f             → Just the matching lines
 ghx read owner/repo f                        → Full file (only when needed)
 ```
 
-`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: Go uses `go/ast` (full multi-line signatures, no noise), TS/JS/Python use Tree-sitter (captures class methods regex misses), everything else falls back to regex.
+`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: **Go** uses `go/ast` (full multi-line signatures, no local variable noise), **TS/JS/Python/Rust** use Tree-sitter (captures class and impl methods that regex cannot reach), everything else falls back to regex. Methods carry parent context — `--level minimal` renders `UserService.GetUser` instead of just `GetUser`.
 
 ## When to Use `ghx code`
 

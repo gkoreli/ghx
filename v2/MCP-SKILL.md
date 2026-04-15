@@ -14,7 +14,7 @@ description: GitHub code exploration via MCP. 7 tools — 5 direct + code meta-t
 | Tool | Input | What it does |
 |------|-------|-------------|
 | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call |
-| `read` | `repo` + `paths` (required), `grep`, `lines`, `map`, `level`, `kind`, `mapEngine` | Read 1-10 files in 1 API call. Glob patterns supported (e.g. `src/**/*.ts`). Directory paths return file listing. `map` = parser-backed structural map with optional level/kind filters |
+| `read` | `repo` + `paths` (required), `grep`, `lines`, `map`, `level`, `kind`, `mapEngine` | Read 1-10 files in 1 API call. Glob patterns supported. Directory paths return file listing. `map` = parser-backed structural map (Go→go/ast, TS/JS/Python/Rust→Tree-sitter, else→regex). `kind`: `func`/`type`/`import`/`const`/`var`. `level: "minimal"` shows `Parent.Method` names only |
 | `search` | `query` (required), `limit`, `full` | Code search with AND matching + matching lines |
 | `repos` | `query` (required), `limit` | Search repos with README preview |
 | `tree` | `repo` (required), `path`, `depth` | File tree listing (default: all files, no depth limit. With depth: includes dirs with /) |
@@ -153,7 +153,7 @@ read({ repo: "...", paths: "f1", grep: "pattern" })        → Just the matching
 read({ repo: "...", paths: "f1" })                         → Full file (only when needed)
 ```
 
-`map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: Go uses `go/ast` (full multi-line signatures, no noise), TS/JS/Python use Tree-sitter (captures class methods regex misses), everything else falls back to regex.
+`map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: **Go** uses `go/ast` (full multi-line signatures, no local variable noise), **TS/JS/Python/Rust** use Tree-sitter (captures class and impl methods that regex cannot reach), everything else falls back to regex. Methods carry parent context — `level: "minimal"` renders `UserService.GetUser` instead of just `GetUser`.
 
 **When to use `code` instead of direct tools:**
 - Result of tool A determines what to call for tool B → use `code` (one round-trip)
