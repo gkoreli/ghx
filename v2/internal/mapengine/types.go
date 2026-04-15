@@ -3,6 +3,7 @@ package mapengine
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -11,6 +12,7 @@ type Engine string
 
 const (
 	EngineAuto       Engine = "auto"
+	EngineGoAST      Engine = "go-ast"
 	EngineRegex      Engine = "regex"
 	EngineTreeSitter Engine = "tree-sitter"
 )
@@ -126,10 +128,10 @@ func Map(path string, content []byte, opts Options) (Result, error) {
 	switch opts.Engine {
 	case EngineRegex:
 		return RegexMapper{}.Map(path, content, opts)
-	case EngineAuto:
-		return mapWithFallback(path, content, opts, false)
 	case EngineTreeSitter:
-		return mapWithFallback(path, content, opts, true)
+		return mapTreeSitterWithFallback(path, content, opts, true)
+	case EngineAuto:
+		return mapAuto(path, content, opts)
 	default:
 		result, err := RegexMapper{}.Map(path, content, opts)
 		result.Fallback = true
@@ -138,7 +140,24 @@ func Map(path string, content []byte, opts Options) (Result, error) {
 	}
 }
 
-func mapWithFallback(path string, content []byte, opts Options, warnUnsupported bool) (Result, error) {
+func mapAuto(path string, content []byte, opts Options) (Result, error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go":
+		result, err := GoASTMapper{}.Map(path, content, opts)
+		if err == nil {
+			return result, nil
+		}
+		fallback, _ := RegexMapper{}.Map(path, content, opts)
+		fallback.Fallback = true
+		return fallback, nil
+	case ".ts", ".tsx", ".js", ".jsx", ".py":
+		return mapTreeSitterWithFallback(path, content, opts, false)
+	default:
+		return RegexMapper{}.Map(path, content, opts)
+	}
+}
+
+func mapTreeSitterWithFallback(path string, content []byte, opts Options, warnUnsupported bool) (Result, error) {
 	result, err := TreeSitterMapper{}.Map(path, content, opts)
 	if err == nil {
 		return result, nil

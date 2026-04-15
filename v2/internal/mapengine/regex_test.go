@@ -64,17 +64,93 @@ func TestRegexMapperMinimalLevel(t *testing.T) {
 	}
 }
 
-func TestMapAutoUsesTreeSitterForGo(t *testing.T) {
+func TestMapAutoUsesGoASTForGoFiles(t *testing.T) {
 	result, err := Map("explore.go", []byte("package ghx\n\nfunc Explore() {}\n"), Options{})
 	if err != nil {
 		t.Fatalf("Map returned error: %v", err)
 	}
 
-	if result.Engine != EngineTreeSitter {
-		t.Fatalf("engine = %q, want tree-sitter", result.Engine)
+	if result.Engine != EngineGoAST {
+		t.Fatalf("engine = %q, want go-ast", result.Engine)
 	}
 	if len(result.Lines) == 0 || !strings.Contains(strings.Join(result.Lines, "\n"), "func Explore") {
 		t.Fatalf("lines = %#v, want func Explore", result.Lines)
+	}
+}
+
+func TestGoASTMapperTopLevelOnly(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"package ghx",
+		"",
+		`import "fmt"`,
+		"",
+		"type FileEntry struct {",
+		"  Name string",
+		"}",
+		"",
+		"func Explore(repo string) error {",
+		"  local := fmt.Sprintf(repo)",
+		"  _ = local",
+		"  return nil",
+		"}",
+	}, "\n"))
+
+	result, err := GoASTMapper{}.Map("explore.go", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	if result.Engine != EngineGoAST {
+		t.Fatalf("engine = %q, want go-ast", result.Engine)
+	}
+
+	got := strings.Join(result.Lines, "\n")
+
+	// must have top-level declarations
+	if !strings.Contains(got, "package ghx") {
+		t.Errorf("missing package: %s", got)
+	}
+	if !strings.Contains(got, "import") {
+		t.Errorf("missing import: %s", got)
+	}
+	if !strings.Contains(got, "type FileEntry struct {") {
+		t.Errorf("missing type: %s", got)
+	}
+	if !strings.Contains(got, "func Explore") {
+		t.Errorf("missing func: %s", got)
+	}
+
+	// must NOT have local variables
+	if strings.Contains(got, "local") {
+		t.Errorf("local variable leaked into map output: %s", got)
+	}
+}
+
+func TestGoASTMapperMultiLineSignature(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"package ghx",
+		"",
+		"func Read(",
+		"  repo string,",
+		"  files []string,",
+		"  opts *ReadOpts,",
+		") ([]FileResult, error) {",
+		"  return nil, nil",
+		"}",
+	}, "\n"))
+
+	result, err := GoASTMapper{}.Map("read.go", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	got := strings.Join(result.Lines, "\n")
+	// signature should be compacted onto one line and include the full parameter list
+	if !strings.Contains(got, "repo string") {
+		t.Errorf("multi-line signature not compacted: %s", got)
+	}
+	if !strings.Contains(got, "[]FileResult, error") {
+		t.Errorf("return type missing from signature: %s", got)
 	}
 }
 
