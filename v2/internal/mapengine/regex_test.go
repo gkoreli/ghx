@@ -352,6 +352,124 @@ func TestTreeSitterBetterThanRegexForClassMethods(t *testing.T) {
 
 // TestTreeSitterEngineFallsBackToRegex ensures unsupported file types
 // degrade gracefully rather than returning an error.
+func TestGoASTReceiverMethodPopulatesParent(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"package svc",
+		"",
+		"type UserService struct{}",
+		"",
+		"func (s *UserService) GetUser(id string) error { return nil }",
+		"func Standalone() {}",
+	}, "\n"))
+
+	result, err := GoASTMapper{}.Map("svc.go", content, Options{Kind: KindFunc})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	var getUser, standalone *Symbol
+	for i := range result.Symbols {
+		switch result.Symbols[i].Name {
+		case "GetUser":
+			getUser = &result.Symbols[i]
+		case "Standalone":
+			standalone = &result.Symbols[i]
+		}
+	}
+
+	if getUser == nil {
+		t.Fatal("GetUser symbol not found")
+	}
+	if getUser.Parent != "UserService" {
+		t.Errorf("GetUser.Parent = %q, want UserService", getUser.Parent)
+	}
+	if standalone == nil {
+		t.Fatal("Standalone symbol not found")
+	}
+	if standalone.Parent != "" {
+		t.Errorf("Standalone.Parent = %q, want empty", standalone.Parent)
+	}
+}
+
+func TestGoASTParentAppearsInMinimalLevel(t *testing.T) {
+	content := []byte("package svc\n\ntype S struct{}\n\nfunc (s *S) Run() {}\n")
+
+	result, err := GoASTMapper{}.Map("svc.go", content, Options{Level: LevelMinimal, Kind: KindFunc})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+	if len(result.Lines) != 1 {
+		t.Fatalf("got %d lines, want 1: %v", len(result.Lines), result.Lines)
+	}
+	if !strings.Contains(result.Lines[0], "S.Run") {
+		t.Errorf("minimal output = %q, want S.Run", result.Lines[0])
+	}
+}
+
+func TestTreeSitterClassMethodPopulatesParent(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"export class UserService {",
+		"  async getUser(id: string): Promise<string> {",
+		"    return id",
+		"  }",
+		"}",
+		"",
+		"function standalone(): void {}",
+	}, "\n"))
+
+	result, err := TreeSitterMapper{}.Map("svc.ts", content, Options{Kind: KindFunc})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+
+	var getUser, standalone *Symbol
+	for i := range result.Symbols {
+		switch result.Symbols[i].Name {
+		case "getUser":
+			getUser = &result.Symbols[i]
+		case "standalone":
+			standalone = &result.Symbols[i]
+		}
+	}
+
+	if getUser == nil {
+		t.Fatal("getUser symbol not found")
+	}
+	if getUser.Parent != "UserService" {
+		t.Errorf("getUser.Parent = %q, want UserService", getUser.Parent)
+	}
+	if standalone != nil && standalone.Parent != "" {
+		t.Errorf("standalone.Parent = %q, want empty", standalone.Parent)
+	}
+}
+
+func TestMapAutoUsesTreeSitterForRust(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"use std::fmt;",
+		"",
+		"pub struct Point { pub x: f64, pub y: f64 }",
+		"",
+		"pub fn distance(a: &Point, b: &Point) -> f64 {",
+		"    0.0",
+		"}",
+	}, "\n"))
+
+	result, err := Map("geo.rs", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+	if result.Engine != EngineTreeSitter {
+		t.Fatalf("engine = %q, want tree-sitter for .rs files", result.Engine)
+	}
+	if result.Fallback {
+		t.Fatalf("tree-sitter fell back to regex (warnings: %v)", result.Warnings)
+	}
+	got := strings.Join(result.Lines, "\n")
+	if !strings.Contains(got, "distance") {
+		t.Errorf("function not found in map output: %s", got)
+	}
+}
+
 func TestTreeSitterEngineFallsBackToRegex(t *testing.T) {
 	result, err := Map("README.md", []byte("# readme\n"), Options{Engine: EngineTreeSitter})
 	if err != nil {

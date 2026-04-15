@@ -149,10 +149,14 @@ func inferName(line string) string {
 func formatSymbol(symbol Symbol, level Level) string {
 	switch level {
 	case LevelMinimal:
-		if symbol.Name != "" {
-			return fmt.Sprintf("%d: %s", symbol.Line, symbol.Name)
+		name := symbol.Name
+		if name == "" {
+			return fmt.Sprintf("%d: %s", symbol.Line, symbol.Signature)
 		}
-		return fmt.Sprintf("%d: %s", symbol.Line, symbol.Signature)
+		if symbol.Parent != "" {
+			name = symbol.Parent + "." + name
+		}
+		return fmt.Sprintf("%d: %s", symbol.Line, name)
 	default:
 		return fmt.Sprintf("%d: %s", symbol.Line, symbol.Signature)
 	}

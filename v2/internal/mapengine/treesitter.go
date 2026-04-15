@@ -2,6 +2,7 @@ package mapengine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/odvcencio/gotreesitter"
@@ -63,8 +64,11 @@ func (m TreeSitterMapper) Map(path string, content []byte, opts Options) (Result
 		symbols = append(symbols, symbol)
 	}
 
-	for _, tag := range tagger.Tag(content) {
-		symbol, ok := cfg.symbolFromTag(path, content, tag)
+	allTags := tagger.Tag(content)
+	parents := computeTreeSitterParents(allTags)
+
+	for i, tag := range allTags {
+		symbol, ok := cfg.symbolFromTag(path, content, tag, parents[i])
 		if ok {
 			add(symbol)
 		}
@@ -150,7 +154,7 @@ func defaultTagsQuery(entry grammars.LangEntry) string {
 	return grammars.ResolveTagsQuery(entry)
 }
 
-func (cfg TreeSitterLanguageConfig) symbolFromTag(path string, content []byte, tag gotreesitter.Tag) (Symbol, bool) {
+func (cfg TreeSitterLanguageConfig) symbolFromTag(path string, content []byte, tag gotreesitter.Tag, parent string) (Symbol, bool) {
 	kind, ok := cfg.kindFromTag(tag.Kind)
 	if !ok {
 		return Symbol{}, false
@@ -172,7 +176,67 @@ func (cfg TreeSitterLanguageConfig) symbolFromTag(path string, content []byte, t
 		Signature: signature,
 		Line:      line,
 		EndLine:   int(tag.Range.EndPoint.Row) + 1,
+		Parent:    parent,
 	}, true
+}
+
+// computeTreeSitterParents resolves the enclosing class/interface for each tag
+// using range containment. Tags are sorted by start byte so the scope stack
+// correctly handles nested types.
+func computeTreeSitterParents(tags []gotreesitter.Tag) []string {
+	type indexedTag struct {
+		tag   gotreesitter.Tag
+		index int
+	}
+	sorted := make([]indexedTag, len(tags))
+	for i, t := range tags {
+		sorted[i] = indexedTag{t, i}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].tag.Range.StartByte < sorted[j].tag.Range.StartByte
+	})
+
+	type scope struct {
+		name string
+		end  uint32
+	}
+
+	parents := make([]string, len(tags))
+	var stack []scope
+
+	for _, it := range sorted {
+		pos := it.tag.Range.StartByte
+
+		// pop scopes that ended before this tag's start
+		n := 0
+		for _, s := range stack {
+			if s.end > pos {
+				stack[n] = s
+				n++
+			}
+		}
+		stack = stack[:n]
+
+		// innermost live scope is the parent
+		if len(stack) > 0 {
+			parents[it.index] = stack[len(stack)-1].name
+		}
+
+		// push this tag as a scope if it can contain other symbols
+		if isTreeSitterContainerKind(it.tag.Kind) {
+			stack = append(stack, scope{name: it.tag.Name, end: it.tag.Range.EndByte})
+		}
+	}
+
+	return parents
+}
+
+func isTreeSitterContainerKind(kind string) bool {
+	switch kind {
+	case "definition.class", "definition.interface", "definition.module":
+		return true
+	}
+	return false
 }
 
 func (cfg TreeSitterLanguageConfig) kindFromTag(tagKind string) (Kind, bool) {
@@ -239,6 +303,12 @@ func defaultTreeSitterLanguageConfigs() map[string]TreeSitterLanguageConfig {
 		"python": {
 			Signature:  pythonTreeSitterSignature,
 			MergeRegex: true,
+		},
+		"rust": {
+			MergeRegex:      true,
+			MergeRegexKinds: map[Kind]bool{
+				KindImport: true, // `use` statements are not tagged by tree-sitter's Rust grammar
+			},
 		},
 	}
 }

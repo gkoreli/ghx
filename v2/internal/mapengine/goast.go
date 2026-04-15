@@ -149,13 +149,35 @@ func goFuncDeclSymbol(fset *token.FileSet, d *ast.FuncDecl, content []byte) Symb
 		sig = compactWhitespace(raw)
 	}
 
+	parent := ""
+	if d.Recv != nil && len(d.Recv.List) > 0 {
+		parent = receiverTypeName(d.Recv.List[0].Type)
+	}
+
 	return Symbol{
 		Kind:      KindFunc,
 		Name:      d.Name.Name,
 		Signature: sig,
 		Line:      pos.Line,
 		EndLine:   fset.Position(d.End()).Line,
+		Parent:    parent,
 	}
+}
+
+// receiverTypeName extracts the base type name from a receiver expression,
+// stripping pointer indirection and generic type parameters.
+func receiverTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.StarExpr:
+		return receiverTypeName(t.X)
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr: // generic receiver: (s *Service[T])
+		return receiverTypeName(t.X)
+	case *ast.IndexListExpr: // multiple type params: (s *Service[T, K])
+		return receiverTypeName(t.X)
+	}
+	return ""
 }
 
 func goSlice(content []byte, fset *token.FileSet, start, end token.Pos) string {

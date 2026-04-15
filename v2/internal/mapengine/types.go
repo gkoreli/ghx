@@ -150,7 +150,7 @@ func mapAuto(path string, content []byte, opts Options) (Result, error) {
 		fallback, _ := RegexMapper{}.Map(path, content, opts)
 		fallback.Fallback = true
 		return fallback, nil
-	case ".ts", ".tsx", ".js", ".jsx", ".py":
+	case ".ts", ".tsx", ".js", ".jsx", ".py", ".rs":
 		return mapTreeSitterWithFallback(path, content, opts, false)
 	default:
 		return RegexMapper{}.Map(path, content, opts)
