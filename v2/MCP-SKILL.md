@@ -153,7 +153,7 @@ read({ repo: "...", paths: "f1", grep: "pattern" })        → Just the matching
 read({ repo: "...", paths: "f1" })                         → Full file (only when needed)
 ```
 
-`map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. It uses Tree-sitter for Go/TS/JS/Python and falls back to regex when needed.
+`map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: Go uses `go/ast` (full multi-line signatures, no noise), TS/JS/Python use Tree-sitter (captures class methods regex misses), everything else falls back to regex.
 
 **When to use `code` instead of direct tools:**
 - Result of tool A determines what to call for tool B → use `code` (one round-trip)

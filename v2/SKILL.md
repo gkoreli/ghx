@@ -55,7 +55,7 @@ ghx read owner/repo --grep "X" f             → Just the matching lines
 ghx read owner/repo f                        → Full file (only when needed)
 ```
 
-`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. It uses Tree-sitter for Go/TS/JS/Python and falls back to regex when needed.
+`--map` doesn't just save tokens — it lets you see 10 files for the cost of reading 1. Engine selection is automatic: Go uses `go/ast` (full multi-line signatures, no noise), TS/JS/Python use Tree-sitter (captures class methods regex misses), everything else falls back to regex.
 
 ## When to Use `ghx code`
 
