@@ -111,6 +111,10 @@ func goGenDeclSymbols(fset *token.FileSet, d *ast.GenDecl, content []byte) []Sym
 func goTypeSymbol(fset *token.FileSet, ts *ast.TypeSpec, content []byte) Symbol {
 	pos := fset.Position(ts.Name.Pos())
 
+	// nameAndParams captures "Name" or "Name[T any]" — everything between
+	// the identifier and the type body. Trimming strips the trailing space.
+	nameAndParams := strings.TrimSpace(goSlice(content, fset, ts.Name.Pos(), ts.Type.Pos()))
+
 	rawBody := goSlice(content, fset, ts.Type.Pos(), ts.Type.End())
 	var typePart string
 	switch ts.Type.(type) {
@@ -127,7 +131,7 @@ func goTypeSymbol(fset *token.FileSet, ts *ast.TypeSpec, content []byte) Symbol 
 	return Symbol{
 		Kind:      KindType,
 		Name:      ts.Name.Name,
-		Signature: "type " + ts.Name.Name + " " + typePart,
+		Signature: "type " + nameAndParams + " " + typePart,
 		Line:      pos.Line,
 		EndLine:   fset.Position(ts.End()).Line,
 	}

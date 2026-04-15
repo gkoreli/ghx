@@ -126,6 +126,21 @@ func TestGoASTMapperTopLevelOnly(t *testing.T) {
 	}
 }
 
+func TestGoASTMapperGenericType(t *testing.T) {
+	content := []byte("package ghx\n\ntype Result[T any] struct {\n\tValue T\n}\n")
+
+	result, err := GoASTMapper{}.Map("result.go", content, Options{Kind: KindType})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+	if len(result.Lines) != 1 {
+		t.Fatalf("got %d lines, want 1: %#v", len(result.Lines), result.Lines)
+	}
+	if !strings.Contains(result.Lines[0], "[T any]") {
+		t.Errorf("generic type params dropped from signature: %s", result.Lines[0])
+	}
+}
+
 func TestGoASTMapperMultiLineSignature(t *testing.T) {
 	content := []byte(strings.Join([]string{
 		"package ghx",
