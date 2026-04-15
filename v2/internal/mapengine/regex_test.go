@@ -252,6 +252,91 @@ func TestTreeSitterLanguageConfigControlsTagKinds(t *testing.T) {
 	}
 }
 
+// TestMapAutoUsesTreeSitterForTS proves that EngineAuto selects tree-sitter
+// (not regex) for TypeScript files, and that the result.Engine field reflects it.
+func TestMapAutoUsesTreeSitterForTS(t *testing.T) {
+	content := []byte("export class App {\n  render(): string { return '' }\n}\n")
+
+	result, err := Map("app.ts", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+	if result.Engine != EngineTreeSitter {
+		t.Fatalf("engine = %q, want tree-sitter for .ts files", result.Engine)
+	}
+	if result.Fallback {
+		t.Fatalf("tree-sitter fell back to regex (warnings: %v)", result.Warnings)
+	}
+}
+
+// TestMapAutoUsesTreeSitterForPython proves the same for Python files.
+func TestMapAutoUsesTreeSitterForPython(t *testing.T) {
+	content := []byte("class Foo:\n    def bar(self):\n        pass\n")
+
+	result, err := Map("foo.py", content, Options{})
+	if err != nil {
+		t.Fatalf("Map returned error: %v", err)
+	}
+	if result.Engine != EngineTreeSitter {
+		t.Fatalf("engine = %q, want tree-sitter for .py files", result.Engine)
+	}
+	if result.Fallback {
+		t.Fatalf("tree-sitter fell back to regex (warnings: %v)", result.Warnings)
+	}
+}
+
+// TestTreeSitterBetterThanRegexForClassMethods is the quality proof:
+// regex is structurally blind to methods inside class bodies.
+// tree-sitter captures them because it parses the AST, not lines.
+//
+// This test runs identical TypeScript through both engines and asserts
+// tree-sitter finds the class methods while regex does not.
+func TestTreeSitterBetterThanRegexForClassMethods(t *testing.T) {
+	content := []byte(strings.Join([]string{
+		"export class UserService {",
+		"  async getUser(id: string): Promise<User> {",
+		"    return fetch(id)",
+		"  }",
+		"  async createUser(data: CreateUserDto): Promise<User> {",
+		"    return post(data)",
+		"  }",
+		"}",
+	}, "\n"))
+
+	tsResult, err := TreeSitterMapper{}.Map("user.service.ts", content, Options{Kind: KindFunc})
+	if err != nil {
+		t.Fatalf("tree-sitter Map error: %v", err)
+	}
+	rxResult, err := RegexMapper{}.Map("user.service.ts", content, Options{Kind: KindFunc})
+	if err != nil {
+		t.Fatalf("regex Map error: %v", err)
+	}
+
+	tsGot := strings.Join(tsResult.Lines, "\n")
+	rxGot := strings.Join(rxResult.Lines, "\n")
+
+	// tree-sitter must find both methods
+	if !strings.Contains(tsGot, "getUser") {
+		t.Errorf("tree-sitter missed getUser; lines: %#v", tsResult.Lines)
+	}
+	if !strings.Contains(tsGot, "createUser") {
+		t.Errorf("tree-sitter missed createUser; lines: %#v", tsResult.Lines)
+	}
+
+	// regex must miss both (they are inside a class body, not at top-level function syntax)
+	if strings.Contains(rxGot, "getUser") || strings.Contains(rxGot, "createUser") {
+		t.Errorf("regex unexpectedly found class methods — proof no longer valid; lines: %#v", rxResult.Lines)
+	}
+
+	// tree-sitter should have more symbols than regex for this content
+	if len(tsResult.Symbols) <= len(rxResult.Symbols) {
+		t.Errorf("tree-sitter found %d symbols, regex found %d — expected tree-sitter > regex",
+			len(tsResult.Symbols), len(rxResult.Symbols))
+	}
+}
+
+// TestTreeSitterEngineFallsBackToRegex ensures unsupported file types
+// degrade gracefully rather than returning an error.
 func TestTreeSitterEngineFallsBackToRegex(t *testing.T) {
 	result, err := Map("README.md", []byte("# readme\n"), Options{Engine: EngineTreeSitter})
 	if err != nil {
