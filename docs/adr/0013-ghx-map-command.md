@@ -1,7 +1,7 @@
 ---
 title: "First-Class Code Mapping in ghx"
 date: 2026-04-07
-status: Proposed
+status: Accepted — Phase 1 and Phase 2 complete as of 2026-04-14
 ---
 
 # 0013. First-Class Code Mapping in `ghx`
@@ -226,17 +226,17 @@ Naming matches codemap's named levels deliberately — agents and developers fam
 | `const` | Constants |
 | `var` | Package-level variables |
 
-### Phase 2: Parser-backed extraction
+### Phase 2: Parser-backed extraction ✓ Done
 
-Build mapping around a common model:
+The common model, as shipped:
 
 ```go
-type MapEngine interface {
-    Map(path string, content []byte, opts MapOpts) (MapResult, error)
+type Mapper interface {
+    Map(path string, content []byte, opts Options) (Result, error)
 }
 
-type MapSymbol struct {
-    Kind      MapKind
+type Symbol struct {
+    Kind      Kind
     Name      string
     Signature string
     Line      int
@@ -246,54 +246,52 @@ type MapSymbol struct {
 }
 ```
 
-Initial engines:
+Engines shipped:
 
-1. `TreeSitterMapper`: pure-Go Tree-sitter tags through `odvcencio/gotreesitter`
-2. `RegexMapper`: fallback and coverage merge layer for imports/package lines and parser gaps
-3. `GoASTMapper` (optional later): Go stdlib parser if a smaller/faster Go-only path is useful
+1. `GoASTMapper`: Go stdlib `go/ast` + `go/parser` for `.go` files. Top-level declarations only, full multi-line signatures compacted to one line, generic type parameters preserved. Zero binary size cost — stdlib only.
+2. `TreeSitterMapper`: pure-Go Tree-sitter tags through `odvcencio/gotreesitter` for TypeScript, TSX, JavaScript, JSX, Python. Captures class methods and nested symbols that regex cannot reach.
+3. `RegexMapper`: fallback for all unsupported languages and safety net when parsers fail.
 
-Implementation decision as of 2026-04-14: use `gotreesitter` first. `malivvan/tree-sitter` remains a future option only if it exposes the target grammars or ghx vendors a custom WASM build.
+Key implementation decision made during development: **Go uses `GoASTMapper`, not `TreeSitterMapper`**. An earlier iteration routed Go through tree-sitter and regressed quality — tree-sitter's Go `tags.scm` captures local variable definitions inside function bodies, producing noise and duplicates. `go/ast` has explicit top-level/local scope distinction and is the correct tool. Tree-sitter is right for languages without a Go stdlib parser.
 
-### Engineering plan
+`malivvan/tree-sitter` remains a future option only if it exposes the target grammars or ghx vendors a custom WASM build.
 
-The map feature should be engineered as a replaceable engine architecture, not as logic embedded in `read`.
+### Engineering plan ✓ Done
 
-1. Create `internal/mapengine` as the engine boundary. This package owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback behavior, and output formatting.
-2. Keep `pkg/ghx/read.go` focused on GitHub fetching, glob expansion, and result assembly. It should call `mapengine.Map(...)` and should not know whether extraction came from regex, Go AST, or Tree-sitter.
-3. Ship the current regex mapper as `RegexMapper`, but treat it as the default fallback rather than the long-term quality bar.
-4. Add `TreeSitterMapper` behind the same engine interface. `auto` should try Tree-sitter for supported languages and fall back to regex; `--map-engine regex` forces the old behavior.
-5. Keep Tree-sitter language behavior configurable inside `TreeSitterMapper`, not in `read.go`. Each language can define:
-   - grammar detection key
-   - tags query resolver
-   - tag-kind normalization (`definition.method` → `func`, etc.)
-   - signature trimming strategy
-   - whether regex symbols are merged for coverage
-   - which regex symbol kinds may be merged
-   - token source factory override
-6. Keep engine selection resilient:
-   - `auto`: best available stable engine, fallback to regex
-   - `regex`: force regex mapper
-   - `tree-sitter`: try Tree-sitter, fallback to regex with a warning if unavailable
-7. Normalize all engine output into the same `MapSymbol` model before rendering. CLI, MCP, codemode, and future `ghx map` should consume the same result shape.
-8. Add map metadata to results:
-   - engine used
-   - fallback status
-   - warnings
-   - original chars
-   - mapped chars
-9. Keep benchmarks and quality fixtures separate from engine code so parser implementations can be swapped without rewriting tests.
+All items shipped as of 2026-04-14:
 
-Initial package shape:
+1. ✓ `internal/mapengine` owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback, and output formatting.
+2. ✓ `pkg/ghx/read.go` calls `mapengine.Map(...)` and has no parser logic.
+3. ✓ `RegexMapper` is the fallback, not the default for supported languages.
+4. ✓ `GoASTMapper` is the primary engine for `.go` files. `TreeSitterMapper` handles TS/JS/Python. Both sit behind the same `Mapper` interface.
+5. ✓ Tree-sitter language behavior is configurable inside `TreeSitterMapper` via `TreeSitterLanguageConfig`.
+6. ✓ Engine selection is resilient: `auto` routes by file extension, `regex` forces regex, `tree-sitter` forces tree-sitter with fallback warning.
+7. ✓ All engine output normalizes to the same `Result`/`Symbol` shape.
+8. ✓ `Result` carries engine, fallback flag, warnings, original chars, mapped chars.
+9. Tests are engine-agnostic where possible. Quality fixtures and benchmarks are future work.
+
+Actual package shape as shipped:
 
 ```text
 v2/internal/mapengine/
-  types.go            # Mapper, Options, Result, Symbol, enums
-  regex.go            # current fallback implementation
-  treesitter.go       # pure-Go Tree-sitter engine + per-language config
-  regex_test.go       # unit and integration tests for both engines
-  fixtures/           # map-quality fixtures per language (future)
-  benchmarks_test.go  # parse/render performance tests (future)
+  types.go            # Mapper, Options, Result, Symbol, enums, engine routing
+  regex.go            # regex fallback implementation
+  goast.go            # Go stdlib go/ast engine for .go files
+  treesitter.go       # pure-Go Tree-sitter engine + TreeSitterLanguageConfig
+  regex_test.go       # 15 tests covering all three engines and routing
+  fixtures/           # map-quality fixtures per language (not yet written)
+  benchmarks_test.go  # parse/render performance tests (not yet written)
 ```
+
+Engine routing in `EngineAuto`:
+
+```
+.go              → GoASTMapper    fallback → RegexMapper
+.ts .tsx .js .jsx .py → TreeSitterMapper   fallback → RegexMapper
+everything else  → RegexMapper
+```
+
+`EngineTreeSitter` flag forces `TreeSitterMapper` for any file, with a warning on fallback. `EngineRegex` forces `RegexMapper`.
 
 ### `TreeSitterLanguageConfig` — per-language hook points
 
@@ -369,15 +367,28 @@ This does not replace global GitHub Code Search, but it gives agents a reliable 
 
 Mapping is a file content post-processing step, not a separate GitHub API. ghx fetches file content via GraphQL, then maps structure locally.
 
-Target language support:
+Language support as shipped:
 
-- **Go**: Go stdlib parser or Tree-sitter
-- **TypeScript/JavaScript**: Tree-sitter tags queries
-- **Python**: Tree-sitter tags queries
-- **Rust**: Tree-sitter tags queries
-- **Other**: graceful fallback to current regex-based extraction
+| Language | Engine | Notes |
+|----------|--------|-------|
+| Go | `GoASTMapper` (`go/ast`) | Top-level only, full multi-line sigs, generics preserved |
+| TypeScript / TSX | `TreeSitterMapper` | Class methods, arrow funcs, interfaces |
+| JavaScript / JSX | `TreeSitterMapper` | Class methods, exported functions |
+| Python | `TreeSitterMapper` | Classes, methods, colon-stop signature trimmer |
+| Rust, Java, Ruby, etc. | `RegexMapper` | Top-level patterns only |
+| Markdown, YAML, etc. | `RegexMapper` | Structural hints only |
 
-Regex is acceptable only as fallback. Parser-backed extraction should be preferred where available.
+Tree-sitter beats regex for any language with nested scope (class bodies, decorators, methods). Go is the exception: `go/ast` is unambiguously better because it has explicit scope, handles multi-line signatures, preserves generic type parameters, and adds zero binary size.
+
+**Verified quality difference (GoAST vs regex on `net/http/server.go`):**
+- Regex includes function bodies on single-line functions (`func unlock() { cr.mu.Unlock() }`) — GoAST stops at `{`
+- Regex truncates multi-line `var`/`const` literals at the first line — GoAST compacts the full value
+- Regex includes inline comments on constants — GoAST strips them
+- Both produce equivalent symbol counts; GoAST output is semantically more precise
+
+**Verified quality difference (TreeSitter vs regex on TypeScript class bodies):**
+- Regex finds zero methods inside a class body — TreeSitter captures all of them
+- `TestTreeSitterBetterThanRegexForClassMethods` encodes this as a permanent regression guard
 
 ### `--kind` filter
 
@@ -482,6 +493,40 @@ Tradeoff: importing the bundled grammar package increases binary size substantia
 - Repo-wide map could be expensive for very large repos — needs rate limit awareness and batching caps
 - Two entry points may overlap if `ghx map` is added (`ghx read --map` and `ghx map`)
 
+## What's next
+
+### Immediate (Phase 1 remainder)
+
+- **`ghx map` top-level command**: Phase 1 specified a thin wrapper over `mapengine.Map`. `read --map` works; `ghx map` as a discoverable entry point has not been added yet.
+- **`--level standard`**: The `standard` level (signatures + doc comments truncated to 160 chars) is defined but `GoASTMapper` and `TreeSitterMapper` do not yet populate `Symbol.Doc`. Implementing this requires reading `ast.CommentGroup` for Go and `@doc` captures for Tree-sitter.
+- **GoReleaser CI confirmation**: `gotreesitter` builds pass locally (`CGO_ENABLED=0`). Cross-compilation across darwin/linux/windows × amd64/arm64 needs CI validation before declaring the map engine stable.
+
+### Near-term
+
+- **Grammar payload pruning**: `gotreesitter` bundles all supported grammars. ghx only needs Go, TypeScript, TSX, JavaScript, Python. Pruning or lazy-loading the bundle is required before treating the ~48M binary size as final.
+- **Benchmarks**: Cold parse time and per-file parse time for `GoASTMapper` and `TreeSitterMapper` under realistic load have not been measured. Add `benchmarks_test.go` with a representative corpus before enabling in CI.
+- **Python quality validation**: `TreeSitterMapper` with the colon-stop trimmer handles Python correctly in tests, but real-world Python (decorators, `@dataclass`, `async def`, type annotations) needs a wider fixture set.
+
+### Phase 3: Repo-scoped map
+
+After the map engine is stable, build the repo-scoped scan workflow:
+
+```
+ghx explore → file tree
+  → filter: source files only (no test/, vendor/, generated)
+  → batch GraphQL blob reads (same strategy as ghx read)
+  → mapengine.Map per file
+  → concatenated output with file headers
+```
+
+This is not global code search — it is bounded to a known repo and uses documented APIs. It gives agents a reliable "show me the whole codebase structure" primitive without cloning. Must be gated by a `--max-files N` cap (default TBD, likely 50–100 files).
+
+### Later
+
+- **`go-enry` integration**: Language detection and generated/vendor/test/binary filtering. Currently ghx uses file extension only. `go-enry` would let ghx skip minified JS, vendored deps, and generated protobuf files automatically.
+- **Nested symbol representation**: `Symbol.Parent` is defined but not populated. Filling it would let agents understand that `render` is a method of `UserService`, not a top-level function.
+- **Rust support via TreeSitter**: `RegexMapper` handles Rust today. `gotreesitter` has a Rust grammar. Adding a `"rust"` entry to `defaultTreeSitterLanguageConfigs()` is the only change needed.
+
 ## Open questions
 
 1. Does `gotreesitter` build reliably in ghx's GoReleaser matrix? _(CI confirmation still needed across darwin/linux/windows × amd64/arm64)_
@@ -490,8 +535,9 @@ Tradeoff: importing the bundled grammar package increases binary size substantia
 4. What's the right default for `--max-files` in repo-wide mode?
 5. Should ghx use `go-enry` for language detection and generated/vendor/test filtering?
 6. How should map output represent nested symbols and parent relationships?
-7. ~~Should parser-backed map be opt-in initially?~~ **Resolved**: Tree-sitter is now the default (`auto`) for supported languages; regex is the fallback. No opt-in flag needed.
+7. ~~Should parser-backed map be opt-in initially?~~ **Resolved**: Tree-sitter is default for TS/JS/Python; GoAST is default for Go; regex is the fallback. No opt-in needed.
 8. What are cold-parse and per-file parse times under realistic load? _(benchmarks not yet written)_
+9. ~~Should Go use tree-sitter or go/ast?~~ **Resolved**: `go/ast` — tree-sitter's Go tags.scm captures local variable definitions inside function bodies, producing noise and duplicates. `go/ast` has explicit scope and is strictly better for Go.
 
 ## References
 
