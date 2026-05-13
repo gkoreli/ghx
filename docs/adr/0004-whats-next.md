@@ -1,7 +1,9 @@
 # ADR-0004: v0.3 — First Contact Intelligence
 
 **Date**: 2026-03-08
-**Status**: Proposed
+**Status**: Superseded by ADR-0007
+
+**Current note**: This proposed bash-era roadmap is historical. The maintained implementation is now the Go implementation in `v2/`, with MCP and codemode covered by later ADRs.
 
 ## The Vision
 

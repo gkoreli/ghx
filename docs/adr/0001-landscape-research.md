@@ -1,6 +1,8 @@
 ## GitHub Content: Use `ghx` and `gh` CLI
 
 > **Note (2026-03-08):** Search-related decisions are now in [ADR-0003](./0003-search-design.md), which is the definitive reference. Some claims in this ADR were corrected there — notably: `filename:` IS valid in the REST API, `OR` is web-only, `gh search code` silently wraps in quotes (exact phrase). The landscape research below remains valuable for context but defer to ADR-0003 for search specifics.
+>
+> **Current note:** Bash-specific implementation and distribution assumptions in this research are superseded by [ADR-0007](./0007-go-multi-frontend-architecture.md). ghx is now maintained as the Go implementation in `v2/`.
 
 For anything on GitHub — repos, files, PRs, issues — use CLI tools via `execute_bash`. Authenticated, structured data, no HTML scraping.
 

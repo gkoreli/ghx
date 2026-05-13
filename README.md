@@ -154,15 +154,6 @@ v2/
 
 See [docs/adr/](docs/adr/) for architectural decisions.
 
-## v1 (bash)
-
-The original bash implementation is in [`v1/`](v1/). Zero dependencies beyond `gh` and `jq` — useful if you just want a shell script you can drop anywhere without compiling Go.
-
-```bash
-npm install -g @gkoreli/ghx    # npm
-cp v1/ghx /usr/local/bin/ghx   # manual
-```
-
 ## License
 
 MIT

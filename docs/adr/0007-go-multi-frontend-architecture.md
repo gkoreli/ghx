@@ -4,6 +4,8 @@
 **Status**: Accepted
 **Supersedes**: ADR-0006
 
+**Current note**: The Go implementation is now the only maintained implementation. Earlier references in this ADR to keeping the bash implementation published or maintained describe the transition plan at the time, not the current support policy.
+
 ## Context
 
 ADR-0006 concluded "stay with bash" based on a swarm experiment that reported Go at "40% functional." This was wrong. The swarm-written Go binary needed 5 lines of manual fixes (QueryRaw → Do, unused imports/vars) to reach 100% functional parity:

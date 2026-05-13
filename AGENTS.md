@@ -13,7 +13,6 @@ v2/              — Go source (main binary)
   pkg/codemode/  — JS executor (goja sandbox, esbuild transpilation, type generation)
   SKILL.md       — CLI agent skill (embedded into binary via go:embed in main.go)
   MCP-SKILL.md   — MCP agent skill (embedded into binary via go:embed in main.go)
-v1/              — legacy bash implementation (maintained but frozen)
 npm/             — platform-specific npm packages (one per OS/arch, contains Go binary)
 scripts/         — CI and release scripts
 ```

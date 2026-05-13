@@ -1,7 +1,9 @@
 # 0002. Problem Statement, Goal, and Vision
 
 **Date**: 2026-03-07
-**Status**: Accepted
+**Status**: Accepted; bash implementation and distribution details superseded by ADR-0007
+
+**Current note**: The problem statement and CLI contract remain relevant. Bash-specific implementation and packaging assumptions in this ADR are historical; ghx is now maintained as the Go implementation in `v2/`.
 
 ## Problem
 
