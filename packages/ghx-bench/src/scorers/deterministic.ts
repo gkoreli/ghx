@@ -125,16 +125,25 @@ function scoreTrace(trace: AgentTrace, checks: NonNullable<Task['checks']>): Age
   //
   // sidecar: mainAgentContext = report block only → ratio ≈ 0.1 → score ≈ 9
   // plain:   mainAgentContext = all output → ratio ≈ 1.0 → score ≈ 1
+  //
+  // Guard: a tiny or empty report (stub JSON, failed output) must NOT score
+  // as "perfectly compressed." Reward compression only for usable reports.
+  const MIN_USABLE_REPORT_CHARS = 100;
 
   const burden = trace.mainAgentBurden;
   if (burden.totalWorkflowCharsApprox > 0) {
     const ratio = burden.mainAgentContextCharsApprox / burden.totalWorkflowCharsApprox;
-    const compressionScore = ratioToScore(1 - ratio);
+    const reportIsUsable = burden.finalReportCharsApprox >= MIN_USABLE_REPORT_CHARS;
+    // If the report is missing or trivially small, treat as uncompressed (ratio=1, score=1)
+    const effectiveRatio = reportIsUsable ? ratio : 1.0;
+    const compressionScore = ratioToScore(1 - effectiveRatio);
     const kbMain = (burden.mainAgentContextCharsApprox / 1024).toFixed(1);
     const kbTotal = (burden.totalWorkflowCharsApprox / 1024).toFixed(1);
     dims['mainAgentBurden'] = {
       score: compressionScore,
-      rationale: `Main-agent context: ${kbMain}KB / ${kbTotal}KB total (${(ratio * 100).toFixed(0)}% ratio)`,
+      rationale: reportIsUsable
+        ? `Main-agent context: ${kbMain}KB / ${kbTotal}KB total (${(ratio * 100).toFixed(0)}% ratio)`
+        : `Empty/missing report — boundary failed (${kbTotal}KB work, no usable artifact)`,
     };
   }
 

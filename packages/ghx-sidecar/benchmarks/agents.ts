@@ -87,14 +87,18 @@ export const sidecarAgent: AgentDef = {
     const totalChars = turns.reduce((sum, t) => sum + t.text.length, 0);
 
     const match = GHX_REPORT_RE.exec(fullText);
-    const reportBlock = match?.[0] ?? '';
-    const reportChars = reportBlock.length;
+    const reportChars = match?.[0].length ?? 0;
+
+    // No report means the sidecar boundary failed — the main agent received no
+    // compressed artifact. Fall back to default (all output = main-agent context)
+    // rather than reporting 0, which would falsely look like perfect compression.
+    if (reportChars === 0) {
+      return defaultBurden(turns);
+    }
 
     return {
-      // Main agent only receives the compressed evidence report
       mainAgentContextCharsApprox: reportChars,
       mainAgentRepoEvidenceCharsApprox: reportChars,
-      // Everything else (exploration scratchpad, intermediate tool outputs) is sidecar-internal
       sidecarInternalTraceCharsApprox: Math.max(0, totalChars - reportChars),
       finalReportCharsApprox: reportChars,
       totalWorkflowCharsApprox: totalChars,

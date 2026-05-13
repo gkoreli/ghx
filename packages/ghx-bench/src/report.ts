@@ -67,15 +67,17 @@ function printBurdenTable(traces: AgentTrace[]): void {
     );
   }
 
-  if (traces.length >= 2) {
-    const burdens = traces.map(t => t.mainAgentBurden.mainAgentContextCharsApprox);
-    const min = Math.min(...burdens);
-    const minAgent = traces.find(t => t.mainAgentBurden.mainAgentContextCharsApprox === min);
-    const max = Math.max(...burdens);
-    const reduction = max > 0 ? ((1 - min / max) * 100).toFixed(0) : '0';
-    if (minAgent !== undefined && min !== max) {
-      process.stdout.write(`\n  ${minAgent.agentId} reduced main-agent context by ${reduction}% vs worst case.\n`);
-    }
+  // Per-agent compression summary — compare by ratio, not absolute KB
+  process.stdout.write('\n');
+  for (const t of traces) {
+    const b = t.mainAgentBurden;
+    const mainKB  = (b.mainAgentContextCharsApprox / 1024).toFixed(1);
+    const totalKB = (b.totalWorkflowCharsApprox / 1024).toFixed(1);
+    const ratio   = b.totalWorkflowCharsApprox > 0
+      ? ((1 - b.mainAgentContextCharsApprox / b.totalWorkflowCharsApprox) * 100).toFixed(0)
+      : '0';
+    const tag = b.sidecarInternalTraceCharsApprox > 0 ? ' [sidecar]' : ' [direct]';
+    process.stdout.write(`  ${t.agentId.padEnd(20)}${mainKB}KB main-agent / ${totalKB}KB total workflow, ${ratio}% compressed${tag}\n`);
   }
 }
 
