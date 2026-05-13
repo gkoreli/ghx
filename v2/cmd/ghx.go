@@ -25,7 +25,7 @@ var RootCmd = &cobra.Command{
 func init() {
 	RootCmd.SilenceErrors = true
 	RootCmd.SilenceUsage = true
-	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, treeCmd, skillCmd, versionCmd)
+	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
 }
 
 var reposCmd = &cobra.Command{
