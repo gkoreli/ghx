@@ -333,6 +333,17 @@ export class LLMJudgeScorer implements Scorer {
       return { scorerId: this.id, scores: [], verdict: 'unknown', summary: 'Judge did not produce a valid <eval-report>.' };
     }
 
+    // Warn if the judge omitted scores for any agent — partial results are
+    // surfaced rather than silently skewing aggregate statistics.
+    const expectedLabels = new Set(anonymized.map(a => a.label));
+    const scoredLabels = new Set(raw.scores.map(s => s.agentId));
+    const missingLabels = [...expectedLabels].filter(l => !scoredLabels.has(l));
+    if (missingLabels.length > 0) {
+      process.stderr.write(
+        `[llm-judge] Warning: judge omitted scores for: ${missingLabels.join(', ')} — results will be incomplete\n`,
+      );
+    }
+
     // Re-map anonymous labels back to real agentIds
     const scores: AgentScore[] = raw.scores.map(s => ({
       agentId: labelToId[s.agentId] ?? s.agentId,

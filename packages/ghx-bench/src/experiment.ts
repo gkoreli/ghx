@@ -12,7 +12,7 @@
 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { runAgent } from './runner.js';
+import { runAgent } from './runner/index.js';
 import { saveTrialResult } from './store.js';
 import { printTrialResult, printExperimentSummary } from './report.js';
 import type {

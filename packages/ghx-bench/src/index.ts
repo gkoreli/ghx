@@ -18,13 +18,11 @@ export type {
   ExperimentResult,
 } from './types.js';
 
-export { runAgent, defaultBurden } from './runner.js';
-export type { RunOptions } from './runner.js';
+export { runAgent, defaultBurden } from './runner/index.js';
+export type { RunOptions } from './runner/index.js';
 
-export { LLMJudgeScorer } from './scorers/llm-judge.js';
-export type { LLMJudgeScorerOptions } from './scorers/llm-judge.js';
-
-export { DeterministicScorer } from './scorers/deterministic.js';
+export { LLMJudgeScorer, DeterministicScorer } from './scorers/index.js';
+export type { LLMJudgeScorerOptions } from './scorers/index.js';
 
 export { saveTrialResult, loadTrialResults } from './store.js';
 export { printTrialResult, printExperimentSummary } from './report.js';
