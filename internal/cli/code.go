@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gkoreli/ghx/v2/pkg/codemode"
-	"github.com/gkoreli/ghx/v2/pkg/ghx"
+	"github.com/gkoreli/ghx/v2/internal/codemode"
+	"github.com/gkoreli/ghx/v2/internal/ghx"
 	"github.com/spf13/cobra"
 )
 

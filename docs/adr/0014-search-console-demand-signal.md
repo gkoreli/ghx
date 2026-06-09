@@ -197,7 +197,7 @@ Need to inspect a GitHub repo?
 7. Clone or pack only after remote reconnaissance says the repo matters.
 ```
 
-This should show up in `README.md`, `v2/SKILL.md`, and `v2/MCP-SKILL.md`. The agent should learn a posture: delay irreversible context loading until structure justifies it.
+This should show up in `README.md`, `internal/skilldoc/SKILL.md`, and `internal/skilldoc/MCP-SKILL.md`. The agent should learn a posture: delay irreversible context loading until structure justifies it.
 
 ### 2. Treat syntax as product surface
 
@@ -274,7 +274,7 @@ This creates trust. A tool that can say when not to use it is easier for agents 
 
 ## Follow-Ups
 
-1. Update `v2/SKILL.md` and `v2/MCP-SKILL.md` with the decision ladder.
+1. Update `internal/skilldoc/SKILL.md` and `internal/skilldoc/MCP-SKILL.md` with the decision ladder.
 2. Audit `ghx search --help` for honest GitHub public API limitations and web-only qualifier warnings.
 3. Audit `ghx map --help` and README examples for path/glob, `--kind`, and map-level discoverability.
 4. Consider a bounded repo/path search design that composes `tree`, glob filtering, batched reads, and local matching.

@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gkoreli/ghx/v2/pkg/codemode"
-	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
+	"github.com/gkoreli/ghx/v2/internal/codemode"
+	ghxlib "github.com/gkoreli/ghx/v2/internal/ghx"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"

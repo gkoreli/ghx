@@ -1,6 +1,6 @@
 package ghx
 
-import "github.com/gkoreli/ghx/v2/pkg/codemode"
+import "github.com/gkoreli/ghx/v2/internal/codemode"
 
 // RegisterTools registers all ghx core functions with the given codemode registry.
 func RegisterTools(r *codemode.Registry) {

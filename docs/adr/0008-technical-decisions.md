@@ -4,6 +4,8 @@
 **Status**: Accepted
 **Parent**: ADR-0007
 
+**Current note**: The dependency and interface decisions remain relevant. Any older layout assumptions are historical; the current root module uses `cmd/ghx/` plus private packages under `internal/`.
+
 ## Purpose
 
 ADR-0007 defined the architecture (core + CLI + MCP + codemode) and the build order. This ADR resolves the technical decisions needed before implementation begins, grounded in research across the codemode ecosystem and oriented toward where the field is heading — not where it was.
@@ -97,16 +99,17 @@ These directions all require **concurrency** at the executor level. Any runtime 
 
 ```
 github.com/gkoreli/ghx/v2
-├── pkg/ghx/        # Core library (GitHub API operations)
-├── pkg/codemode/   # Codemode SDK (executor, transpiler, typegen, registry)
-├── cmd/            # CLI + MCP server
+├── cmd/ghx/        # Binary entrypoint
+├── internal/ghx/        # Core library (GitHub API operations)
+├── internal/codemode/   # Codemode SDK (executor, transpiler, typegen, registry)
+├── internal/cli/        # CLI + MCP server commands
 ├── go.mod          # Single module
 ```
 
 - Faster iteration — no cross-repo dependency management during initial development
 - ~400 lines of codemode code doesn't justify a separate repo yet
 - If a second consumer appears, extract to `github.com/gkoreli/go-codemode` then
-- Go modules support `pkg/codemode/` as an importable package within the same module
+- The current implementation keeps product domains private under `internal/`; extract public packages only if a real external Go API appears.
 
 ---
 
@@ -169,7 +172,7 @@ ghx serve --http :8080 # MCP server mode (streamable HTTP)
 
 | Layer | Method |
 |-------|--------|
-| Core (`pkg/ghx/`) | Unit tests with mocked GitHub API responses |
+| Core (`internal/ghx/`) | Unit tests with mocked GitHub API responses |
 | Codemode executor | Snapshot tests: JS input → expected output. Timeout, ACL, console capture |
 | Codemode type gen | Golden file tests: Go function signatures → expected TS stubs |
 | MCP server | Integration tests using `mcptest` from mark3labs/mcp-go |
@@ -215,7 +218,7 @@ All pure Go. No CGO. Cross-compiles to all platforms.
 |---------|--------|-------|
 | §1 Script Runtime (goja + esbuild) | ✅ | executor.go (296 lines), transpile.go (21 lines), LoaderTS per ADR-0009 |
 | §2 MCP Library (mcp-go) | ✅ | serve.go (302 lines), 7 tools (5 direct + code + search_tools) |
-| §3 Module Structure | ✅ | Monorepo, pkg/codemode/ + pkg/ghx/ |
+| §3 Module Structure | ✅ | Monorepo, internal/codemode/ + internal/ghx/ |
 | §4 Tool Registration | ✅ | register.go (135 lines), hybrid pattern with JSON schemas |
 | §5 Distribution | ✅ | Single binary (21MB), `ghx serve` + `ghx code` subcommands |
 | §6 Type Stubs | ✅ | typegen.go (128 lines), `declare const codemode: { ... }` format |

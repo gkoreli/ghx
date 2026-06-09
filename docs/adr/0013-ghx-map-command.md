@@ -23,7 +23,7 @@ The product question is no longer "should ghx build mapping?" ghx already has it
 ghx's `--map` flag works as follows:
 
 ```bash
-ghx read gkoreli/ghx --map v2/pkg/ghx/explore.go
+ghx read gkoreli/ghx --map internal/ghx/explore.go
 # Returns: package declarations, imports, type definitions, function signatures
 # Output: 202 characters instead of 3,111 bytes (92% token reduction)
 ```
@@ -261,7 +261,7 @@ Key implementation decision made during development: **Go uses `GoASTMapper`, no
 All items shipped as of 2026-04-14:
 
 1. ✓ `internal/mapengine` owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback, and output formatting.
-2. ✓ `pkg/ghx/read.go` calls `mapengine.Map(...)` and has no parser logic.
+2. ✓ `internal/ghx/read.go` calls `mapengine.Map(...)` and has no parser logic.
 3. ✓ `RegexMapper` is the fallback, not the default for supported languages.
 4. ✓ `GoASTMapper` is the primary engine for `.go` files. `TreeSitterMapper` handles TS/JS/Python. Both sit behind the same `Mapper` interface.
 5. ✓ Tree-sitter language behavior is configurable inside `TreeSitterMapper` via `TreeSitterLanguageConfig`.
@@ -273,7 +273,7 @@ All items shipped as of 2026-04-14:
 Actual package shape as shipped:
 
 ```text
-v2/internal/mapengine/
+internal/mapengine/
   types.go            # Mapper, Options, Result, Symbol, enums, engine routing
   regex.go            # regex fallback implementation
   goast.go            # Go stdlib go/ast engine for .go files

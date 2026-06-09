@@ -66,7 +66,6 @@ The suite is not a user-facing benchmark CLI. It is an e2e/eval test suite run
 manually by engineers.
 
 ```
-cd v2
 go test ./internal/sidecar/evals -tags=agent_e2e -run TestEpisodes
 ```
 
@@ -79,7 +78,7 @@ go test ./internal/sidecar/evals -tags=agent_e2e -run TestEpisodes -count=5
 ## Architecture
 
 ```
-v2/internal/sidecar/evals/
+internal/sidecar/evals/
   episode.go        – Task, Episode, Turn, Action, Observation, RewardBreakdown
   profiles.go       – plain, ghx, ghx-sidecar profile definitions
   runner.go         – ACP-backed episode runner using coder/acp-go-sdk

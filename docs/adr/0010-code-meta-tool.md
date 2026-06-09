@@ -4,6 +4,8 @@
 **Status**: Accepted
 **Parent**: ADR-0008, ADR-0009
 
+**Current note**: The invariant still holds, but the current layout uses private packages under `internal/` instead of public-looking `pkg/` packages.
+
 ## Purpose
 
 ADRs 0008-0009 built the executor and type system. This ADR defines how they're exposed to LLMs: a single `code` tool that wraps all ghx tools, letting the LLM write one program instead of making N individual tool calls.
@@ -13,10 +15,10 @@ ADRs 0008-0009 built the executor and type system. This ADR defines how they're 
 ## Invariant: Core Is the Source of Truth
 
 ```
-pkg/ghx/       → defines what operations exist
-pkg/codemode/  → defines how code execution works
-cmd/ghx.go     → exposes EVERYTHING via CLI (including codemode)
-cmd/serve.go   → exposes the same things via MCP (no unique features)
+internal/ghx/       → defines what operations exist
+internal/codemode/  → defines how code execution works
+internal/cli/       → exposes EVERYTHING via CLI and MCP (including codemode)
+cmd/ghx/            → binary entrypoint
 ```
 
 If you can't do it from `ghx <command>`, it doesn't exist yet. MCP never gets capabilities that CLI doesn't have. CLI is the first frontend for every feature — MCP wraps the same core functions.
@@ -245,7 +247,7 @@ For ghx: adopt the same cap. If the executor result exceeds 24K chars, truncate 
 | CLI `ghx code "..."` | ✅ | `cmd/code.go` (65 lines), commit `678ff22` |
 | CLI `ghx code -` (stdin) | ✅ | Same file, tested: `echo 'return 1+1' \| ./ghx code -` → `2` |
 | CLI `ghx code --list` | ✅ | Prints `declare const codemode: { ... }` type stubs |
-| MCP `code` tool | ✅ | `cmd/serve.go`, commit `9bc5349` (wave 8-9) |
+| MCP `code` tool | ✅ | `internal/cli/serve.go`, commit `9bc5349` (wave 8-9) |
 | MCP `search_tools` tool | ✅ | Same file, returns type stubs + tool descriptions |
 | `codemode` object injection | ✅ | `executor.go` — `codemode.explore()` not `callTool()` |
 | Type stubs in description | ✅ | `typegen.go` → `declare const codemode: { ... }` injected into tool description |
@@ -274,10 +276,10 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code","arg
 
 ```
 cmd/code.go          65   ← NEW (wave 10) — CLI frontend for codemode
-cmd/serve.go        302   ← MCP server (code + search_tools + 5 direct tools)
-cmd/ghx.go          245   ← CLI frontend (repos, explore, read, search, tree)
-pkg/codemode/       955   ← executor (296), registry (78), normalize (63), transpile (21), typegen (128), tests (369)
-pkg/ghx/            784   ← core library: explore, read, search, repos, tree, register
+internal/cli/serve.go        302   ← MCP server (code + search_tools + 5 direct tools)
+internal/cli/ghx.go          245   ← CLI frontend (repos, explore, read, search, tree)
+internal/codemode/       955   ← executor (296), registry (78), normalize (63), transpile (21), typegen (128), tests (369)
+internal/ghx/            784   ← core library: explore, read, search, repos, tree, register
 ```
 
 ### Remaining gaps

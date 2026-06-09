@@ -1,11 +1,11 @@
-package cmd
+package cli
 
 import (
 	"fmt"
 	"os"
 	"strings"
 
-	ghxlib "github.com/gkoreli/ghx/v2/pkg/ghx"
+	ghxlib "github.com/gkoreli/ghx/v2/internal/ghx"
 	"github.com/spf13/cobra"
 )
 

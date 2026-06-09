@@ -9,7 +9,7 @@ import (
 )
 
 type SearchMatch struct {
-	Repo     string `json:"repo"`     // "owner/repo"
+	Repo     string `json:"repo"` // "owner/repo"
 	Path     string `json:"path"`
 	Fragment string `json:"fragment"` // matching line context
 }

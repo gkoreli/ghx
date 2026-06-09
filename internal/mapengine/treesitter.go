@@ -305,7 +305,7 @@ func defaultTreeSitterLanguageConfigs() map[string]TreeSitterLanguageConfig {
 			MergeRegex: true,
 		},
 		"rust": {
-			MergeRegex:      true,
+			MergeRegex: true,
 			MergeRegexKinds: map[Kind]bool{
 				KindImport: true, // `use` statements are not tagged by tree-sitter's Rust grammar
 			},

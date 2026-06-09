@@ -114,4 +114,3 @@ func checkGhxBinary(ctx context.Context) PreflightCheck {
 	}
 	return PreflightCheck{Name: "ghx-binary", Passed: true, Message: "ghx found: " + strings.TrimSpace(string(out))}
 }
-

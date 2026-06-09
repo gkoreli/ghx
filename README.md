@@ -41,10 +41,10 @@ brew install gkoreli/tap/ghx
 npm install -g @gkoreli/ghx
 
 # Go
-go install github.com/gkoreli/ghx/v2@latest
+go install github.com/gkoreli/ghx/v2/cmd/ghx@latest
 
 # Build from source
-cd v2 && go build -o ghx .
+go build -o ghx ./cmd/ghx
 ```
 
 Requires: [gh CLI](https://cli.github.com/) authenticated (`gh auth login`).
@@ -145,11 +145,13 @@ Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox wit
 ## Architecture
 
 ```
-v2/
-├── internal/mapengine/ — parser-backed map engine (GoAST, TreeSitter, Regex, engine routing)
-├── pkg/ghx/            — core library (Explore, Read, Search, Repos, Tree, Glob)
-├── pkg/codemode/       — JS executor (goja sandbox, TS transpilation, type generation)
-└── cmd/                — CLI frontend (cobra) + MCP server (mcp-go)
+cmd/ghx/             — binary entrypoint
+internal/cli/        — CLI frontend (cobra) + MCP server commands
+internal/ghx/        — core library (Explore, Read, Search, Repos, Tree, Glob)
+internal/codemode/   — JS executor (goja sandbox, TS transpilation, type generation)
+internal/mapengine/  — parser-backed map engine (GoAST, TreeSitter, Regex, engine routing)
+internal/sidecar/    — sidecar runtime, sessions, reports, and ACP integration
+internal/skilldoc/   — embedded CLI and MCP agent skill markdown
 ```
 
 See [docs/adr/](docs/adr/) for architectural decisions.

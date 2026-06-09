@@ -7,12 +7,13 @@ ghx — GitHub code exploration for AI agents. Go binary distributed via npm, Ho
 ## Architecture
 
 ```
-v2/              — Go source (main binary)
-  cmd/           — CLI commands (cobra)
-  pkg/ghx/       — core library (explore, read, search, repos, tree, glob)
-  pkg/codemode/  — JS executor (goja sandbox, esbuild transpilation, type generation)
-  SKILL.md       — CLI agent skill (embedded into binary via go:embed in main.go)
-  MCP-SKILL.md   — MCP agent skill (embedded into binary via go:embed in main.go)
+cmd/ghx/             — Go binary entrypoint
+internal/cli/        — CLI commands (cobra)
+internal/ghx/        — core library (explore, read, search, repos, tree, glob)
+internal/codemode/   — JS executor (goja sandbox, esbuild transpilation, type generation)
+internal/mapengine/  — parser-backed structural map engine
+internal/sidecar/    — sidecar runtime, sessions, reports, ACP integration
+internal/skilldoc/   — CLI and MCP agent skills embedded via go:embed
 npm/             — platform-specific npm packages (one per OS/arch, contains Go binary)
 scripts/         — CI and release scripts
 ```
@@ -37,16 +38,16 @@ This updates both `version` and all `optionalDependencies` in `package.json`. Th
 
 ## SKILL.md Files
 
-SKILL.md and MCP-SKILL.md are embedded into the binary via `go:embed` in `v2/main.go`. If you modify them, the binary must be rebuilt for changes to take effect. The `ghx skill` and `ghx skill --mcp` commands print the embedded content.
+`internal/skilldoc/SKILL.md` and `internal/skilldoc/MCP-SKILL.md` are embedded into the binary via `go:embed`. If you modify them, the binary must be rebuilt for changes to take effect. The `ghx skill` and `ghx skill --mcp` commands print the embedded content.
 
 ## Build
 
 ```bash
-cd v2 && go build -o ghx .
+go build -o ghx ./cmd/ghx
 ```
 
 ## Test
 
 ```bash
-cd v2 && go test ./...
+go test ./...
 ```

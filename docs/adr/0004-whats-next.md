@@ -3,7 +3,7 @@
 **Date**: 2026-03-08
 **Status**: Superseded by ADR-0007
 
-**Current note**: This proposed bash-era roadmap is historical. The maintained implementation is now the Go implementation in `v2/`, with MCP and codemode covered by later ADRs.
+**Current note**: This proposed bash-era roadmap is historical. The maintained implementation is now the Go module at the repository root, with MCP and codemode covered by later ADRs.
 
 ## The Vision
 

@@ -109,7 +109,7 @@ Reject glob patterns with a clear error message pointing to `ghx tree`.
 ### Architecture
 
 ```
-pkg/ghx/
+internal/ghx/
 ├── glob.go       — fetchTree(), isGlob(), expandGlobs()  [shared infrastructure]
 ├── tree.go       — Tree()  [refactored to use fetchTree()]
 ├── read.go       — Read()  [glob expansion as preprocessing, then existing logic]

@@ -40,7 +40,7 @@ primary implementor.
 
 ## Decision
 
-Migrate the `ghx` sidecar from TypeScript/acpx to Go inside the `v2/` binary.
+Migrate the `ghx` sidecar from TypeScript/acpx to Go inside the Go binary.
 
 Delete `packages/ghx-sidecar` entirely. The Go implementation is the canonical sidecar
 runtime going forward. `packages/ghx-bench` is kept as-is (no equivalent eval engine
@@ -56,10 +56,10 @@ exports, `acpx.ts`, `schema.ts`, `core/config.ts`, `core/prompt.ts`, `core/prefl
 
 ### Created
 
-`v2/internal/sidecar/` — the Go sidecar runtime package:
+`internal/sidecar/` — the Go sidecar runtime package:
 
 ```
-v2/internal/sidecar/
+internal/sidecar/
   report.go    – Report, Claim, RelevantFile, Evidence types + ExtractReport()
   prompt.go    – Request type + BuildPrompt() (full persona on first turn, compact
                  prior-context on follow-up)
@@ -70,7 +70,7 @@ v2/internal/sidecar/
   runtime.go   – Ask() orchestrator (the single entry point for a sidecar turn)
 ```
 
-`v2/cmd/sidecar.go` — Cobra command tree:
+`internal/cli/sidecar.go` — Cobra command tree:
 
 ```
 ghx sidecar ask --session --repo <question>
@@ -81,9 +81,9 @@ ghx sidecar config show
 ghx sidecar config init
 ```
 
-`v2/cmd/ghx.go` — `sidecarCmd` added to `RootCmd.AddCommand(...)`.
+`internal/cli/ghx.go` — `sidecarCmd` added to `RootCmd.AddCommand(...)`.
 
-`v2/go.mod` — `github.com/coder/acp-go-sdk v0.13.0` promoted from indirect to direct.
+`go.mod` — `github.com/coder/acp-go-sdk v0.13.0` promoted from indirect to direct.
 
 ## Architecture
 
@@ -111,7 +111,7 @@ ghx sidecar ask
 | Agent subprocess | Managed by `acpx` runtime internals | `exec.CommandContext` spawned directly in `RunTurn` |
 | Permission enforcement | `permissionMode: 'deny-all'` SDK option | `denyClient.RequestPermission` always selects `reject_once`/`reject_always` |
 | Session resumption | `ensureSession({ mode: 'persistent' })` inside acpx | `ACPSessionID` field on `SessionMeta`; `conn.LoadSession` on follow-up turns |
-| Session store | Managed by `createFileSessionStore` in acpx | `v2/internal/sidecar/session.go` owns all disk artifacts |
+| Session store | Managed by `createFileSessionStore` in acpx | `internal/sidecar/session.go` owns all disk artifacts |
 | Text streaming | `AcpRuntimeEvent` iterable loop | `denyClient.SessionUpdate` callback with `AgentMessageChunk` |
 | Tool call capture | `event.type === 'tool_call'` event | `denyClient.SessionUpdate` with `u.ToolCall` branch |
 | Report extraction | `extractReport(fullText)` regex parser | `report.ExtractReport(text)` using `ghxReportRE` |
@@ -263,7 +263,7 @@ promoted to a test suite.
 - [ADR-0014.2: ghx Sidecar Proof-of-Concept Gate](./0014.2-sidecar-proof-of-concept-gate.md)
 - [ADR-0014.3: ghx-sidecar MVP Implementation Architecture](./0014.3-sidecar-mvp-implementation.md)
 - [ADR-0014.4: ghx-sidecar Benchmark and LLM Judge Architecture](./0014.4-sidecar-bench-llm-judge.md)
-- [v2/internal/sidecar/](../../v2/internal/sidecar/)
-- [v2/cmd/sidecar.go](../../v2/cmd/sidecar.go)
+- [internal/sidecar/](../../internal/sidecar/)
+- [internal/cli/sidecar.go](../../internal/cli/sidecar.go)
 - [coder/acp-go-sdk v0.13.0](https://github.com/coder/acp-go-sdk)
 - [Agent Client Protocol](https://agentclientprotocol.com/get-started/introduction)

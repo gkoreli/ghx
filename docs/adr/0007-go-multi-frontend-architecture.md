@@ -4,7 +4,7 @@
 **Status**: Accepted
 **Supersedes**: ADR-0006
 
-**Current note**: The Go implementation is now the only maintained implementation. Earlier references in this ADR to keeping the bash implementation published or maintained describe the transition plan at the time, not the current support policy.
+**Current note**: The Go implementation is now the only maintained implementation. The current repository layout uses a root Go module with the executable entrypoint in `cmd/ghx/` and private product domains in `internal/`. Earlier references to a separate `v2/` directory or keeping the bash implementation published describe the transition plan at the time, not the current support policy.
 
 ## Context
 
@@ -67,7 +67,7 @@ Rewrite ghx in Go with a core library + multiple frontends architecture.
           ghx search        tool: search        ghx.Search(query)
 ```
 
-### Layer 1: Core package (`pkg/ghx/`)
+### Layer 1: Core package (`internal/ghx/`)
 
 Pure Go functions. No CLI concerns, no I/O formatting. Takes structured input, returns structured output. Uses `go-gh` for GitHub API access.
 
@@ -87,7 +87,7 @@ func Tree(repo string, path string, opts TreeOpts) (*TreeResult, error)
 
 ### Layer 2: CLI frontend (`cmd/`)
 
-Thin wrapper. Parses flags via cobra, calls core, formats output to stdout/stderr. This is what `v2/cmd/ghx.go` already does — refactor to call core instead of inlining logic.
+Thin wrapper. Parses flags via cobra, calls core, formats output to stdout/stderr. This is now implemented in `internal/cli/`, with the binary entrypoint in `cmd/ghx/`.
 
 ### Layer 3: MCP server frontend (`cmd/mcp/` or flag `ghx serve`)
 
@@ -133,8 +133,8 @@ goja is the sweet spot: single binary, LLMs write JS well, sandboxed by default.
 
 ## Build Order
 
-1. **Extract core** — Pull logic from `v2/cmd/ghx.go` into `pkg/ghx/`. Structured input/output, no formatting.
-2. **Wire CLI** — Refactor `cmd/ghx.go` to call core. Verify parity with bash version.
+1. **Extract core** — Pull logic from the Cobra command layer into `internal/ghx/`. Structured input/output, no formatting.
+2. **Wire CLI** — Refactor `internal/cli/ghx.go` to call core. Verify parity with bash version.
 3. **Go codemode package** — Executor (goja), transpiler (esbuild), type generator, tool registry, code normalizer. ~400 lines.
 4. **MCP server** — Add `ghx serve` command. Expose core as MCP tools via `mcp-golang`. Include codemode `search` + `execute` meta-tools.
 5. **Wire codemode** — Register ghx's 5 core functions with codemode registry. MCP server exposes both direct tools and codemode.
@@ -157,7 +157,7 @@ The swarm experiment proved Go works for ghx (5 lines of fixes). The codemode re
 
 ## Consequences
 
-- `v2/` becomes the main development directory
+- The Go module becomes the main development surface
 - Bash `ghx` stays published as v0.x (stable, maintained for existing users)
 - Go `ghx` ships as v2.x with CLI parity first, then MCP + codemode
 - ADR-0006 is superseded — its conclusion was based on incomplete swarm data and the wrong evaluation frame
@@ -177,7 +177,7 @@ GOOS=windows GOARCH=amd64 go build -o ghx-windows-amd64.exe .
 
 | Channel | How | User command |
 |---------|-----|-------------|
-| Go native | `go install` fetches from git, compiles locally | `go install github.com/gkoreli/ghx/v2@latest` |
+| Go native | `go install` fetches from git, compiles locally | `go install github.com/gkoreli/ghx/v2/cmd/ghx@latest` |
 | npm | CI cross-compiles, npm package ships platform binaries via postinstall | `npm install -g @gkoreli/ghx` / `npx @gkoreli/ghx` |
 | curl | GitHub release assets, install script detects OS/arch | `curl -sf https://... \| sh` |
 | Homebrew | Tap formula pointing at GitHub release binaries | `brew install gkoreli/tap/ghx` |
@@ -256,9 +256,9 @@ Rather than hardcoding codemode bindings into ghx, we build a thin, reusable Go 
 
 ### Updated build order
 
-1. **Core ghx package** (`pkg/ghx/`) — Extract logic from `v2/cmd/ghx.go` into structured input/output functions
+1. **Core ghx package** (`internal/ghx/`) — Extract logic from the Cobra command layer into structured input/output functions
 2. **CLI frontend** — Refactor `cmd/` to call core. Verify parity with bash version.
-3. **Go codemode package** (`pkg/codemode/` or separate module) — Executor, transpiler, type gen, registry, normalizer
+3. **Go codemode package** (`internal/codemode/` or separate module) — Executor, transpiler, type gen, registry, normalizer
 4. **MCP server frontend** — Expose core as MCP tools via `mcp-golang`. Add codemode `search` + `execute` meta-tools.
 5. **Wire it together** — ghx registers its 5 core functions with the codemode registry. MCP server exposes both direct tools and codemode meta-tools.
 
@@ -268,16 +268,16 @@ Rather than hardcoding codemode bindings into ghx, we build a thin, reusable Go 
 
 | Task | File | Lines | Result |
 |------|------|-------|--------|
-| TASK-0526 | `pkg/ghx/repos.go` | 132 | ✅ Full implementation, compiles |
-| TASK-0527 | `pkg/ghx/search.go` | 89 | ✅ Full implementation, compiles |
-| TASK-0528 | `pkg/ghx/explore.go` | 122 | ✅ Full implementation, compiles |
-| TASK-0529 | `pkg/ghx/read.go` | 207 | ✅ Full implementation, grep break bug fixed |
-| TASK-0530 | `pkg/ghx/tree.go` | 79 | ✅ Full implementation, compiles |
+| TASK-0526 | `internal/ghx/repos.go` | 132 | ✅ Full implementation, compiles |
+| TASK-0527 | `internal/ghx/search.go` | 89 | ✅ Full implementation, compiles |
+| TASK-0528 | `internal/ghx/explore.go` | 122 | ✅ Full implementation, compiles |
+| TASK-0529 | `internal/ghx/read.go` | 207 | ✅ Full implementation, grep break bug fixed |
+| TASK-0530 | `internal/ghx/tree.go` | 79 | ✅ Full implementation, compiles |
 | TASK-0531 | Exit code 2 fix | — | ✅ Unknown flags now exit 2 |
-| TASK-0532 | `pkg/codemode/executor.go` | 4 | ❌ Stub only — agent wrote type alias, skipped implementation |
-| TASK-0533 | `pkg/codemode/registry.go` | 8 | ❌ Stub only — agent wrote struct, skipped implementation |
-| TASK-0534 | `pkg/codemode/normalize.go` | 26 | ✅ Full implementation |
-| TASK-0535 | `pkg/codemode/typegen.go` | 107 | ✅ Full implementation + test file |
+| TASK-0532 | `internal/codemode/executor.go` | 4 | ❌ Stub only — agent wrote type alias, skipped implementation |
+| TASK-0533 | `internal/codemode/registry.go` | 8 | ❌ Stub only — agent wrote struct, skipped implementation |
+| TASK-0534 | `internal/codemode/normalize.go` | 26 | ✅ Full implementation |
+| TASK-0535 | `internal/codemode/typegen.go` | 107 | ✅ Full implementation + test file |
 
 **Success rate**: 8/10 (80%). Both failures were codemode tasks where the agent had less concrete reference code to extract from. The ghx core extraction tasks (which had exact source code to reference) were 6/6.
 
@@ -304,9 +304,9 @@ All resolved in ADR-0008:
 
 | Task | File | Before → After | Result |
 |------|------|----------------|--------|
-| TASK-0536 | `pkg/codemode/executor.go` | 4 → 92 lines | ✅ Full goja sandbox |
-| TASK-0537 | `pkg/codemode/registry.go` | 8 → 78 lines | ✅ Full tool registry |
-| TASK-0538 | `cmd/ghx.go` | ~500 → 245 lines | ✅ Thin wrapper over pkg/ghx/ |
+| TASK-0536 | `internal/codemode/executor.go` | 4 → 92 lines | ✅ Full goja sandbox |
+| TASK-0537 | `internal/codemode/registry.go` | 8 → 78 lines | ✅ Full tool registry |
+| TASK-0538 | `internal/cli/ghx.go` | ~500 → 245 lines | ✅ Thin wrapper over internal/ghx/ |
 
 **Cumulative: 16 agents, 14 delivered first try (87.5%)**
 
@@ -314,8 +314,8 @@ Net effect of wave 5: -231 lines. Codebase got smaller while gaining a core libr
 
 ### Build order progress
 
-1. ✅ **Extract core** (`pkg/ghx/`) — 5 files, 629 lines, all compile
-2. ✅ **Wire CLI** — cmd/ghx.go calls pkg/ghx/, 245 lines
+1. ✅ **Extract core** (`internal/ghx/`) — 5 files, 629 lines, all compile
+2. ✅ **Wire CLI** — internal/cli/ghx.go calls internal/ghx/, 245 lines
 3. ✅ **Go codemode package** — executor (92), registry (78), normalize (26), typegen (107) = 303 lines
 4. 🔄 **MCP server** — `ghx serve` command, mark3labs/mcp-go (ADR-0008 §2)
 5. 🔄 **Wire codemode** — register ghx core functions, expose via MCP
@@ -324,10 +324,10 @@ Net effect of wave 5: -231 lines. Codebase got smaller while gaining a core libr
 
 | Task | File | Lines | Result |
 |------|------|-------|--------|
-| TASK-0539 | `pkg/codemode/executor.go` | 92 → 231 | ✅ Full ADR-0008 §11 contract (ctx, ToolCallRecord, limits, IIFE, callTool) |
-| TASK-0540 | `pkg/codemode/transpile.go` | 21 (new) | ✅ esbuild modern JS → ES2015 |
-| TASK-0541 | `cmd/serve.go` | 183 (new) | ✅ `ghx serve` MCP server via mark3labs/mcp-go |
-| TASK-0542 | `pkg/ghx/register.go` | 135 (new) | ✅ Wire 5 core functions to codemode registry |
+| TASK-0539 | `internal/codemode/executor.go` | 92 → 231 | ✅ Full ADR-0008 §11 contract (ctx, ToolCallRecord, limits, IIFE, callTool) |
+| TASK-0540 | `internal/codemode/transpile.go` | 21 (new) | ✅ esbuild modern JS → ES2015 |
+| TASK-0541 | `internal/cli/serve.go` | 183 (new) | ✅ `ghx serve` MCP server via mark3labs/mcp-go |
+| TASK-0542 | `internal/ghx/register.go` | 135 (new) | ✅ Wire 5 core functions to codemode registry |
 
 **Cumulative: 20 agents, 18 delivered first try (90%)**
 
@@ -337,11 +337,11 @@ Wave 6 was 100% success (4/4) vs wave 4b's 50% (2/4 codemode stubs). The differe
 
 ### Build order: COMPLETE
 
-1. ✅ **Extract core** (`pkg/ghx/`) — 5 files, 629 lines
-2. ✅ **Wire CLI** — cmd/ghx.go, 245 lines
+1. ✅ **Extract core** (`internal/ghx/`) — 5 files, 629 lines
+2. ✅ **Wire CLI** — internal/cli/ghx.go, 245 lines
 3. ✅ **Go codemode package** — executor (231), registry (78), normalize (26), typegen (107), transpile (21) = 463 lines
-4. ✅ **MCP server** — cmd/serve.go, 183 lines, `ghx serve` command
-5. ✅ **Wire codemode** — pkg/ghx/register.go, 135 lines
+4. ✅ **MCP server** — internal/cli/serve.go, 183 lines, `ghx serve` command
+5. ✅ **Wire codemode** — internal/ghx/register.go, 135 lines
 
 Total: 1736 lines of Go across 14 files. All compile. Tests pass.
 
@@ -351,7 +351,7 @@ After reading all wave 5-6 output, three integration issues were found and fixed
 
 1. **Transpile not wired** — executor.go had `Transpile()` available but never called it. Fixed: normalize → transpile → IIFE → execute pipeline.
 2. **Dead method** — registry.go had `ToolFuncs()` returning `map[string]ToolFunc` but executor now takes `[]Tool`. Replaced with `Tools()`.
-3. **MCP server bypasses codemode** — serve.go calls `pkg/ghx/` directly, doesn't expose codemode meta-tools (`search` + `execute`). This is the key differentiator from a standard MCP server. Needs wave 7 agent.
+3. **MCP server bypasses codemode** — serve.go calls `internal/ghx/` directly, doesn't expose codemode meta-tools (`search` + `execute`). This is the key differentiator from a standard MCP server. Needs wave 7 agent.
 
 **Insight: agents build correct isolated components but don't wire cross-cutting concerns.** Each file was correct in isolation. The transpile→executor pipeline and the serve→codemode→executor chain required human integration review.
 
@@ -363,9 +363,9 @@ All build order steps complete. Remaining work tracked in ADR-0010 (research dir
 
 | Task | File | What | Result |
 |------|------|------|--------|
-| TASK-0543 | `cmd/serve.go` | Codemode meta-tools (`code` + `search_tools`) in MCP server | ✅ |
-| TASK-0544 | `pkg/codemode/executor_test.go` | 12 executor tests (happy path, timeout, ACL, console, IIFE) | ✅ |
-| TASK-0545 | `cmd/serve.go` | `--http :8080` streamable HTTP transport flag | ✅ |
+| TASK-0543 | `internal/cli/serve.go` | Codemode meta-tools (`code` + `search_tools`) in MCP server | ✅ |
+| TASK-0544 | `internal/codemode/executor_test.go` | 12 executor tests (happy path, timeout, ACL, console, IIFE) | ✅ |
+| TASK-0545 | `internal/cli/serve.go` | `--http :8080` streamable HTTP transport flag | ✅ |
 
 Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `vm.Interrupt()`).
 
@@ -373,16 +373,16 @@ Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `v
 
 | Task | File | What | Result |
 |------|------|------|--------|
-| TASK-0546 | `pkg/codemode/typegen.go` | `declare const codemode: { ... }` output format (ADR-0009) | ✅ |
-| TASK-0547 | `pkg/codemode/executor.go` | `codemode` object injection (per-tool methods via closure) | ✅ |
-| TASK-0548 | `pkg/ghx/read.go` | Batch file reads — 1 GraphQL call with aliases instead of N | ✅ |
+| TASK-0546 | `internal/codemode/typegen.go` | `declare const codemode: { ... }` output format (ADR-0009) | ✅ |
+| TASK-0547 | `internal/codemode/executor.go` | `codemode` object injection (per-tool methods via closure) | ✅ |
+| TASK-0548 | `internal/ghx/read.go` | Batch file reads — 1 GraphQL call with aliases instead of N | ✅ |
 
 ### Wave 9 results (2 agents, 2/2 ✅)
 
 | Task | File | What | Result |
 |------|------|------|--------|
-| TASK-0549 | `cmd/serve.go` | Rename to `code`/`search_tools`, type stubs in description, 24K truncation | ✅ |
-| TASK-0550 | `pkg/codemode/normalize.go` | Handle named functions + bare expressions (not just fences) | ✅ |
+| TASK-0549 | `internal/cli/serve.go` | Rename to `code`/`search_tools`, type stubs in description, 24K truncation | ✅ |
+| TASK-0550 | `internal/codemode/normalize.go` | Handle named functions + bare expressions (not just fences) | ✅ |
 
 ### Wave 10 results (1 agent, 1/1 ✅)
 
@@ -405,9 +405,9 @@ Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `v
 
 | Wave | Agents | Success | Key deliverables |
 |------|--------|---------|-----------------|
-| 4a (core) | 6 | 6/6 | pkg/ghx/ — 5 core functions |
+| 4a (core) | 6 | 6/6 | internal/ghx/ — 5 core functions |
 | 4b (codemode) | 4 | 2/4 | normalize.go, typegen.go |
-| 5 (respawn) | 3 | 3/3 | executor.go, registry.go, cmd/ghx.go |
+| 5 (respawn) | 3 | 3/3 | executor.go, registry.go, internal/cli/ghx.go |
 | 6 (MCP+wiring) | 4 | 4/4 | serve.go, transpile.go, register.go |
 | 7 (meta-tools) | 3 | 3/3 | codemode meta-tools, executor tests, HTTP transport |
 | 8 (ADR-0009) | 3 | 3/3 | typegen, codemode object, batch reads |
@@ -425,7 +425,7 @@ Also fixed manually: context interrupt (goroutine watches `ctx.Done()`, calls `v
 |---------|---------|-----------|
 | npm | `npm install -g @gkoreli/ghx` | `postinstall.js` downloads Go binary from GitHub release |
 | Homebrew | `brew install gkoreli/tap/ghx` | goreleaser pushes formula to `gkoreli/homebrew-tap` |
-| Go | `go install github.com/gkoreli/ghx/v2@latest` | Standard Go toolchain |
+| Go | `go install github.com/gkoreli/ghx/v2/cmd/ghx@latest` | Standard Go toolchain |
 | Direct | `curl -fsSL .../install.sh \| bash` | Shell script downloads from GitHub release |
 
 ### npm: Pattern 2 (postinstall download) — shipped

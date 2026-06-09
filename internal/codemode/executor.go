@@ -33,9 +33,9 @@ type ExecutorOption func(*Executor)
 
 // Executor runs sandboxed JavaScript with injected tool bindings.
 type Executor struct {
-	maxCodeSize    int64
-	maxToolCalls   int
-	callTimeout    time.Duration
+	maxCodeSize  int64
+	maxToolCalls int
+	callTimeout  time.Duration
 }
 
 // WithMaxCodeSize sets the maximum code size (default 64KB).

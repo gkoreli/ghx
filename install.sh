@@ -32,7 +32,6 @@ install_binary() {
   chmod +x "$INSTALL_DIR/ghx"
   for f in SKILL.md MCP-SKILL.md; do
     [[ -f "$TMPDIR_CLEANUP/$f" ]] && cp "$TMPDIR_CLEANUP/$f" "$INSTALL_DIR/$f"
-    [[ -f "$TMPDIR_CLEANUP/v2/$f" ]] && cp "$TMPDIR_CLEANUP/v2/$f" "$INSTALL_DIR/$f"
   done
   return 0
 }
@@ -42,7 +41,7 @@ install_source() {
   echo "Building ghx from source..."
   TMPDIR_CLEANUP="$(mktemp -d)"
   git clone --depth 1 "https://github.com/$REPO.git" "$TMPDIR_CLEANUP/ghx"
-  (cd "$TMPDIR_CLEANUP/ghx/v2" && go build -o "$INSTALL_DIR/ghx" .)
+  (cd "$TMPDIR_CLEANUP/ghx" && go build -o "$INSTALL_DIR/ghx" ./cmd/ghx)
 }
 
 echo "Installing ghx to $INSTALL_DIR..."

@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	fenceRe      = regexp.MustCompile(`(?s)^` + "`" + `{3}[^\n]*\n(.*)\n` + "`" + `{3}$`)
-	namedFuncRe  = regexp.MustCompile(`^function\s+(\w+)\s*\(`)
-	bareExprRe   = regexp.MustCompile(`^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*|\[.+\])*$`)
+	fenceRe     = regexp.MustCompile(`(?s)^` + "`" + `{3}[^\n]*\n(.*)\n` + "`" + `{3}$`)
+	namedFuncRe = regexp.MustCompile(`^function\s+(\w+)\s*\(`)
+	bareExprRe  = regexp.MustCompile(`^[a-zA-Z_$][\w$]*(\.[a-zA-Z_$][\w$]*|\[.+\])*$`)
 )
 
 // Normalize cleans LLM-generated code for execution.
