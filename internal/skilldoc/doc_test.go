@@ -1,6 +1,7 @@
 package skilldoc
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -56,6 +57,20 @@ func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 				t.Fatal("frontmatter metadata.hermes.related_skills must be present")
 			}
 		})
+	}
+}
+
+// TestSkillsRootMatchesEmbedded ensures the repo-root skill file
+// (used by `npx skills add gkoreli/ghx`) matches the embedded one,
+// so the skills CLI and the Go binary present the identical document.
+func TestSkillsRootMatchesEmbedded(t *testing.T) {
+	rootPath := "../../skills/ghx/SKILL.md"
+	rootContent, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("cannot read repo-root skill at %s — did the file move? %v", rootPath, err)
+	}
+	if strings.TrimSpace(string(rootContent)) != strings.TrimSpace(SkillMD) {
+		t.Fatalf("skills/ghx/SKILL.md differs from internal/skilldoc/SKILL.md\nEdit internal/skilldoc/SKILL.md and copy it to skills/ghx/SKILL.md.")
 	}
 }
 
