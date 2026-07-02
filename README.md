@@ -125,7 +125,7 @@ ghx serve --http :8080                       # HTTP transport
 
 ```bash
 ghx skill                                   # CLI skill (for SKILL.md injection)
-ghx skill --mcp                             # MCP skill
+ghx skill --mcp                             # Same skill; compatibility alias for MCP setups
 ```
 
 Designed for eager context injection via spawn hooks — the agent always has the latest ghx knowledge without loading it mid-conversation.

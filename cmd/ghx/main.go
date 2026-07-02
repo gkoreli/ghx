@@ -10,7 +10,6 @@ import (
 
 func main() {
 	cli.SkillMD = skilldoc.SkillMD
-	cli.MCPSkillMD = skilldoc.MCPSkillMD
 	if err := cli.RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

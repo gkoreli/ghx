@@ -281,12 +281,7 @@ var skillCmd = &cobra.Command{
 	Use:   "skill",
 	Short: "Output SKILL.md for agent context injection",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mcpFlag, _ := cmd.Flags().GetBool("mcp")
-		filename := "SKILL.md"
-		if mcpFlag {
-			filename = "MCP-SKILL.md"
-		}
-		return printSkill(filename)
+		return printSkill()
 	},
 }
 
@@ -299,17 +294,12 @@ var versionCmd = &cobra.Command{
 }
 
 func init() {
-	skillCmd.Flags().Bool("mcp", false, "Output MCP skill instead of CLI skill")
+	skillCmd.Flags().Bool("mcp", false, "Compatibility alias; output the same canonical skill")
 }
 
 var SkillMD string
-var MCPSkillMD string
 
-func printSkill(filename string) error {
-	if filename == "MCP-SKILL.md" {
-		fmt.Print(MCPSkillMD)
-	} else {
-		fmt.Print(SkillMD)
-	}
+func printSkill() error {
+	fmt.Print(SkillMD)
 	return nil
 }
