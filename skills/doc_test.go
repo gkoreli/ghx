@@ -1,7 +1,6 @@
-package skilldoc
+package skills
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -24,8 +23,8 @@ type skillFrontmatter struct {
 
 func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 	docs := map[string]string{
-		"SKILL.md":     SkillMD,
-		"MCP-SKILL.md": MCPSkillMD,
+		"ghx/SKILL.md":     SkillMD,
+		"ghx-mcp/SKILL.md": MCPSkillMD,
 	}
 
 	for name, content := range docs {
@@ -57,31 +56,6 @@ func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 				t.Fatal("frontmatter metadata.hermes.related_skills must be present")
 			}
 		})
-	}
-}
-
-// TestSkillsRootMatchesEmbedded ensures the repo-root skill file
-// matches the embedded one, so the skills CLI and the Go binary
-// present the identical document.
-func TestSkillsRootMatchesEmbedded(t *testing.T) {
-	rootPath := "../../skills/ghx/SKILL.md"
-	rootContent, err := os.ReadFile(rootPath)
-	if err != nil {
-		t.Fatalf("cannot read repo-root skill at %s — did the file move? %v", rootPath, err)
-	}
-	if strings.TrimSpace(string(rootContent)) != strings.TrimSpace(SkillMD) {
-		t.Fatalf("skills/ghx/SKILL.md differs from internal/skilldoc/SKILL.md")
-	}
-}
-
-func TestMCPSkillsRootMatchesEmbedded(t *testing.T) {
-	var rootContent []byte
-	rootContent, err := os.ReadFile("../../skills/ghx-mcp/SKILL.md")
-	if err != nil {
-		t.Fatalf("cannot read repo-root MCP skill: %v", err)
-	}
-	if strings.TrimSpace(string(rootContent)) != strings.TrimSpace(MCPSkillMD) {
-		t.Fatalf("skills/ghx-mcp/SKILL.md differs from internal/skilldoc/MCP-SKILL.md")
 	}
 }
 

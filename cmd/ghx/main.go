@@ -5,12 +5,12 @@ import (
 	"os"
 
 	"github.com/gkoreli/ghx/v2/internal/cli"
-	"github.com/gkoreli/ghx/v2/internal/skilldoc"
+	"github.com/gkoreli/ghx/v2/skills"
 )
 
 func main() {
-	cli.SkillMD = skilldoc.SkillMD
-	cli.MCPSkillMD = skilldoc.MCPSkillMD
+	cli.SkillMD = skills.SkillMD
+	cli.MCPSkillMD = skills.MCPSkillMD
 	if err := cli.RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

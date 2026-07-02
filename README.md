@@ -158,7 +158,7 @@ internal/ghx/        — core library (Explore, Read, Search, Repos, Tree, Glob)
 internal/codemode/   — JS executor (goja sandbox, TS transpilation, type generation)
 internal/mapengine/  — parser-backed map engine (GoAST, TreeSitter, Regex, engine routing)
 internal/sidecar/    — sidecar runtime, sessions, reports, and ACP integration
-internal/skilldoc/   — embedded CLI and MCP agent skill markdown
+skills/             — CLI and MCP agent skills, embedded into binary via go:embed
 ```
 
 See [docs/adr/](docs/adr/) for architectural decisions.
