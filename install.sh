@@ -30,7 +30,7 @@ install_binary() {
   tar xzf "$TMPDIR_CLEANUP/ghx.tar.gz" -C "$TMPDIR_CLEANUP"
   cp "$TMPDIR_CLEANUP/ghx" "$INSTALL_DIR/ghx"
   chmod +x "$INSTALL_DIR/ghx"
-  for f in SKILL.md MCP-SKILL.md; do
+  for f in SKILL.md; do
     [[ -f "$TMPDIR_CLEANUP/$f" ]] && cp "$TMPDIR_CLEANUP/$f" "$INSTALL_DIR/$f"
   done
   return 0
