@@ -128,10 +128,11 @@ ghx skill                                   # CLI skill (for SKILL.md injection)
 ghx skill --mcp                             # MCP skill
 ```
 
-Install the CLI skill into Claude Code with the skills CLI:
+Install the skills into Claude Code with the skills CLI:
 
 ```bash
 npx skills add gkoreli/ghx -g -a claude-code --skill ghx -y
+npx skills add gkoreli/ghx -g -a claude-code --skill ghx-mcp -y
 ```
 
 Designed for eager context injection via spawn hooks — the agent always has the latest ghx knowledge without loading it mid-conversation.
