@@ -23,7 +23,8 @@ type skillFrontmatter struct {
 
 func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 	docs := map[string]string{
-		"SKILL.md": SkillMD,
+		"SKILL.md":     SkillMD,
+		"MCP-SKILL.md": MCPSkillMD,
 	}
 
 	for name, content := range docs {

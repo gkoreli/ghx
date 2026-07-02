@@ -1,40 +1,18 @@
 ---
 name: ghx
-description: Use when exploring GitHub repositories, reading files, searching code, mapping symbols, or composing multi-step repo reconnaissance with the ghx CLI and codemode.
+description: "Use when exploring GitHub repositories from a shell with the ghx CLI: read files, search code, map symbols, inspect trees, discover repos, or compose multi-step reconnaissance with codemode."
 version: 1.1.0
 author: ghx contributors
 license: MIT
 metadata:
   hermes:
-    tags: [github, code-exploration, cli, mcp, codemode, repository-recon]
+    tags: [github, code-exploration, cli, codemode, repository-recon]
     related_skills: []
 ---
 
 # ghx — GitHub Code Exploration for AI Agents
 
-Use `ghx` for anything on GitHub — repos, files, code search, code maps, and composed reconnaissance. ghx is available both as a CLI and as an MCP server; choose the interface your harness exposes, but follow the same exploration discipline: map before reading, grep before full files, batch related lookups, and compose dependent steps in codemode.
-
-## Interfaces
-
-### CLI
-
-Run CLI commands through the host shell (`execute_bash`, `terminal`, or equivalent). Auth comes from the local `gh` CLI.
-
-```bash
-ghx explore owner/repo
-ghx read owner/repo "src/**/*.ts" --map
-ghx code 'var r = codemode.explore({ repo: "owner/repo" }); return r.branch;'
-```
-
-### MCP
-
-When the ghx MCP server is configured, use its tools directly instead of shelling out. The direct tools are `explore`, `read`, `search`, `repos`, and `tree`; the `code` meta-tool composes them in one round-trip; `search_tools` prints the current schema/type stubs.
-
-```javascript
-explore({ repo: "owner/repo" })
-read({ repo: "owner/repo", paths: "src/**/*.ts", map: true })
-code({ code: 'var r = codemode.explore({ repo: "owner/repo" }); return r.branch;' })
-```
+Use `ghx` via `execute_bash` for anything on GitHub — repos, files, code search, codemode. Authenticated via `gh` CLI, structured output, zero context overhead.
 
 ## Commands
 
@@ -127,6 +105,7 @@ declare const codemode: {
 
 - Write plain JavaScript, not TypeScript (no type annotations)
 - `codemode.*` calls are synchronous — no `await` needed
+- Must `return` a value — bare expressions don't auto-return (except simple identifiers)
 - Must `return` a value — bare expressions don't auto-return (except simple identifiers)
 - Console output goes to stderr, return value goes to stdout
 - Max 20 tool calls per execution, 64KB code size limit

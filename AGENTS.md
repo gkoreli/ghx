@@ -38,7 +38,7 @@ This updates both `version` and all `optionalDependencies` in `package.json`. Th
 
 ## SKILL.md Files
 
-`internal/skilldoc/SKILL.md` is embedded into the binary via `go:embed` and is the single source of truth for both CLI and MCP agent guidance. If you modify it, the binary must be rebuilt for changes to take effect. Both `ghx skill` and `ghx skill --mcp` print this embedded content (`--mcp` is kept for compatibility).
+`internal/skilldoc/SKILL.md` and `internal/skilldoc/MCP-SKILL.md` are embedded into the binary via `go:embed`. If you modify them, the binary must be rebuilt for changes to take effect. The `ghx skill` and `ghx skill --mcp` commands print the embedded content.
 
 ## Build
 
