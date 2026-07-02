@@ -1,6 +1,12 @@
 name: Auto Tag and Publish
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing release version to publish to npm (without v)'
+        required: true
+        type: string
   push:
     branches:
       - mainline
@@ -30,10 +36,20 @@ jobs:
         id: version
         run: |
           git fetch --tags
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CURRENT_VERSION="${{ inputs.version }}"
+            CURRENT_VERSION="${CURRENT_VERSION#v}"
+          else
+            CURRENT_VERSION=$(node -p "require('./package.json').version")
+          fi
 
           if ! echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
             echo "::error::Invalid version: $CURRENT_VERSION"
+            exit 1
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && ! git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+            echo "::error::Release tag v$CURRENT_VERSION does not exist"
             exit 1
           fi
 
@@ -80,18 +96,21 @@ jobs:
 
   npm:
     needs: [tag, release]
-    if: needs.tag.outputs.changed == 'true'
+    if: ${{ always() && needs.tag.result == 'success' && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch') && (needs.tag.outputs.changed == 'true' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: v${{ needs.tag.outputs.version }}
 
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
 
       - name: Upgrade npm (required for OIDC trusted publishing)
         run: npm install -g npm@latest
