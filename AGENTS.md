@@ -40,6 +40,8 @@ This updates both `version` and all `optionalDependencies` in `package.json`. Th
 
 `internal/skilldoc/SKILL.md` and `internal/skilldoc/MCP-SKILL.md` are embedded into the binary via `go:embed`. If you modify them, the binary must be rebuilt for changes to take effect. The `ghx skill` and `ghx skill --mcp` commands print the embedded content.
 
+The canonical skill documents live at `skills/ghx/SKILL.md` and `skills/ghx-mcp/SKILL.md` — these are the ones the skills CLI discovers. Identical copies under `internal/skilldoc/` are embedded into the binary. `doc_test.go` enforces they stay in sync.
+
 ## Build
 
 ```bash
