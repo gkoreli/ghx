@@ -40,7 +40,13 @@ func TestEpisodes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runDir := filepath.Join(".ghx-evals", "runs", time.Now().UTC().Format("20060102-150405"))
+	// GHX_EVAL_RUN_DIR lets multiple invocations (gate-run trial rounds)
+	// accumulate episodes into one directory so the final verdict covers
+	// the whole sample; without it each invocation gets a timestamped dir.
+	runDir := os.Getenv("GHX_EVAL_RUN_DIR")
+	if runDir == "" {
+		runDir = filepath.Join(".ghx-evals", "runs", time.Now().UTC().Format("20060102-150405"))
+	}
 	cfg := RunConfig{
 		AgentCmd:    agentCmd,
 		SessionsDir: t.TempDir(),
