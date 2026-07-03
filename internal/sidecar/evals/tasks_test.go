@@ -60,3 +60,53 @@ func TestTaskValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateRejectsLeakedChecks enforces the ADR-0016.2 discoverability
+// rule: a check string appearing in a question could be scored by parroting.
+func TestValidateRejectsLeakedChecks(t *testing.T) {
+	for name, task := range map[string]Task{
+		"symbol in question": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"Where is the route() decorator implemented?"},
+			Checks: TaskChecks{ExpectedSymbols: []string{"route"}},
+		},
+		"file in question": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"What does src/compose.ts do?"},
+			Checks: TaskChecks{ExpectedFiles: []string{"src/compose.ts"}},
+		},
+		"claim in question": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"Is the router an external package?"},
+			Checks: TaskChecks{ExpectedFiles: []string{"lib/app.js"}, RequiredClaims: []string{"external package"}},
+		},
+		"leaked unacceptable claim": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"Is routing in lib/router?"},
+			Checks: TaskChecks{ExpectedFiles: []string{"lib/app.js"}, UnacceptableClaims: []string{"lib/router"}},
+		},
+		"case-insensitive leak": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"Is the Router implemented here?"},
+			Checks: TaskChecks{ExpectedSymbols: []string{"router"}},
+		},
+		"blank check": {
+			ID: "a", Repo: "o/r",
+			Turns:  []string{"Where is X?"},
+			Checks: TaskChecks{ExpectedFiles: []string{"lib/app.js"}, ExpectedSymbols: []string{"  "}},
+		},
+	} {
+		if err := task.Validate(); err == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+
+	discoverable := Task{
+		ID: "a", Repo: "o/r",
+		Turns:  []string{"Where is middleware composition implemented?"},
+		Checks: TaskChecks{ExpectedFiles: []string{"src/compose.ts"}, ExpectedSymbols: []string{"compose"}},
+	}
+	if err := discoverable.Validate(); err != nil {
+		t.Errorf("discoverable checks rejected: %v", err)
+	}
+}

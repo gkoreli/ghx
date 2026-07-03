@@ -8,6 +8,7 @@ package evals
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
@@ -37,7 +38,12 @@ type Task struct {
 	Tags   []string   `json:"tags,omitempty"`
 }
 
-// Validate reports whether the task is well-formed enough to score.
+// Validate reports whether the task is well-formed enough to score, and
+// enforces the ADR-0016.2 benchmark validity rules: every check string must
+// be non-blank and must be *discoverable* — a check that appears verbatim in
+// a question is given away, so an agent could score it by parroting the
+// question without exploring. Leaked unacceptable claims are rejected too:
+// they would zero correctness on every honest echo of the question.
 func (t Task) Validate() error {
 	if t.ID == "" {
 		return fmt.Errorf("task: id is required")
@@ -51,6 +57,27 @@ func (t Task) Validate() error {
 	c := t.Checks
 	if len(c.ExpectedFiles) == 0 && len(c.ExpectedSymbols) == 0 && len(c.RequiredClaims) == 0 {
 		return fmt.Errorf("task %s: at least one positive check is required", t.ID)
+	}
+
+	checkGroups := map[string][]string{
+		"expectedFiles":      c.ExpectedFiles,
+		"expectedSymbols":    c.ExpectedSymbols,
+		"requiredClaims":     c.RequiredClaims,
+		"unacceptableClaims": c.UnacceptableClaims,
+	}
+	for group, checks := range checkGroups {
+		for _, check := range checks {
+			if strings.TrimSpace(check) == "" {
+				return fmt.Errorf("task %s: %s contains a blank entry (matches everything)", t.ID, group)
+			}
+			for i, turn := range t.Turns {
+				if strings.Contains(strings.ToLower(turn), strings.ToLower(check)) {
+					return fmt.Errorf(
+						"task %s: %s entry %q leaks into question turn %d — checks must be discoverable, not given",
+						t.ID, group, check, i)
+				}
+			}
+		}
 	}
 	return nil
 }
