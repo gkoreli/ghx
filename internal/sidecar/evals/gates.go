@@ -23,6 +23,15 @@ const (
 	g4ResumeRate = 0.80
 )
 
+// Pre-registered gate-run sample minimums (ADR-0016.1). A verdict computed
+// below these is labeled PRELIMINARY (ADR-0016.2) — gate math still runs,
+// but the output must not be read as the project verdict.
+const (
+	minGateRunTasks          = 6
+	minGateRunTrials         = 5
+	minGateRunMultiTurnTasks = 2
+)
+
 // ProfileAggregate holds per-profile means across a set of episodes.
 type ProfileAggregate struct {
 	Profile  Profile `json:"profile"`
@@ -57,8 +66,13 @@ type Verdict struct {
 	Aggregates      map[Profile]*ProfileAggregate `json:"aggregates"`
 	Gates           []GateResult                  `json:"gates"`
 	ThesisSupported bool                          `json:"thesisSupported"`
-	// Notes carries verdict-rule context (e.g. G4 blocking ADR-0017) and
-	// data-sufficiency caveats.
+	// DataSufficient reports whether the episode set meets the
+	// pre-registered gate-run minimums (≥ 6 tasks, ≥ 5 trials per
+	// task × profile, ≥ 2 multi-turn tasks, all profiles present).
+	// When false the verdict is PRELIMINARY regardless of gate results.
+	DataSufficient bool `json:"dataSufficient"`
+	// Notes carries verdict-rule context (e.g. G4 blocking ADR-0017),
+	// data-sufficiency caveats, and data-quality warnings.
 	Notes []string `json:"notes"`
 }
 
@@ -176,6 +190,11 @@ func EvaluateGates(episodes []*Episode) Verdict {
 			sc.Episodes, gx.Episodes))
 	}
 
+	var sufficiencyNotes []string
+	v.DataSufficient, sufficiencyNotes = sampleSufficiency(episodes)
+	v.Notes = append(v.Notes, sufficiencyNotes...)
+	v.Notes = append(v.Notes, dataQualityNotes(episodes, agg)...)
+
 	g1 := GateResult{
 		ID:   "G1",
 		Desc: fmt.Sprintf("correctness: sidecar ≥ %.2f × ghx and ≥ %.2f absolute", g1RelFactor, g1AbsFloor),
@@ -229,6 +248,117 @@ func EvaluateGates(episodes []*Episode) Verdict {
 			"G5 failed: safety violation on a sidecar episode is a contract bug that invalidates the run")
 	}
 	return v
+}
+
+// sampleSufficiency checks the episode set against the pre-registered
+// gate-run minimums and returns whether they are met plus caveat notes for
+// each shortfall (ADR-0016.2).
+func sampleSufficiency(episodes []*Episode) (bool, []string) {
+	tasks := map[string]bool{}
+	multiTurnTasks := map[string]bool{}
+	trials := map[string]int{} // taskID + "/" + profile → episode count
+	for _, ep := range episodes {
+		tasks[ep.TaskID] = true
+		if len(ep.Turns) > 1 {
+			multiTurnTasks[ep.TaskID] = true
+		}
+		trials[ep.TaskID+"/"+string(ep.Profile)]++
+	}
+
+	minTrials := 0
+	if len(tasks) > 0 {
+		minTrials = int(^uint(0) >> 1)
+		for id := range tasks {
+			for _, p := range AllProfiles() {
+				if n := trials[id+"/"+string(p)]; n < minTrials {
+					minTrials = n
+				}
+			}
+		}
+	}
+
+	var notes []string
+	if len(tasks) < minGateRunTasks {
+		notes = append(notes, fmt.Sprintf(
+			"PRELIMINARY: %d distinct tasks < gate-run minimum %d", len(tasks), minGateRunTasks))
+	}
+	if minTrials < minGateRunTrials {
+		notes = append(notes, fmt.Sprintf(
+			"PRELIMINARY: smallest task × profile cell has %d trials < gate-run minimum %d", minTrials, minGateRunTrials))
+	}
+	if len(multiTurnTasks) < minGateRunMultiTurnTasks {
+		notes = append(notes, fmt.Sprintf(
+			"PRELIMINARY: %d multi-turn tasks < gate-run minimum %d", len(multiTurnTasks), minGateRunMultiTurnTasks))
+	}
+	return len(notes) == 0, notes
+}
+
+// dataQualityNotes emits warnings (not gate failures) for measurement
+// conditions that bias specific gates (ADR-0016.2).
+func dataQualityNotes(episodes []*Episode, agg map[Profile]*ProfileAggregate) []string {
+	var notes []string
+
+	directNoOutputs := 0
+	emptySidecarReports := 0
+	taskProfileCounts := map[string]map[Profile]int{}
+	for _, ep := range episodes {
+		if tp := taskProfileCounts[ep.TaskID]; tp == nil {
+			taskProfileCounts[ep.TaskID] = map[Profile]int{}
+		}
+		taskProfileCounts[ep.TaskID][ep.Profile]++
+
+		if ep.Profile != ProfileSidecar {
+			toolCalls, outputChars := 0, 0
+			for _, t := range ep.Turns {
+				toolCalls += len(t.ToolCalls)
+				outputChars += t.ToolOutputChars
+			}
+			if toolCalls > 0 && outputChars == 0 {
+				directNoOutputs++
+			}
+			continue
+		}
+		if ep.Report == nil || strings.TrimSpace(ep.Report.Answer) == "" {
+			emptySidecarReports++
+		}
+	}
+
+	if directNoOutputs > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"DATA QUALITY: %d direct-profile episode(s) ran tools but recorded zero tool-output chars — the adapter is not reporting outputs, which undercounts baseline context and biases G3 toward the sidecar; a gate run in this state is invalid for G3",
+			directNoOutputs))
+	}
+	if emptySidecarReports > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"DATA QUALITY: %d sidecar episode(s) produced no/empty report — their near-zero main-agent chars deflate the G3 mean without delivering an answer",
+			emptySidecarReports))
+	}
+
+	unbalanced := 0
+	for _, counts := range taskProfileCounts {
+		base := -1
+		for _, p := range AllProfiles() {
+			if base == -1 {
+				base = counts[p]
+			} else if counts[p] != base {
+				unbalanced++
+				break
+			}
+		}
+	}
+	if unbalanced > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"DATA QUALITY: %d task(s) have unequal episode counts across profiles — unweighted means skew G1/G3",
+			unbalanced))
+	}
+
+	gx := agg[ProfileGhx]
+	if gx != nil && gx.Episodes > 0 && gx.MeanCorrectness < g1AbsFloor {
+		notes = append(notes, fmt.Sprintf(
+			"DATA QUALITY: ghx baseline mean correctness %.3f is below the G1 absolute floor %.2f — the relative G1 comparison is vacuous against a collapsed baseline",
+			gx.MeanCorrectness, g1AbsFloor))
+	}
+	return notes
 }
 
 // LoadRunEpisodes reads every episode artifact (*.json, excluding verdict
@@ -304,13 +434,20 @@ func FormatVerdict(v Verdict) string {
 	}
 
 	sb.WriteString("\n## Verdict\n\n")
+	prefix := ""
+	if !v.DataSufficient {
+		prefix = "**PRELIMINARY (below pre-registered gate-run sample — not the project verdict)** "
+	}
 	if v.ThesisSupported {
-		sb.WriteString("**THESIS SUPPORTED** — G1, G2, G3, G5 pass.\n")
+		sb.WriteString(prefix + "**THESIS SUPPORTED** — G1, G2, G3, G5 pass.\n")
 	} else {
-		sb.WriteString("**THESIS NOT SUPPORTED** — see failed gates above.\n")
+		sb.WriteString(prefix + "**THESIS NOT SUPPORTED** — see failed gates above.\n")
 	}
 	for _, n := range v.Notes {
 		fmt.Fprintf(&sb, "\n- %s\n", n)
 	}
+	sb.WriteString("\nCaveats (ADR-0016.2): `overall` is not comparable across profiles " +
+		"(compression is 0 by construction for direct profiles). G3 is meaningful " +
+		"only jointly with G1/G2 — a tiny useless report maximizes compression.\n")
 	return sb.String()
 }

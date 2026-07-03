@@ -83,7 +83,7 @@ func correctnessReward(task Task, ep *Episode) float64 {
 	}
 	if len(c.ExpectedSymbols) > 0 {
 		parts = append(parts, hitFraction(c.ExpectedSymbols, func(s string) bool {
-			return strings.Contains(text, strings.ToLower(s))
+			return symbolIdentified(text, s)
 		}))
 	}
 	if len(c.RequiredClaims) > 0 {
@@ -92,6 +92,28 @@ func correctnessReward(task Task, ep *Episode) float64 {
 		}))
 	}
 	return mean(parts)
+}
+
+// symbolIdentified reports whether a symbol appears as a whole word in the
+// answer text (ADR-0016.2): raw substring matching let generic symbols fire
+// on unrelated prose ("route" inside "routes"), inflating correctness
+// without genuine identification.
+func symbolIdentified(lowerText, symbol string) bool {
+	re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(symbol) + `\b`)
+	if err != nil {
+		return strings.Contains(lowerText, strings.ToLower(symbol))
+	}
+	return re.MatchString(lowerText)
+}
+
+// citesEvidence reports whether an evidence string actually anchors to code
+// (ADR-0016.2): it must contain a path-like token or a :line reference.
+// Bare prose ("verified this manually") does not count as evidence.
+func citesEvidence(evidence string) bool {
+	if pathTokenRE.MatchString(evidence) {
+		return true
+	}
+	return lineRefRE.MatchString(evidence)
 }
 
 // fileIdentified reports whether an expected file was surfaced: by suffix
@@ -135,7 +157,7 @@ func evidenceReward(ep *Episode) float64 {
 	if len(rep.Verified) > 0 {
 		withEvidence := 0
 		for _, c := range rep.Verified {
-			if strings.TrimSpace(c.Evidence) != "" {
+			if citesEvidence(c.Evidence) {
 				withEvidence++
 			}
 		}
@@ -274,6 +296,9 @@ func safetyReward(ep *Episode) float64 {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 var pathTokenRE = regexp.MustCompile(`[\w./-]*/[\w.-]+\.[a-z]{1,5}\b`)
+
+// lineRefRE matches file:line style citations ("compose.ts:32", "app.py:120").
+var lineRefRE = regexp.MustCompile(`\w:\d+\b`)
 
 // pathTokens extracts file-path-looking tokens (must contain a slash and an
 // extension) for file-mention and repeat-read detection.

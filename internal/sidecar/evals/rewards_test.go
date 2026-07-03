@@ -215,3 +215,53 @@ func TestMemoryNotApplicableSingleTurn(t *testing.T) {
 		t.Error("memory must not apply to single-turn tasks")
 	}
 }
+
+// TestSymbolWordBoundary enforces ADR-0016.2: generic symbols must not fire
+// on unrelated prose ("route" inside "routes"), so parroting the question
+// domain earns nothing.
+func TestSymbolWordBoundary(t *testing.T) {
+	task := Task{
+		ID: "t", Repo: "o/r", Turns: []string{"Where are handlers registered?"},
+		Checks: TaskChecks{ExpectedSymbols: []string{"route"}},
+	}
+	parrot := &Episode{
+		Profile: ProfileGhx,
+		Turns:   []TurnRecord{{Turn: 0, Text: "Routes are registered via the routing table."}},
+	}
+	if r := ComputeRewards(task, parrot); r.Correctness != 0 {
+		t.Errorf("correctness = %v for prose without the symbol as a word, want 0", r.Correctness)
+	}
+
+	genuine := &Episode{
+		Profile: ProfileGhx,
+		Turns:   []TurnRecord{{Turn: 0, Text: "The route() method on RouterGroup registers handlers."}},
+	}
+	if r := ComputeRewards(task, genuine); r.Correctness != 1 {
+		t.Errorf("correctness = %v for a genuine whole-word symbol mention, want 1", r.Correctness)
+	}
+}
+
+// TestEvidenceRequiresCitation enforces ADR-0016.2: verified-claim evidence
+// counts only when it anchors to a path or file:line, not bare prose.
+func TestEvidenceRequiresCitation(t *testing.T) {
+	mk := func(evidence string) *Episode {
+		rep := &sidecar.Report{
+			Answer:        "answer",
+			Verified:      []sidecar.Claim{{Summary: "claim", Evidence: evidence}},
+			RelevantFiles: []sidecar.RelevantFile{{Path: "src/a.ts", Reason: "core"}},
+			CommandsRun:   []string{"ghx read o/r src/a.ts"},
+		}
+		return &Episode{Profile: ProfileSidecar, Report: rep, Turns: []TurnRecord{{Turn: 0, Report: rep}}}
+	}
+
+	junk := evidenceReward(mk("trust me, I verified this manually"))
+	cited := evidenceReward(mk("src/compose.ts:32 dispatch(i)"))
+	lineOnly := evidenceReward(mk("compose.ts:32"))
+
+	if junk >= cited {
+		t.Errorf("junk evidence (%v) must score below cited evidence (%v)", junk, cited)
+	}
+	if cited != 1 || lineOnly != 1 {
+		t.Errorf("cited evidence should max the claim part: path-style=%v line-style=%v, want 1", cited, lineOnly)
+	}
+}

@@ -1,24 +1,38 @@
 package evals
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 )
 
-// mkEpisode builds a synthetic scored episode for gate tests.
+// mkEpisode builds a synthetic scored episode for gate tests. Tool-output
+// chars and a sidecar report are populated so a healthy synthetic episode
+// does not trip the ADR-0016.2 data-quality warnings.
 func mkEpisode(p Profile, corr, evid, safety float64, mainChars, totalChars int, multiTurn, resumed bool) *Episode {
 	ep := &Episode{
+		TaskID:  "task-a",
 		Profile: p,
 		Rewards: RewardBreakdown{Correctness: corr, Evidence: evid, Safety: safety},
 		Context: ContextAccounting{MainAgentChars: mainChars, TotalWorkflowChars: totalChars},
-		Turns:   []TurnRecord{{Turn: 0, ToolCalls: []string{"ghx read o/r src/a.ts (completed)"}}},
+		Turns: []TurnRecord{{
+			Turn:            0,
+			ToolCalls:       []string{"ghx read o/r src/a.ts (completed)"},
+			ToolOutputChars: 500,
+		}},
+	}
+	if p == ProfileSidecar {
+		ep.Report = &sidecar.Report{Answer: "implemented in src/a.ts"}
 	}
 	if multiTurn {
 		ep.Turns = append(ep.Turns, TurnRecord{
-			Turn:      1,
-			Resumed:   resumed,
-			ToolCalls: []string{"ghx read o/r src/b.ts (completed)"},
+			Turn:            1,
+			Resumed:         resumed,
+			ToolCalls:       []string{"ghx read o/r src/b.ts (completed)"},
+			ToolOutputChars: 500,
 		})
 	}
 	return ep
@@ -125,6 +139,109 @@ func TestEvaluateGatesInsufficientData(t *testing.T) {
 	if len(v.Notes) == 0 || !strings.Contains(v.Notes[0], "INSUFFICIENT DATA") {
 		t.Errorf("expected insufficient-data note, got %v", v.Notes)
 	}
+}
+
+// gateRunEpisodes builds a full pre-registered sample: minGateRunTasks tasks
+// × minGateRunTrials trials × all profiles, first two tasks multi-turn.
+func gateRunEpisodes() []*Episode {
+	var eps []*Episode
+	for task := 0; task < minGateRunTasks; task++ {
+		multiTurn := task < minGateRunMultiTurnTasks
+		for trial := 0; trial < minGateRunTrials; trial++ {
+			for _, e := range []*Episode{
+				mkEpisode(ProfileSidecar, 0.9, 0.9, 1.0, 800, 9000, multiTurn, true),
+				mkEpisode(ProfileGhx, 0.85, 0.6, 1.0, 9000, 9000, multiTurn, true),
+				mkEpisode(ProfilePlain, 0.5, 0.4, 1.0, 12000, 12000, multiTurn, true),
+			} {
+				e.TaskID = fmt.Sprintf("task-%d", task)
+				eps = append(eps, e)
+			}
+		}
+	}
+	return eps
+}
+
+func TestVerdictPreliminaryBelowSampleMinimum(t *testing.T) {
+	v := EvaluateGates(passingEpisodes()) // one task, five trials
+	if v.DataSufficient {
+		t.Error("a single-task run must not be data-sufficient")
+	}
+	if !v.ThesisSupported {
+		t.Error("gate math itself should still pass on this sample")
+	}
+	md := FormatVerdict(v)
+	if !strings.Contains(md, "PRELIMINARY") {
+		t.Error("verdict markdown must be labeled PRELIMINARY below the gate-run sample")
+	}
+}
+
+func TestVerdictSufficientAtGateRunSample(t *testing.T) {
+	v := EvaluateGates(gateRunEpisodes())
+	if !v.DataSufficient {
+		t.Errorf("full gate-run sample must be data-sufficient; notes: %v", v.Notes)
+	}
+	if strings.Contains(FormatVerdict(v), "PRELIMINARY") {
+		t.Error("a sufficient sample must not be labeled PRELIMINARY")
+	}
+}
+
+func TestDataQualityNoteMissingToolOutputs(t *testing.T) {
+	eps := passingEpisodes()
+	for _, ep := range eps {
+		if ep.Profile == ProfileGhx {
+			for i := range ep.Turns {
+				ep.Turns[i].ToolOutputChars = 0
+			}
+		}
+	}
+	v := EvaluateGates(eps)
+	if !hasNote(v, "zero tool-output") {
+		t.Errorf("expected missing-tool-output data-quality note, got %v", v.Notes)
+	}
+}
+
+func TestDataQualityNoteEmptySidecarReport(t *testing.T) {
+	eps := passingEpisodes()
+	for _, ep := range eps {
+		if ep.Profile == ProfileSidecar {
+			ep.Report = nil
+		}
+	}
+	v := EvaluateGates(eps)
+	if !hasNote(v, "no/empty report") {
+		t.Errorf("expected empty-report data-quality note, got %v", v.Notes)
+	}
+}
+
+func TestDataQualityNoteUnbalancedProfiles(t *testing.T) {
+	eps := passingEpisodes()
+	eps = append(eps, mkEpisode(ProfileSidecar, 0.9, 0.9, 1.0, 800, 9000, true, true))
+	v := EvaluateGates(eps)
+	if !hasNote(v, "unequal episode counts") {
+		t.Errorf("expected unbalanced-profiles data-quality note, got %v", v.Notes)
+	}
+}
+
+func TestDataQualityNoteCollapsedBaseline(t *testing.T) {
+	eps := passingEpisodes()
+	for _, ep := range eps {
+		if ep.Profile == ProfileGhx {
+			ep.Rewards.Correctness = 0.3 // below g1AbsFloor
+		}
+	}
+	v := EvaluateGates(eps)
+	if !hasNote(v, "collapsed baseline") {
+		t.Errorf("expected collapsed-baseline data-quality note, got %v", v.Notes)
+	}
+}
+
+func hasNote(v Verdict, substr string) bool {
+	for _, n := range v.Notes {
+		if strings.Contains(n, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSaveVerdictAndLoadRunEpisodes(t *testing.T) {
