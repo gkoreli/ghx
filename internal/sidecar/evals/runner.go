@@ -81,6 +81,7 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 
 		rec.Text = turn.FullText
 		rec.ToolCalls = turn.ToolCalls
+		rec.ToolOutputChars = turn.ToolOutputChars
 		rec.Report = report
 		ep.Turns = append(ep.Turns, rec)
 		ep.Report = report
@@ -156,14 +157,15 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 // finalizeContext computes the workflow-boundary accounting from ADR-0016.1.
 //
 // Sidecar: the main agent receives only the serialized report JSON per turn;
-// everything else the agent produced is sidecar-internal. Direct profiles:
-// the main agent IS the explorer, so all produced text is main-agent context.
-// Tool outputs the agent consumed are not visible through ACP notifications,
-// so all figures are produced-text approximations (documented limitation).
+// everything else — produced text AND tool outputs the agent consumed — is
+// sidecar-internal. Direct profiles: the main agent IS the explorer, so all
+// produced text plus consumed tool outputs are main-agent context. Tool
+// output sizes come from tool_call/tool_call_update content when the agent
+// adapter reports it; adapters that omit output content still undercount.
 func finalizeContext(ep *Episode) {
 	total := 0
 	for _, t := range ep.Turns {
-		total += len(t.Text)
+		total += len(t.Text) + t.ToolOutputChars
 	}
 
 	if ep.Profile != ProfileSidecar {

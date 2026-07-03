@@ -19,6 +19,7 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"Where is middleware composition implemented?",
 		"<ghx-report>",
 		"max 8 ghx commands",
+		"under\n  2000 characters", // report compactness bound (ADR-0016.1)
 		"normal", // default depth
 		"- remote", // default backend
 	} {

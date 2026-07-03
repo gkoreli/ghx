@@ -66,8 +66,11 @@ type TurnRecord struct {
 	// Resumed reports whether this turn continued prior agent context
 	// (ACP LoadSession for the sidecar profile; same live session for
 	// direct profiles). Always false on turn 0.
-	Resumed    bool  `json:"resumed"`
-	DurationMs int64 `json:"durationMs"`
+	Resumed bool `json:"resumed"`
+	// ToolOutputChars approximates tool-output content the agent consumed
+	// this turn (from tool_call/tool_call_update events).
+	ToolOutputChars int   `json:"toolOutputChars"`
+	DurationMs      int64 `json:"durationMs"`
 	// Error records a turn failure; the episode keeps partial data.
 	Error string `json:"error,omitempty"`
 }
