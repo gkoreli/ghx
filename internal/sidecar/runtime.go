@@ -23,7 +23,10 @@ type AskRequest struct {
 	Scope string
 }
 
-// Ask executes one sidecar investigation turn and returns the evidence report.
+// Ask executes one sidecar investigation turn and returns the evidence report
+// together with the raw TurnResult (full streamed text and observed tool
+// calls) so callers such as the eval runner can account for the internal
+// exploration the main agent never sees.
 //
 // Session lifecycle:
 //   - If the named session has never been used, InitSession is called and
@@ -34,7 +37,7 @@ type AskRequest struct {
 // The structured Report is extracted from the <ghx-report> block in the
 // agent's output. If no report is found the turn still succeeds but the
 // returned report will have only an Answer field describing the failure.
-func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, error) {
+func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult, error) {
 	sessionsDir := cfg.SessionsDir
 
 	// Ensure session exists on disk.
@@ -47,13 +50,13 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, error) {
 			}
 		}
 		if err := InitSession(sessionsDir, req.Session, req.Repo, scope); err != nil {
-			return nil, fmt.Errorf("init session: %w", err)
+			return nil, nil, fmt.Errorf("init session: %w", err)
 		}
 	}
 
 	meta, err := ReadMeta(sessionsDir, req.Session)
 	if err != nil {
-		return nil, fmt.Errorf("read meta: %w", err)
+		return nil, nil, fmt.Errorf("read meta: %w", err)
 	}
 
 	prompt := BuildPrompt(Request{
@@ -71,7 +74,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, error) {
 
 	turnResult, newSessionID, err := RunTurn(ctx, cfg.AgentCmd, acpSessionID, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("run turn: %w", err)
+		return nil, nil, fmt.Errorf("run turn: %w", err)
 	}
 
 	// Persist the ACP session ID so the next turn can resume.
@@ -99,5 +102,5 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, error) {
 		fmt.Fprintf(os.Stderr, "warning: failed to save report: %v\n", saveErr)
 	}
 
-	return report, nil
+	return report, &turnResult, nil
 }
