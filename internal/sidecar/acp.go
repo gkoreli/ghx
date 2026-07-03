@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,32 @@ type TurnResult struct {
 	FullText string
 	// ToolCalls lists the tool calls observed during the turn (title + status).
 	ToolCalls []string
+	// ToolOutputChars approximates the size of tool outputs the agent
+	// consumed (content blocks and raw output on tool_call/tool_call_update
+	// events). Produced text alone understates context burden; this is the
+	// other half.
+	ToolOutputChars int
+}
+
+// ContentSize approximates the character size of tool-call content blocks
+// plus raw output. JSON length is used for non-string raw output.
+func ContentSize(content []acp.ToolCallContent, rawOutput any) int {
+	n := 0
+	for _, c := range content {
+		if c.Content != nil && c.Content.Content.Text != nil {
+			n += len(c.Content.Content.Text.Text)
+		}
+	}
+	switch v := rawOutput.(type) {
+	case nil:
+	case string:
+		n += len(v)
+	default:
+		if data, err := json.Marshal(v); err == nil {
+			n += len(data)
+		}
+	}
+	return n
 }
 
 // denyClient implements acp.Client with read-only permission semantics.
@@ -86,7 +113,11 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		tc := u.ToolCall
 		entry := fmt.Sprintf("%s (%s)", tc.Title, tc.Status)
 		c.result.ToolCalls = append(c.result.ToolCalls, entry)
+		c.result.ToolOutputChars += ContentSize(tc.Content, tc.RawOutput)
 		fmt.Fprintf(os.Stderr, "  ▶ %s\n", entry)
+	case u.ToolCallUpdate != nil:
+		tcu := u.ToolCallUpdate
+		c.result.ToolOutputChars += ContentSize(tcu.Content, tcu.RawOutput)
 	}
 	return nil
 }

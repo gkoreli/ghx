@@ -104,6 +104,11 @@ Do not call it until you have gathered enough evidence to answer confidently
 - Budget: max 8 ghx commands per question; follow-ups may use 5 additional.
 - Do NOT inspect tests unless the question is about tests.
 - Do NOT edit files, make commits, or take any write action.
+- Keep the report compact: the entire <ghx-report> JSON must stay under
+  2000 characters. Answer in at most 3 sentences. List at most 5 relevant
+  files. One line per evidence entry. Never paste file contents — cite
+  path, symbol, and line instead. The report replaces the transcript; it
+  must be cheaper to read than redoing the exploration.
 
 ## Failure mode
 

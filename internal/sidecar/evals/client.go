@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 )
 
 // evalClient implements acp.Client for the two direct profiles.
@@ -78,6 +79,10 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 	case u.ToolCall != nil:
 		tc := u.ToolCall
 		c.current.ToolCalls = append(c.current.ToolCalls, fmt.Sprintf("%s (%s)", tc.Title, tc.Status))
+		c.current.ToolOutputChars += sidecar.ContentSize(tc.Content, tc.RawOutput)
+	case u.ToolCallUpdate != nil:
+		tcu := u.ToolCallUpdate
+		c.current.ToolOutputChars += sidecar.ContentSize(tcu.Content, tcu.RawOutput)
 	}
 	return nil
 }
