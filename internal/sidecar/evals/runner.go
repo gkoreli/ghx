@@ -107,10 +107,7 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %q: %w", cfg.AgentCmd, err)
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	defer sidecar.ShutdownAgent(cmd, stdin)
 
 	client := &evalClient{}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)

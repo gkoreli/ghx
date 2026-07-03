@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -150,6 +152,28 @@ func (c *denyClient) KillTerminal(_ context.Context, _ acp.KillTerminalRequest) 
 	return acp.KillTerminalResponse{}, fmt.Errorf("sidecar: terminal not allowed")
 }
 
+// shutdownGrace is how long ShutdownAgent waits for a spawned agent to exit
+// on its own after stdin closes before falling back to a hard kill. Package
+// variable (not const) so tests can shorten it.
+var shutdownGrace = 2 * time.Second
+
+// ShutdownAgent terminates a spawned ACP agent process gracefully: closing
+// stdin signals EOF so a well-behaved stdio agent exits on its own — a hard
+// kill mid-write makes Node-based adapters dump an EPIPE stack trace into
+// logs. If the process is still running after shutdownGrace, it is killed.
+// Safe to defer immediately after cmd.Start.
+func ShutdownAgent(cmd *exec.Cmd, stdin io.Closer) {
+	_ = stdin.Close()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(shutdownGrace):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+}
+
 // RunTurn spawns the agent binary, establishes an ACP session (new or resumed),
 // sends prompt, streams output, and returns the collected TurnResult and the
 // ACP session ID to persist for follow-up turns.
@@ -171,10 +195,7 @@ func RunTurn(ctx context.Context, agentCmd, acpSessionID, prompt string) (result
 	if err := cmd.Start(); err != nil {
 		return result, "", fmt.Errorf("start %q: %w", agentCmd, err)
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	defer ShutdownAgent(cmd, stdin)
 
 	client := &denyClient{result: &result}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)

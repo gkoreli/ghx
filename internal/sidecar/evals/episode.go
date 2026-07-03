@@ -57,9 +57,9 @@ func (t Task) Validate() error {
 
 // TurnRecord captures what happened during one episode turn.
 type TurnRecord struct {
-	Turn      int    `json:"turn"`
-	Question  string `json:"question"`
-	Text      string `json:"text"`
+	Turn      int      `json:"turn"`
+	Question  string   `json:"question"`
+	Text      string   `json:"text"`
 	ToolCalls []string `json:"toolCalls"`
 	// Report is the structured report extracted this turn (sidecar profile).
 	Report *sidecar.Report `json:"report,omitempty"`
@@ -100,10 +100,10 @@ type RewardBreakdown struct {
 // Episode is the durable record of one task × profile run. Serialized JSON
 // is the canonical artifact (ADR-0016: local artifacts are the source of truth).
 type Episode struct {
-	ID      string  `json:"id"`
-	TaskID  string  `json:"taskId"`
-	Repo    string  `json:"repo"`
-	Profile Profile `json:"profile"`
+	ID      string       `json:"id"`
+	TaskID  string       `json:"taskId"`
+	Repo    string       `json:"repo"`
+	Profile Profile      `json:"profile"`
 	Turns   []TurnRecord `json:"turns"`
 	// Report is the final structured report (sidecar profile only).
 	Report *sidecar.Report `json:"report,omitempty"`
