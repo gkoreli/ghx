@@ -17,18 +17,48 @@ type TurnResult struct {
 	ToolCalls []string
 }
 
-// denyClient implements acp.Client with deny-all permission semantics.
+// denyClient implements acp.Client with read-only permission semantics.
 // Text deltas are streamed to stdout; tool call events are written to stderr.
-// Write operations are rejected so the sidecar cannot mutate the repo.
+// Write-shaped operations are rejected so the sidecar cannot mutate state.
 type denyClient struct {
 	result *TurnResult
 }
 
-// RequestPermission always selects the first reject option, preventing
-// the sidecar from writing files, running shell commands, or modifying state.
+// isWriteToolKind reports whether a permission request is for a mutating
+// tool. Nil kind is treated as unknown and therefore write-shaped: agents
+// that do not classify their tools do not get auto-approval.
+func isWriteToolKind(k *acp.ToolKind) bool {
+	if k == nil {
+		return true
+	}
+	switch *k {
+	case acp.ToolKindRead, acp.ToolKindSearch, acp.ToolKindExecute, acp.ToolKindFetch, acp.ToolKindThink:
+		return false
+	}
+	return true
+}
+
+// RequestPermission approves read/search/execute/fetch tool permissions and
+// rejects everything write-shaped (edit, delete, move, unknown).
+//
+// The sidecar's evidence gathering runs through shell `ghx` invocations,
+// which permission-requesting agents (e.g. the Claude ACP adapter) classify
+// as "execute". The original deny-all policy rejected those requests too,
+// which blocked the sidecar from doing any work at all — the first live
+// eval episode (ADR-0016.1) surfaced this. Mutation safety is still layered:
+// write-kind permissions are rejected here, WriteTextFile/ReadTextFile
+// return errors, and terminal methods are refused. Residual risk — an agent
+// mislabeling a mutating shell command as "execute" — is bounded by the
+// persona contract and acceptable for a reconnaissance harness.
 func (c *denyClient) RequestPermission(_ context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	var wantOnce, wantAlways acp.PermissionOptionKind
+	if isWriteToolKind(params.ToolCall.Kind) {
+		wantOnce, wantAlways = acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways
+	} else {
+		wantOnce, wantAlways = acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways
+	}
 	for _, o := range params.Options {
-		if o.Kind == acp.PermissionOptionKindRejectOnce || o.Kind == acp.PermissionOptionKindRejectAlways {
+		if o.Kind == wantOnce || o.Kind == wantAlways {
 			return acp.RequestPermissionResponse{
 				Outcome: acp.RequestPermissionOutcome{
 					Selected: &acp.RequestPermissionOutcomeSelected{OptionId: o.OptionId},
@@ -36,7 +66,7 @@ func (c *denyClient) RequestPermission(_ context.Context, params acp.RequestPerm
 			}, nil
 		}
 	}
-	// No explicit reject option — cancel to be safe.
+	// No matching option — cancel to be safe.
 	return acp.RequestPermissionResponse{
 		Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}},
 	}, nil
