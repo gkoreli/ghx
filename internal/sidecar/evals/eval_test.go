@@ -68,4 +68,20 @@ func TestEpisodes(t *testing.T) {
 			})
 		}
 	}
+
+	// Evaluate the pre-registered ADR-0016.1 gates over everything this run
+	// produced and write verdict.json + verdict.md next to the episodes.
+	// A single -count run is usually below gate-run sample size; the verdict
+	// notes data sufficiency, and multiple runs into the same dir accumulate.
+	eps, err := LoadRunEpisodes(runDir)
+	if err != nil {
+		t.Fatalf("load run episodes: %v", err)
+	}
+	verdict := EvaluateGates(eps)
+	mdPath, err := SaveVerdict(runDir, verdict)
+	if err != nil {
+		t.Fatalf("save verdict: %v", err)
+	}
+	t.Logf("verdict: %s", mdPath)
+	t.Log("\n" + FormatVerdict(verdict))
 }
