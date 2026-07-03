@@ -2,7 +2,9 @@ package sidecar
 
 import (
 	"context"
+	"os/exec"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -93,5 +95,52 @@ func TestWriteAndTerminalStayRefused(t *testing.T) {
 	}
 	if _, err := c.CreateTerminal(context.Background(), acp.CreateTerminalRequest{}); err == nil {
 		t.Error("CreateTerminal must remain refused")
+	}
+}
+
+// TestShutdownAgentGraceful verifies a well-behaved stdio agent exits on
+// stdin close without needing the kill fallback.
+func TestShutdownAgentGraceful(t *testing.T) {
+	cmd := exec.Command("cat")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	ShutdownAgent(cmd, stdin)
+	if elapsed := time.Since(start); elapsed >= shutdownGrace {
+		t.Errorf("graceful path took %v — fell through to the kill fallback", elapsed)
+	}
+	if !cmd.ProcessState.Exited() {
+		t.Error("process not reaped")
+	}
+}
+
+// TestShutdownAgentKillsStubbornProcess verifies a process that ignores
+// stdin EOF is killed after the grace period.
+func TestShutdownAgentKillsStubbornProcess(t *testing.T) {
+	old := shutdownGrace
+	shutdownGrace = 100 * time.Millisecond
+	defer func() { shutdownGrace = old }()
+
+	cmd := exec.Command("sleep", "30")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	ShutdownAgent(cmd, stdin)
+	if cmd.ProcessState == nil {
+		t.Fatal("process not reaped")
+	}
+	if cmd.ProcessState.Exited() && cmd.ProcessState.Success() {
+		t.Error("expected the process to be killed, but it exited cleanly")
 	}
 }

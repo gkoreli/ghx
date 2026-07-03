@@ -20,8 +20,8 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"<ghx-report>",
 		"max 8 ghx commands",
 		"under\n  2000 characters", // report compactness bound (ADR-0016.1)
-		"normal", // default depth
-		"- remote", // default backend
+		"normal",                   // default depth
+		"- remote",                 // default backend
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("first-turn prompt missing %q", want)
