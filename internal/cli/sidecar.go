@@ -41,7 +41,7 @@ var sidecarAskCmd = &cobra.Command{
 		}
 
 		cfg := sidecar.LoadConfig()
-		report, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
+		report, _, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
 			Session:  session,
 			Repo:     repo,
 			Question: args[0],
