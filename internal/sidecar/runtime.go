@@ -72,7 +72,13 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		acpSessionID = meta.ACPSessionID
 	}
 
-	turnResult, newSessionID, err := RunTurn(ctx, cfg.AgentCmd, acpSessionID, prompt)
+	turnResult, newSessionID, err := RunTurnWithOptions(ctx, RunTurnOptions{
+		AgentCmd:     cfg.AgentCmd,
+		ACPSessionID: acpSessionID,
+		Prompt:       prompt,
+		Cwd:          cfg.Cwd,
+		Env:          cfg.Env,
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("run turn: %w", err)
 	}

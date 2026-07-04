@@ -88,6 +88,8 @@ type TurnRecord struct {
 	Question  string   `json:"question"`
 	Text      string   `json:"text"`
 	ToolCalls []string `json:"toolCalls"`
+	// ToolTraces carries full ACP tool-call audit data for this turn.
+	ToolTraces []ToolCallTrace `json:"toolTraces,omitempty"`
 	// Report is the structured report extracted this turn (sidecar profile).
 	Report *sidecar.Report `json:"report,omitempty"`
 	// Resumed reports whether this turn continued prior agent context
@@ -100,6 +102,45 @@ type TurnRecord struct {
 	DurationMs      int64 `json:"durationMs"`
 	// Error records a turn failure; the episode keeps partial data.
 	Error string `json:"error,omitempty"`
+}
+
+// ToolStatusTransition records one observed status for an ACP tool call.
+type ToolStatusTransition struct {
+	Status string    `json:"status"`
+	At     time.Time `json:"at"`
+}
+
+// ToolCallTrace is the durable per-tool-call audit record captured from ACP.
+type ToolCallTrace struct {
+	ID                string                 `json:"id"`
+	Kind              string                 `json:"kind,omitempty"`
+	Title             string                 `json:"title,omitempty"`
+	RawInput          any                    `json:"rawInput,omitempty"`
+	StatusTransitions []ToolStatusTransition `json:"statusTransitions,omitempty"`
+	OutputSize        int                    `json:"outputSize"`
+	OutputExcerpt     string                 `json:"outputExcerpt,omitempty"`
+}
+
+// Action is the training/audit action projection of a tool invocation.
+type Action struct {
+	ActionIndex int       `json:"actionIndex"`
+	Turn        int       `json:"turn"`
+	Type        string    `json:"type"`
+	ToolCallID  string    `json:"toolCallId,omitempty"`
+	Kind        string    `json:"kind,omitempty"`
+	Name        string    `json:"name,omitempty"`
+	Input       string    `json:"input,omitempty"`
+	At          time.Time `json:"at"`
+}
+
+// Observation is the bounded output projection attached to an action.
+type Observation struct {
+	ActionIndex int       `json:"actionIndex"`
+	Turn        int       `json:"turn"`
+	ToolCallID  string    `json:"toolCallId,omitempty"`
+	Text        string    `json:"text,omitempty"`
+	OutputSize  int       `json:"outputSize"`
+	At          time.Time `json:"at"`
 }
 
 // ContextAccounting models the workflow boundary from ADR-0016.1: how many
@@ -124,6 +165,16 @@ type RewardBreakdown struct {
 	Overall       float64 `json:"overall"`
 }
 
+// AgentIdentity records the executable/model identity for a run or episode.
+type AgentIdentity struct {
+	AgentCommand        string `json:"agentCommand,omitempty"`
+	AdapterName         string `json:"adapterName,omitempty"`
+	AdapterVersion      string `json:"adapterVersion,omitempty"`
+	SubjectModel        string `json:"subjectModel,omitempty"`
+	AdapterSubjectModel string `json:"adapterSubjectModel,omitempty"`
+	WrapperSHA256       string `json:"wrapperSha256,omitempty"`
+}
+
 // Episode is the durable record of one task × profile run. Serialized JSON
 // is the canonical artifact (ADR-0016: local artifacts are the source of truth).
 type Episode struct {
@@ -132,8 +183,15 @@ type Episode struct {
 	Repo    string       `json:"repo"`
 	Profile Profile      `json:"profile"`
 	Turns   []TurnRecord `json:"turns"`
+	Actions []Action     `json:"actions,omitempty"`
+	// Observations captures bounded tool outputs; OutputSize is exact even
+	// when Text is truncated to the first 2048 bytes.
+	Observations []Observation `json:"observations,omitempty"`
+	Identity     AgentIdentity `json:"identity,omitempty"`
 	// Report is the final structured report (sidecar profile only).
-	Report *sidecar.Report `json:"report,omitempty"`
+	Report           *sidecar.Report `json:"report,omitempty"`
+	Invalid          bool            `json:"invalid,omitempty"`
+	ExclusionReasons []string        `json:"exclusionReasons,omitempty"`
 	// Violations lists safety-contract breaches observed during the run
 	// (write attempts, terminal requests, write-kind permission requests).
 	Violations []string          `json:"violations,omitempty"`

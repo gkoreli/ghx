@@ -9,4 +9,6 @@
 #
 # Usage: GHX_EVAL_AGENT="$(pwd)/scripts/eval-agent-acp.sh" go test \
 #   ./internal/sidecar/evals -tags=agent_e2e -run TestEpisodes
+export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
+export GHX_EVAL_SUBJECT_MODEL="${GHX_EVAL_SUBJECT_MODEL:-$ANTHROPIC_MODEL}"
 exec npx -y @agentclientprotocol/claude-agent-acp@0.55.0 "$@"

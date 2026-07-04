@@ -13,6 +13,10 @@ import (
 // chars and a sidecar report are populated so a healthy synthetic episode
 // does not trip the ADR-0016.2 data-quality warnings.
 func mkEpisode(p Profile, corr, evid, safety float64, mainChars, totalChars int, multiTurn, resumed bool) *Episode {
+	command := "ghx read o/r src/a.ts (completed)"
+	if p == ProfilePlain {
+		command = "gh api repos/o/r/contents/src/a.ts (completed)"
+	}
 	ep := &Episode{
 		TaskID:  "task-a",
 		Profile: p,
@@ -20,7 +24,7 @@ func mkEpisode(p Profile, corr, evid, safety float64, mainChars, totalChars int,
 		Context: ContextAccounting{MainAgentChars: mainChars, TotalWorkflowChars: totalChars},
 		Turns: []TurnRecord{{
 			Turn:            0,
-			ToolCalls:       []string{"ghx read o/r src/a.ts (completed)"},
+			ToolCalls:       []string{command},
 			ToolOutputChars: 500,
 		}},
 	}
@@ -28,10 +32,14 @@ func mkEpisode(p Profile, corr, evid, safety float64, mainChars, totalChars int,
 		ep.Report = &sidecar.Report{Answer: "implemented in src/a.ts"}
 	}
 	if multiTurn {
+		followupCommand := "ghx read o/r src/b.ts (completed)"
+		if p == ProfilePlain {
+			followupCommand = "gh api repos/o/r/contents/src/b.ts (completed)"
+		}
 		ep.Turns = append(ep.Turns, TurnRecord{
 			Turn:            1,
 			Resumed:         resumed,
-			ToolCalls:       []string{"ghx read o/r src/b.ts (completed)"},
+			ToolCalls:       []string{followupCommand},
 			ToolOutputChars: 500,
 		})
 	}
@@ -232,6 +240,67 @@ func TestDataQualityNoteCollapsedBaseline(t *testing.T) {
 	v := EvaluateGates(eps)
 	if !hasNote(v, "collapsed baseline") {
 		t.Errorf("expected collapsed-baseline data-quality note, got %v", v.Notes)
+	}
+}
+
+func TestPlainGhxInvocationInvalidAndExcluded(t *testing.T) {
+	eps := passingEpisodes()
+	plain := mkEpisode(ProfilePlain, 1.0, 1.0, 1.0, 100, 100, false, false)
+	plain.ID = "plain-bad"
+	plain.Actions = []Action{{Input: "ghx read owner/repo src/a.ts"}}
+	eps = append(eps, plain)
+
+	v := EvaluateGates(eps)
+	if v.Valid {
+		t.Fatal("verdict should be invalid when a plain episode invokes ghx")
+	}
+	if !plain.Invalid {
+		t.Fatal("plain episode was not marked invalid")
+	}
+	if !hasNote(v, "plain profile invoked ghx") {
+		t.Fatalf("expected compliance note, got %v", v.Notes)
+	}
+	if got := v.Aggregates[ProfilePlain].Episodes; got != 5 {
+		t.Fatalf("plain aggregate episodes = %d, want 5 (bad episode excluded)", got)
+	}
+}
+
+func TestGhxProfileWithoutGhxInvocationFlaggedOnly(t *testing.T) {
+	eps := passingEpisodes()
+	for _, ep := range eps {
+		ep.Identity = AgentIdentity{}
+	}
+	ghx := mkEpisode(ProfileGhx, 1.0, 1.0, 1.0, 100, 100, false, false)
+	ghx.ID = "ghx-no-ghx"
+	ghx.Actions = []Action{{Input: "gh api repos/o/r"}}
+	eps = append(eps, ghx)
+
+	v := EvaluateGates(eps)
+	if !v.Valid {
+		t.Fatalf("ghx profile with zero ghx invocations should not invalidate verdict: %v", v.Notes)
+	}
+	if !hasNote(v, "zero ghx invocations") {
+		t.Fatalf("expected ghx compliance note, got %v", v.Notes)
+	}
+	if got := v.Aggregates[ProfileGhx].Episodes; got != 6 {
+		t.Fatalf("ghx aggregate episodes = %d, want 6", got)
+	}
+}
+
+func TestMixedAgentIdentityInvalidatesVerdict(t *testing.T) {
+	eps := passingEpisodes()
+	for i, ep := range eps {
+		ep.Identity = AgentIdentity{AgentCommand: "agent", AdapterName: "mock", AdapterVersion: "1", SubjectModel: "sonnet"}
+		if i == 0 {
+			ep.Identity.SubjectModel = "different"
+		}
+	}
+	v := EvaluateGates(eps)
+	if v.Valid {
+		t.Fatal("mixed identities should invalidate verdict")
+	}
+	if !hasNote(v, "mixed agent identities") {
+		t.Fatalf("expected identity note, got %v", v.Notes)
 	}
 }
 

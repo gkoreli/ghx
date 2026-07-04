@@ -3,6 +3,7 @@ package evals
 import (
 	"context"
 	"fmt"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
@@ -21,6 +22,16 @@ type evalClient struct {
 	current *TurnRecord
 	// violations accumulates safety-contract breaches for the episode.
 	violations []string
+}
+
+func (c *evalClient) upsertTrace(id string) *ToolCallTrace {
+	for i := range c.current.ToolTraces {
+		if c.current.ToolTraces[i].ID == id {
+			return &c.current.ToolTraces[i]
+		}
+	}
+	c.current.ToolTraces = append(c.current.ToolTraces, ToolCallTrace{ID: id})
+	return &c.current.ToolTraces[len(c.current.ToolTraces)-1]
 }
 
 func isWriteKind(k *acp.ToolKind) bool {
@@ -78,13 +89,54 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
-		c.current.ToolCalls = append(c.current.ToolCalls, fmt.Sprintf("%s (%s)", tc.Title, tc.Status))
-		c.current.ToolOutputChars += sidecar.ContentSize(tc.Content, tc.RawOutput)
+		tr := c.upsertTrace(string(tc.ToolCallId))
+		tr.Title = tc.Title
+		tr.Kind = string(tc.Kind)
+		if tc.RawInput != nil {
+			tr.RawInput = tc.RawInput
+		}
+		tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(tc.Status), At: nowUTC()})
+		size := sidecar.ContentSize(tc.Content, tc.RawOutput)
+		tr.OutputSize += size
+		appendExcerpt(tr, sidecar.ToolOutputText(tc.Content, tc.RawOutput))
+		c.current.ToolOutputChars += size
+		rebuildToolSummaries(c.current)
 	case u.ToolCallUpdate != nil:
 		tcu := u.ToolCallUpdate
-		c.current.ToolOutputChars += sidecar.ContentSize(tcu.Content, tcu.RawOutput)
+		tr := c.upsertTrace(string(tcu.ToolCallId))
+		if tcu.Title != nil {
+			tr.Title = *tcu.Title
+		}
+		if tcu.Kind != nil {
+			tr.Kind = string(*tcu.Kind)
+		}
+		if tcu.RawInput != nil {
+			tr.RawInput = tcu.RawInput
+		}
+		if tcu.Status != nil {
+			tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(*tcu.Status), At: nowUTC()})
+		}
+		size := sidecar.ContentSize(tcu.Content, tcu.RawOutput)
+		tr.OutputSize += size
+		appendExcerpt(tr, sidecar.ToolOutputText(tcu.Content, tcu.RawOutput))
+		c.current.ToolOutputChars += size
+		rebuildToolSummaries(c.current)
 	}
 	return nil
+}
+
+func nowUTC() time.Time { return time.Now().UTC() }
+
+func appendExcerpt(tr *ToolCallTrace, text string) {
+	const max = 2048
+	if text == "" || len(tr.OutputExcerpt) >= max {
+		return
+	}
+	remain := max - len(tr.OutputExcerpt)
+	if len(text) > remain {
+		text = text[:remain]
+	}
+	tr.OutputExcerpt += text
 }
 
 // WriteTextFile is a contract violation for every eval profile.

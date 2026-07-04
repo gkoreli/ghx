@@ -52,6 +52,7 @@ func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+		AgentInfo:         &acp.Implementation{Name: "mockagent", Version: "0.0.1", Meta: map[string]any{"subjectModel": "mock-sonnet"}},
 	}, nil
 }
 
@@ -72,17 +73,33 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 	r := m.replies[idx]
 
 	for i, title := range r.ToolCalls {
+		id := acp.ToolCallId(fmt.Sprintf("tc-%d-%d", idx, i))
 		update := acp.SessionUpdate{
 			ToolCall: &acp.SessionUpdateToolCall{
-				ToolCallId: acp.ToolCallId(fmt.Sprintf("tc-%d-%d", idx, i)),
-				Title:      title,
+				ToolCallId: id,
+				Title:      "Terminal",
 				Kind:       acp.ToolKindExecute,
-				Status:     acp.ToolCallStatusCompleted,
+				Status:     acp.ToolCallStatusPending,
+				RawInput:   map[string]any{"command": title},
 			},
 		}
 		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
 			SessionId: params.SessionId,
 			Update:    update,
+		}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		status := acp.ToolCallStatusCompleted
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: params.SessionId,
+			Update: acp.SessionUpdate{
+				ToolCallUpdate: &acp.SessionToolCallUpdate{
+					ToolCallId: id,
+					Status:     &status,
+					RawInput:   map[string]any{"command": title},
+					Content:    []acp.ToolCallContent{acp.ToolContent(acp.TextBlock("mock output for " + title))},
+				},
+			},
 		}); err != nil {
 			return acp.PromptResponse{}, err
 		}

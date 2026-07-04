@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,6 +155,22 @@ func TestMockSidecarEpisode(t *testing.T) {
 	if len(ep.Turns[0].ToolCalls) != 2 {
 		t.Errorf("turn 0 tool calls = %v, want 2 captured", ep.Turns[0].ToolCalls)
 	}
+	if !strings.Contains(ep.Turns[0].ToolCalls[0], "execute: ghx tree honojs/hono") {
+		t.Errorf("tool summary did not resolve command: %v", ep.Turns[0].ToolCalls)
+	}
+	if len(ep.Turns[0].ToolTraces) != 2 || len(ep.Actions) == 0 || len(ep.Observations) == 0 {
+		t.Fatalf("trace/action/observation capture missing: traces=%d actions=%d observations=%d", len(ep.Turns[0].ToolTraces), len(ep.Actions), len(ep.Observations))
+	}
+	first := ep.Turns[0].ToolTraces[0]
+	if first.ID == "" || first.Kind != "execute" || first.RawInput == nil || len(first.StatusTransitions) != 2 {
+		t.Fatalf("incomplete tool trace: %+v", first)
+	}
+	if first.OutputSize == 0 || !strings.Contains(first.OutputExcerpt, "mock output") {
+		t.Fatalf("tool output not captured: %+v", first)
+	}
+	if ep.Identity.AdapterName != "mockagent" || ep.Identity.AdapterVersion != "0.0.1" || ep.Identity.AdapterSubjectModel != "mock-sonnet" {
+		t.Fatalf("identity not captured from initialize: %+v", ep.Identity)
+	}
 
 	r := ep.Rewards
 	if r.Correctness != 1.0 {
@@ -223,6 +240,15 @@ func TestMockDirectEpisode(t *testing.T) {
 	if len(ep.Turns[0].ToolCalls) != 1 {
 		t.Errorf("turn 0 tool calls = %v, want 1", ep.Turns[0].ToolCalls)
 	}
+	if len(ep.Actions) != 2 || len(ep.Observations) != 2 {
+		t.Fatalf("actions/observations = %d/%d, want 2/2", len(ep.Actions), len(ep.Observations))
+	}
+	if got := ep.Actions[0].Input; got != "ghx read honojs/hono src/compose.ts" {
+		t.Fatalf("action input = %q", got)
+	}
+	if ep.Turns[0].ToolOutputChars == 0 {
+		t.Fatal("tool output chars not captured")
+	}
 	if ep.Context.MainAgentChars != ep.Context.TotalWorkflowChars {
 		t.Errorf("direct profile must count all output as main-agent context: %+v", ep.Context)
 	}
@@ -231,5 +257,35 @@ func TestMockDirectEpisode(t *testing.T) {
 	}
 	if ep.Rewards.Correctness == 0 {
 		t.Errorf("correctness = 0; text mentions expected files/symbols so partial credit expected")
+	}
+}
+
+func TestEvalReportRendersMockRun(t *testing.T) {
+	dir := t.TempDir()
+	eps := passingEpisodes()
+	for i, ep := range eps[:3] {
+		ep.ID = "episode-" + string(rune('a'+i))
+		ep.Identity = AgentIdentity{AgentCommand: "mockagent", AdapterName: "mockagent", AdapterVersion: "0.0.1", SubjectModel: "mock-sonnet"}
+		if _, err := SaveEpisode(dir, ep); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SaveRunManifest(dir, RunManifest{
+		ExpectedEpisodes: 3,
+		Identity:         eps[0].Identity,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "run", "./cmd/evalreport", dir)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("evalreport failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	for _, want := range []string{"Episodes: 3 / 3 expected", "Per-profile aggregates", "Gate status", "Compliance and identity notes", "PRELIMINARY"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("evalreport output missing %q:\n%s", want, text)
+		}
 	}
 }

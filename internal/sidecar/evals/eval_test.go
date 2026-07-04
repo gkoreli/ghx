@@ -51,6 +51,12 @@ func TestEpisodes(t *testing.T) {
 		AgentCmd:    agentCmd,
 		SessionsDir: t.TempDir(),
 	}
+	if err := SaveRunManifest(runDir, RunManifest{
+		ExpectedEpisodes: len(tasks) * len(AllProfiles()),
+		Identity:         agentIdentity(cfg, nil),
+	}); err != nil {
+		t.Fatalf("save run manifest: %v", err)
+	}
 
 	for _, task := range tasks {
 		for _, profile := range AllProfiles() {
@@ -82,6 +88,16 @@ func TestEpisodes(t *testing.T) {
 	eps, err := LoadRunEpisodes(runDir)
 	if err != nil {
 		t.Fatalf("load run episodes: %v", err)
+	}
+	manifestIdentity := agentIdentity(cfg, nil)
+	if len(eps) > 0 {
+		manifestIdentity = eps[0].Identity
+	}
+	if err := SaveRunManifest(runDir, RunManifest{
+		ExpectedEpisodes: len(tasks) * len(AllProfiles()),
+		Identity:         manifestIdentity,
+	}); err != nil {
+		t.Fatalf("save final run manifest: %v", err)
 	}
 	verdict := EvaluateGates(eps)
 	mdPath, err := SaveVerdict(runDir, verdict)

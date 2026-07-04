@@ -66,6 +66,8 @@ type Verdict struct {
 	Aggregates      map[Profile]*ProfileAggregate `json:"aggregates"`
 	Gates           []GateResult                  `json:"gates"`
 	ThesisSupported bool                          `json:"thesisSupported"`
+	// Valid is false when compliance or identity checks invalidate the run.
+	Valid bool `json:"valid"`
 	// DataSufficient reports whether the episode set meets the
 	// pre-registered gate-run minimums (≥ 6 tasks, ≥ 5 trials per
 	// task × profile, ≥ 2 multi-turn tasks, all profiles present).
@@ -178,11 +180,13 @@ func repeatReadRatio(ep *Episode) float64 {
 // reports data-sufficiency caveats in Notes; the formal gate run requires
 // ≥ 6 tasks × 5 trials × 3 profiles.
 func EvaluateGates(episodes []*Episode) Verdict {
-	agg := Aggregate(episodes)
+	filtered, validityNotes, valid := validateEpisodesForVerdict(episodes)
+	agg := Aggregate(filtered)
 	sc := agg[ProfileSidecar]
 	gx := agg[ProfileGhx]
 
-	v := Verdict{Aggregates: agg}
+	v := Verdict{Aggregates: agg, Valid: valid}
+	v.Notes = append(v.Notes, validityNotes...)
 
 	if sc.Episodes == 0 || gx.Episodes == 0 {
 		v.Notes = append(v.Notes, fmt.Sprintf(
@@ -191,9 +195,9 @@ func EvaluateGates(episodes []*Episode) Verdict {
 	}
 
 	var sufficiencyNotes []string
-	v.DataSufficient, sufficiencyNotes = sampleSufficiency(episodes)
+	v.DataSufficient, sufficiencyNotes = sampleSufficiency(filtered)
 	v.Notes = append(v.Notes, sufficiencyNotes...)
-	v.Notes = append(v.Notes, dataQualityNotes(episodes, agg)...)
+	v.Notes = append(v.Notes, dataQualityNotes(filtered, agg)...)
 
 	g1 := GateResult{
 		ID:   "G1",
@@ -238,7 +242,7 @@ func EvaluateGates(episodes []*Episode) Verdict {
 	// Verdict rules from ADR-0016.1: thesis supported iff G1, G2, G3, G5 pass.
 	// G4 does not overturn the thesis but blocks ADR-0017 until the evidence
 	// ledger exists.
-	v.ThesisSupported = g1.Pass && g2.Pass && g3.Pass && g5.Pass
+	v.ThesisSupported = v.Valid && g1.Pass && g2.Pass && g3.Pass && g5.Pass
 	if !g4.Pass {
 		v.Notes = append(v.Notes,
 			"G4 failed: session resumption/memory is not proven — ADR-0017 framework standardization is blocked until the ADR-0014.1 evidence ledger lands")
@@ -248,6 +252,83 @@ func EvaluateGates(episodes []*Episode) Verdict {
 			"G5 failed: safety violation on a sidecar episode is a contract bug that invalidates the run")
 	}
 	return v
+}
+
+func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool) {
+	valid := true
+	var notes []string
+	var filtered []*Episode
+	identityKeys := map[string]int{}
+
+	for _, ep := range episodes {
+		if ep == nil {
+			continue
+		}
+		key := identityKey(ep.Identity)
+		if key != "" {
+			identityKeys[key]++
+		}
+		exclude := ep.Invalid
+		if ep.Profile == ProfilePlain && invokesGhx(ep) {
+			exclude = true
+			ep.Invalid = true
+			reason := "COMPLIANCE: plain profile invoked ghx"
+			if !containsString(ep.ExclusionReasons, reason) {
+				ep.ExclusionReasons = append(ep.ExclusionReasons, reason)
+			}
+			notes = append(notes, fmt.Sprintf("%s in episode %s — excluded from gate aggregates", reason, episodeLabel(ep)))
+		}
+		if ep.Profile == ProfileGhx && !invokesGhx(ep) {
+			notes = append(notes, fmt.Sprintf("COMPLIANCE: ghx profile episode %s recorded zero ghx invocations", episodeLabel(ep)))
+		}
+		if exclude {
+			valid = false
+			for _, reason := range ep.ExclusionReasons {
+				if !strings.Contains(reason, "plain profile invoked ghx") {
+					notes = append(notes, fmt.Sprintf("COMPLIANCE: episode %s excluded: %s", episodeLabel(ep), reason))
+				}
+			}
+			continue
+		}
+		filtered = append(filtered, ep)
+	}
+
+	if len(identityKeys) > 1 {
+		valid = false
+		notes = append(notes, fmt.Sprintf("IDENTITY: mixed agent identities in one run (%d distinct identities) — verdict invalid", len(identityKeys)))
+	}
+	return filtered, notes, valid
+}
+
+func identityKey(id AgentIdentity) string {
+	parts := []string{id.AgentCommand, id.AdapterName, id.AdapterVersion, id.SubjectModel, id.AdapterSubjectModel, id.WrapperSHA256}
+	allEmpty := true
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			allEmpty = false
+			break
+		}
+	}
+	if allEmpty {
+		return ""
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func episodeLabel(ep *Episode) string {
+	if ep.ID != "" {
+		return ep.ID
+	}
+	return ep.TaskID + "/" + string(ep.Profile)
+}
+
+func containsString(items []string, want string) bool {
+	for _, it := range items {
+		if it == want {
+			return true
+		}
+	}
+	return false
 }
 
 // sampleSufficiency checks the episode set against the pre-registered
@@ -370,7 +451,7 @@ func LoadRunEpisodes(runDir string) ([]*Episode, error) {
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" && !strings.HasPrefix(e.Name(), "verdict") {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" && !strings.HasPrefix(e.Name(), "verdict") && e.Name() != "manifest.json" {
 			names = append(names, e.Name())
 		}
 	}
@@ -437,6 +518,9 @@ func FormatVerdict(v Verdict) string {
 	prefix := ""
 	if !v.DataSufficient {
 		prefix = "**PRELIMINARY (below pre-registered gate-run sample — not the project verdict)** "
+	}
+	if !v.Valid {
+		prefix += "**INVALID (compliance/identity checks failed)** "
 	}
 	if v.ThesisSupported {
 		sb.WriteString(prefix + "**THESIS SUPPORTED** — G1, G2, G3, G5 pass.\n")

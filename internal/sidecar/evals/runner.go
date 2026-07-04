@@ -26,32 +26,40 @@ type RunConfig struct {
 // episode (with the turn error recorded) is returned alongside the error so
 // failed runs still produce artifacts (ADR-0016 implementation note 4).
 func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) (*Episode, error) {
+	rt, rtErr := prepareEpisodeRuntime(cfg, profile)
+	if rtErr != nil {
+		return nil, rtErr
+	}
+	defer rt.Cleanup()
+
 	ep := &Episode{
 		ID:        fmt.Sprintf("%s_%s_%d", task.ID, profile, time.Now().UnixMilli()),
 		TaskID:    task.ID,
 		Repo:      task.Repo,
 		Profile:   profile,
 		StartedAt: time.Now().UTC(),
+		Identity:  agentIdentity(cfg, nil),
 	}
 
 	var err error
 	if profile == ProfileSidecar {
-		err = runSidecarEpisode(ctx, cfg, task, ep)
+		err = runSidecarEpisode(ctx, cfg, task, ep, rt)
 	} else {
-		err = runDirectEpisode(ctx, cfg, task, profile, ep)
+		err = runDirectEpisode(ctx, cfg, task, profile, ep, rt)
 	}
 
 	ep.EndedAt = time.Now().UTC()
 	finalizeContext(ep)
 	ep.Rewards = ComputeRewards(task, ep)
+	logEpisodeProgress(task, ep)
 	return ep, err
 }
 
 // runSidecarEpisode drives the production sidecar path: one sidecar.Ask per
 // question, exactly like repeated "ghx sidecar ask" CLI invocations. Follow-up
 // turns exercise real ACP session resumption via the persisted session ID.
-func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episode) error {
-	scfg := sidecar.Config{AgentCmd: cfg.AgentCmd, SessionsDir: cfg.SessionsDir}
+func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episode, rt episodeRuntime) error {
+	scfg := sidecar.Config{AgentCmd: cfg.AgentCmd, SessionsDir: cfg.SessionsDir, Cwd: rt.Cwd, Env: rt.Env}
 	session := ep.ID
 
 	for i, q := range task.Turns {
@@ -82,9 +90,19 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		rec.Text = turn.FullText
 		rec.ToolCalls = turn.ToolCalls
 		rec.ToolOutputChars = turn.ToolOutputChars
+		for _, tr := range turn.ToolTraces {
+			rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
+		}
+		rebuildToolSummaries(&rec)
 		rec.Report = report
 		ep.Turns = append(ep.Turns, rec)
+		appendTraceProjections(ep, rec)
 		ep.Report = report
+		if turn.AgentInfo != nil {
+			ep.Identity.AdapterName = turn.AgentInfo.Name
+			ep.Identity.AdapterVersion = turn.AgentInfo.Version
+			ep.Identity.AdapterSubjectModel = modelFromMeta(turn.AgentInfo.Meta)
+		}
 	}
 	return nil
 }
@@ -92,9 +110,10 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 // runDirectEpisode drives a plain or ghx profile: one live agent process for
 // the whole episode, one ACP session, one Prompt call per question. Follow-up
 // turns are Resumed by construction — the session never ends between turns.
-func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile, ep *Episode) error {
+func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile, ep *Episode, rt episodeRuntime) error {
 	cmd := exec.CommandContext(ctx, cfg.AgentCmd)
 	cmd.Stderr = os.Stderr
+	cmd.Env = rt.Env
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -111,18 +130,23 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 
 	client := &evalClient{}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
-	cwd, _ := os.Getwd()
 
-	if _, err := conn.Initialize(ctx, acp.InitializeRequest{
+	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
 			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("acp initialize: %w", err)
 	}
+	if initResp.AgentInfo != nil {
+		ep.Identity.AdapterName = initResp.AgentInfo.Name
+		ep.Identity.AdapterVersion = initResp.AgentInfo.Version
+		ep.Identity.AdapterSubjectModel = modelFromMeta(initResp.AgentInfo.Meta)
+	}
 
-	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: cwd, McpServers: []acp.McpServer{}})
+	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: rt.Cwd, McpServers: []acp.McpServer{}})
 	if err != nil {
 		return fmt.Errorf("acp new session: %w", err)
 	}
@@ -141,14 +165,30 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 		if err != nil {
 			record.Error = err.Error()
 			ep.Turns = append(ep.Turns, record)
+			appendTraceProjections(ep, record)
 			ep.Violations = append(ep.Violations, client.violations...)
 			return fmt.Errorf("direct turn %d: %w", i, err)
 		}
 		ep.Turns = append(ep.Turns, record)
+		appendTraceProjections(ep, record)
 	}
 
 	ep.Violations = append(ep.Violations, client.violations...)
 	return nil
+}
+
+func logEpisodeProgress(task Task, ep *Episode) {
+	fmt.Fprintf(os.Stderr, "eval episode complete task=%s profile=%s turns=%d overall=%.3f mainAgentChars=%d duration=%s\n",
+		task.ID, ep.Profile, len(ep.Turns), ep.Rewards.Overall, ep.Context.MainAgentChars, ep.EndedAt.Sub(ep.StartedAt).Round(time.Millisecond))
+}
+
+func modelFromMeta(meta map[string]any) string {
+	for _, key := range []string{"subjectModel", "model", "modelName"} {
+		if v, ok := meta[key].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // finalizeContext computes the workflow-boundary accounting from ADR-0016.1.

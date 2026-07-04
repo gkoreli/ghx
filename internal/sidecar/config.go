@@ -20,6 +20,10 @@ type Config struct {
 	// SessionsDir is where named session artifacts are stored.
 	// Defaults to ~/.ghx-sidecar/sessions.
 	SessionsDir string `json:"sessionsDir"`
+	// Cwd overrides the ACP session cwd. Empty means current working directory.
+	Cwd string `json:"-"`
+	// Env overrides the spawned ACP adapter environment. Nil means inherit.
+	Env []string `json:"-"`
 }
 
 func defaultConfig() Config {
