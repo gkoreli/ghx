@@ -268,6 +268,9 @@ func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool
 		if key != "" {
 			identityKeys[key]++
 		}
+		if strings.TrimSpace(ep.Identity.SubjectModel) == "" || ep.Identity.SubjectModel == "unknown" {
+			notes = append(notes, fmt.Sprintf("IDENTITY: subject-model identity is unverified for episode %s", episodeLabel(ep)))
+		}
 		exclude := ep.Invalid
 		if ep.Profile == ProfilePlain && invokesGhx(ep) {
 			exclude = true

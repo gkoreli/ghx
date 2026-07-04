@@ -59,17 +59,41 @@ func resolvedToolInput(tr ToolCallTrace) string {
 		if s, ok := v["cmd"].(string); ok && strings.TrimSpace(s) != "" {
 			return commandWithArgs(s, v["args"])
 		}
-		if data, err := json.Marshal(v); err == nil {
-			return string(data)
+		if len(v) > 0 {
+			data, err := json.Marshal(v)
+			if err == nil && string(data) != "{}" {
+				return string(data)
+			}
 		}
+	case nil:
+		// Fall through to the title/id fallback below.
 	default:
 		if tr.RawInput != nil {
-			if data, err := json.Marshal(tr.RawInput); err == nil {
+			if data, err := json.Marshal(tr.RawInput); err == nil && string(data) != "{}" {
 				return string(data)
 			}
 		}
 	}
-	return tr.Title
+	if strings.TrimSpace(tr.Title) != "" {
+		return tr.Title
+	}
+	return tr.ID
+}
+
+func rawTokenInvokesGhx(token string) bool {
+	token = strings.Trim(strings.ToLower(token), `"'()[],:;`)
+	token = strings.TrimSuffix(token, ".cmd")
+	if token == "" {
+		return false
+	}
+	base := token
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	if base == "ghx" || base == "ghx.exe" {
+		return true
+	}
+	return token == "@gkoreli/ghx" || strings.HasSuffix(token, "/@gkoreli/ghx")
 }
 
 func commandWithArgs(command string, rawArgs any) string {
@@ -151,12 +175,7 @@ func invokesGhx(ep *Episode) bool {
 	for _, cmd := range commandsFromEpisode(ep) {
 		fields := strings.Fields(strings.ToLower(cmd))
 		for _, f := range fields {
-			f = strings.Trim(f, `"'()[],:;`)
-			base := f
-			if i := strings.LastIndex(base, "/"); i >= 0 {
-				base = base[i+1:]
-			}
-			if base == "ghx" {
+			if rawTokenInvokesGhx(f) {
 				return true
 			}
 		}

@@ -4,13 +4,17 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
+	"regexp"
 	"strings"
 )
 
-var requiredPlainTools = []string{"sh", "bash", "gh", "node", "npx", "npm"}
+var wrapperModelPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`GHX_EVAL_SUBJECT_MODEL="\$\{GHX_EVAL_SUBJECT_MODEL:-([^}]+)\}"`),
+	regexp.MustCompile(`GHX_EVAL_SUBJECT_MODEL=\$\{GHX_EVAL_SUBJECT_MODEL:-([^}]+)\}`),
+	regexp.MustCompile(`ANTHROPIC_MODEL="?\$\{ANTHROPIC_MODEL:-([^}"]+)\}"?`),
+	regexp.MustCompile(`ANTHROPIC_MODEL="?([^"\s]+)"?`),
+}
 
 type episodeRuntime struct {
 	Cwd     string
@@ -42,49 +46,41 @@ func prepareEpisodeRuntime(cfg RunConfig, profile Profile) (episodeRuntime, erro
 	return rt, nil
 }
 
-func buildPlainProfileEnv(base []string, binDir string) ([]string, error) {
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return nil, err
-	}
+func buildPlainProfileEnv(base []string, _ string) ([]string, error) {
 	basePath := envValue(base, "PATH")
-	for _, name := range requiredPlainTools {
-		target, err := lookPathWithoutGhx(name, basePath)
-		if err != nil {
-			if name == "bash" {
-				continue
-			}
-			return nil, fmt.Errorf("plain profile PATH: required tool %q not found: %w", name, err)
-		}
-		link := filepath.Join(binDir, name)
-		if err := os.Symlink(target, link); err != nil && !os.IsExist(err) {
-			return nil, fmt.Errorf("symlink %s -> %s: %w", link, target, err)
-		}
-	}
-	if ghx, err := exec.LookPath("ghx"); err == nil {
-		for _, part := range filepath.SplitList(binDir) {
-			if sameDir(filepath.Dir(ghx), part) {
-				return nil, fmt.Errorf("plain profile PATH unexpectedly includes ghx dir %s", part)
-			}
-		}
-	}
-	return setEnv(base, "PATH", binDir), nil
-}
-
-func lookPathWithoutGhx(name, pathValue string) (string, error) {
-	for _, dir := range filepath.SplitList(pathValue) {
+	var kept []string
+	for _, dir := range filepath.SplitList(basePath) {
 		if dir == "" {
 			continue
 		}
-		candidate := filepath.Join(dir, name)
-		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		hasGhx, err := dirProvidesGhx(dir)
+		if err != nil {
+			return nil, err
+		}
+		if hasGhx {
 			continue
 		}
-		if name != "ghx" {
-			return candidate, nil
-		}
+		kept = append(kept, dir)
 	}
-	return "", exec.ErrNotFound
+	return setEnv(base, "PATH", strings.Join(kept, string(os.PathListSeparator))), nil
+}
+
+func dirProvidesGhx(dir string) (bool, error) {
+	for _, name := range []string{"ghx", "ghx.exe"} {
+		candidate := filepath.Join(dir, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return false, fmt.Errorf("plain profile PATH: stat %s: %w", candidate, err)
+		}
+		if info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func envValue(env []string, key string) string {
@@ -115,25 +111,10 @@ func setEnv(env []string, key, value string) []string {
 	return out
 }
 
-func sameDir(a, b string) bool {
-	ar, errA := filepath.EvalSymlinks(a)
-	br, errB := filepath.EvalSymlinks(b)
-	if errA == nil {
-		a = ar
-	}
-	if errB == nil {
-		b = br
-	}
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(a, b)
-	}
-	return a == b
-}
-
 func agentIdentity(cfg RunConfig, initAgent *AgentIdentity) AgentIdentity {
 	id := AgentIdentity{
 		AgentCommand: cfg.AgentCmd,
-		SubjectModel: os.Getenv("GHX_EVAL_SUBJECT_MODEL"),
+		SubjectModel: resolveSubjectModel(cfg.AgentCmd),
 	}
 	if initAgent != nil {
 		id.AdapterName = initAgent.AdapterName
@@ -144,6 +125,57 @@ func agentIdentity(cfg RunConfig, initAgent *AgentIdentity) AgentIdentity {
 		id.WrapperSHA256 = hash
 	}
 	return id
+}
+
+func resolveSubjectModel(agentCmd string) string {
+	if v := strings.TrimSpace(os.Getenv("GHX_EVAL_SUBJECT_MODEL")); v != "" {
+		return v
+	}
+	if v, ok := subjectModelFromWrapper(agentCmd); ok {
+		return v
+	}
+	return "unknown"
+}
+
+func subjectModelFromWrapper(cmd string) (string, bool) {
+	if cmd == "" || (!filepath.IsAbs(cmd) && !strings.Contains(cmd, string(os.PathSeparator))) {
+		return "", false
+	}
+	data, err := os.ReadFile(cmd)
+	if err != nil {
+		return "", false
+	}
+	text := string(data)
+	for _, re := range wrapperModelPatterns {
+		m := re.FindStringSubmatch(text)
+		if len(m) < 2 {
+			continue
+		}
+		model := strings.Trim(m[1], `"' `)
+		if model == "$ANTHROPIC_MODEL" {
+			if v, ok := anthropicModelDefault(text); ok {
+				return v, true
+			}
+			continue
+		}
+		if model != "" {
+			return model, true
+		}
+	}
+	return "", false
+}
+
+func anthropicModelDefault(text string) (string, bool) {
+	for _, re := range wrapperModelPatterns[2:] {
+		m := re.FindStringSubmatch(text)
+		if len(m) >= 2 {
+			model := strings.Trim(m[1], `"' `)
+			if model != "" && !strings.HasPrefix(model, "$") {
+				return model, true
+			}
+		}
+	}
+	return "", false
 }
 
 func wrapperHash(cmd string) (string, bool) {

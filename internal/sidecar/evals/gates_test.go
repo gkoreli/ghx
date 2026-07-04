@@ -265,6 +265,21 @@ func TestPlainGhxInvocationInvalidAndExcluded(t *testing.T) {
 	}
 }
 
+func TestPlainGhxInvocationDetectsNpxAndScopedPackage(t *testing.T) {
+	for _, input := range []string{
+		"npx ghx read owner/repo src/a.ts",
+		"npx -y @gkoreli/ghx read owner/repo src/a.ts",
+	} {
+		t.Run(input, func(t *testing.T) {
+			plain := mkEpisode(ProfilePlain, 1.0, 1.0, 1.0, 100, 100, false, false)
+			plain.Actions = []Action{{Input: input}}
+			if !invokesGhx(plain) {
+				t.Fatalf("invokesGhx(%q) = false, want true", input)
+			}
+		})
+	}
+}
+
 func TestGhxProfileWithoutGhxInvocationFlaggedOnly(t *testing.T) {
 	eps := passingEpisodes()
 	for _, ep := range eps {
@@ -301,6 +316,17 @@ func TestMixedAgentIdentityInvalidatesVerdict(t *testing.T) {
 	}
 	if !hasNote(v, "mixed agent identities") {
 		t.Fatalf("expected identity note, got %v", v.Notes)
+	}
+}
+
+func TestUnknownSubjectModelAddsVerdictNote(t *testing.T) {
+	eps := passingEpisodes()
+	for _, ep := range eps {
+		ep.Identity = AgentIdentity{AgentCommand: "agent", AdapterName: "mock", AdapterVersion: "1", SubjectModel: "unknown"}
+	}
+	v := EvaluateGates(eps)
+	if !hasNote(v, "subject-model identity is unverified") {
+		t.Fatalf("expected unverified subject-model note, got %v", v.Notes)
 	}
 }
 

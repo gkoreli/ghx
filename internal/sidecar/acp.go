@@ -128,7 +128,11 @@ func toolSummary(tr ToolCallTrace) string {
 	if n := len(tr.StatusTransitions); n > 0 {
 		status = tr.StatusTransitions[n-1].Status
 	}
-	input := resolveToolInput(tr.RawInput, tr.Title)
+	fallback := tr.Title
+	if fallback == "" {
+		fallback = tr.ID
+	}
+	input := resolveToolInput(tr.RawInput, fallback)
 	if tr.Kind != "" {
 		input = tr.Kind + ": " + input
 	}
@@ -151,12 +155,17 @@ func resolveToolInput(raw any, fallback string) string {
 		if s, ok := v["cmd"].(string); ok && s != "" {
 			return commandWithArgs(s, v["args"])
 		}
-		if data, err := json.Marshal(v); err == nil {
-			return string(data)
+		if len(v) > 0 {
+			data, err := json.Marshal(v)
+			if err == nil && string(data) != "{}" {
+				return string(data)
+			}
 		}
+	case nil:
+		// Fall through to fallback below.
 	default:
 		if raw != nil {
-			if data, err := json.Marshal(raw); err == nil {
+			if data, err := json.Marshal(raw); err == nil && string(data) != "{}" {
 				return string(data)
 			}
 		}
