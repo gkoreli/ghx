@@ -40,6 +40,11 @@ func main() {
 	fmt.Printf("Run: %s\n", runDir)
 	fmt.Printf("Status: %s\n", label)
 	fmt.Printf("Episodes: %d / %s expected\n\n", len(episodes), expected)
+	if traces, spans, ok, err := evals.TraceFileStats(runDir); err != nil {
+		fmt.Printf("Traces: unreadable (%v)\n\n", err)
+	} else if ok {
+		fmt.Printf("Traces: %d spans across %d trace(s) in traces.jsonl\n\n", spans, traces)
+	}
 
 	if manifest != nil {
 		fmt.Println("Identity:")

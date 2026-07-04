@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,7 +21,13 @@ func SaveEpisode(runDir string, ep *Episode) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := EmitEpisodeTraces(context.TODO(), runDir, ep); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // LoadEpisode reads one episode artifact back from disk.

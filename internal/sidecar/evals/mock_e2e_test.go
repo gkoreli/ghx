@@ -6,10 +6,114 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+const knownSecretValue = "super-secret-eval-token"
+
+func loadTraceData(t *testing.T, runDir string) []*tracepb.TracesData {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(runDir, traceFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), knownSecretValue) {
+		t.Fatalf("traces.jsonl contains known secret value %q", knownSecretValue)
+	}
+	var out []*tracepb.TracesData
+	for i, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var td tracepb.TracesData
+		if err := protojson.Unmarshal([]byte(line), &td); err != nil {
+			t.Fatalf("parse traces.jsonl line %d: %v\n%s", i+1, err, line)
+		}
+		out = append(out, &td)
+	}
+	if len(out) == 0 {
+		t.Fatal("traces.jsonl had no records")
+	}
+	return out
+}
+
+func flattenTraceSpans(data []*tracepb.TracesData) (map[string]*tracepb.Span, map[string]string) {
+	spans := map[string]*tracepb.Span{}
+	resourceAttrs := map[string]string{}
+	for _, td := range data {
+		for _, rs := range td.ResourceSpans {
+			for _, attr := range rs.GetResource().GetAttributes() {
+				resourceAttrs[attr.Key] = anyValueString(attr.Value)
+			}
+			for _, ss := range rs.ScopeSpans {
+				for _, sp := range ss.Spans {
+					spans[string(sp.SpanId)] = sp
+				}
+			}
+		}
+	}
+	return spans, resourceAttrs
+}
+
+func spanByName(t *testing.T, spans map[string]*tracepb.Span, name string) *tracepb.Span {
+	t.Helper()
+	for _, sp := range spans {
+		if sp.Name == name {
+			return sp
+		}
+	}
+	t.Fatalf("span %q not found; got %v", name, spanNames(spans))
+	return nil
+}
+
+func spansByNamePrefix(spans map[string]*tracepb.Span, prefix string) []*tracepb.Span {
+	var out []*tracepb.Span
+	for _, sp := range spans {
+		if strings.HasPrefix(sp.Name, prefix) {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+func spanNames(spans map[string]*tracepb.Span) []string {
+	var out []string
+	for _, sp := range spans {
+		out = append(out, sp.Name)
+	}
+	return out
+}
+
+func spanAttr(sp *tracepb.Span, key string) string {
+	for _, attr := range sp.Attributes {
+		if attr.Key == key {
+			return anyValueString(attr.Value)
+		}
+	}
+	return ""
+}
+
+func anyValueString(v *commonpb.AnyValue) string {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue
+	case *commonpb.AnyValue_IntValue:
+		return strconv.FormatInt(x.IntValue, 10)
+	case *commonpb.AnyValue_DoubleValue:
+		return strconv.FormatFloat(x.DoubleValue, 'f', -1, 64)
+	case *commonpb.AnyValue_BoolValue:
+		return strconv.FormatBool(x.BoolValue)
+	default:
+		return ""
+	}
+}
 
 // buildMockAgent compiles the scripted ACP agent into a temp dir.
 // Skips the test when no Go toolchain is available (the mock e2e is a
@@ -114,6 +218,8 @@ const turn1Report = `Building on prior findings about src/compose.ts.
 // scripted mock agent. This is the ADR-0016.1 checkpoint-d proof that the
 // episode pipeline works end-to-end without a live LLM.
 func TestMockSidecarEpisode(t *testing.T) {
+	t.Setenv("GHX_EVAL_KNOWN_SECRET", knownSecretValue)
+	t.Setenv("GHX_EVAL_SUBJECT_MODEL", "mock-sonnet-subject")
 	bin := buildMockAgent(t)
 	writeScript(t, []map[string]any{
 		{
@@ -171,6 +277,9 @@ func TestMockSidecarEpisode(t *testing.T) {
 	if ep.Identity.AdapterName != "mockagent" || ep.Identity.AdapterVersion != "0.0.1" || ep.Identity.AdapterSubjectModel != "mock-sonnet" {
 		t.Fatalf("identity not captured from initialize: %+v", ep.Identity)
 	}
+	if ep.Identity.SubjectModel != "mock-sonnet-subject" {
+		t.Fatalf("subject model not captured from eval env: %+v", ep.Identity)
+	}
 
 	r := ep.Rewards
 	if r.Correctness != 1.0 {
@@ -193,7 +302,8 @@ func TestMockSidecarEpisode(t *testing.T) {
 	}
 
 	// Artifact roundtrip.
-	path, err := SaveEpisode(t.TempDir(), ep)
+	runDir := t.TempDir()
+	path, err := SaveEpisode(runDir, ep)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +313,67 @@ func TestMockSidecarEpisode(t *testing.T) {
 	}
 	if loaded.Rewards.Overall != ep.Rewards.Overall {
 		t.Errorf("artifact roundtrip changed rewards: %v != %v", loaded.Rewards.Overall, ep.Rewards.Overall)
+	}
+
+	traceData := loadTraceData(t, runDir)
+	traceBytes, err := os.ReadFile(filepath.Join(runDir, traceFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line, _, ok := strings.Cut(string(traceBytes), "\n"); ok {
+		t.Logf("sample trace line: %s", boundedString(line, 320))
+	}
+	spans, resourceAttrs := flattenTraceSpans(traceData)
+	if len(spans) < 6 {
+		t.Fatalf("span count = %d, want at least episode + 2 turns + 3 tools + reward", len(spans))
+	}
+	for key, want := range map[string]string{
+		"service.name":           "ghx-evals",
+		"otel.semconv_version":   otelSemconvVersion,
+		"ghx.eval.task_id":       task.ID,
+		"ghx.eval.profile":       string(ProfileSidecar),
+		"ghx.eval.subject_model": "mock-sonnet-subject",
+		"ghx.eval.adapter.name":  "mockagent",
+	} {
+		if got := resourceAttrs[key]; got != want {
+			t.Fatalf("resource attr %s = %q, want %q (attrs=%v)", key, got, want, resourceAttrs)
+		}
+	}
+	episodeSpan := spanByName(t, spans, "eval.episode")
+	rewardSpan := spanByName(t, spans, "eval.reward.compute")
+	if len(episodeSpan.ParentSpanId) != 0 {
+		t.Fatalf("episode span has parent: %x", episodeSpan.ParentSpanId)
+	}
+	if string(rewardSpan.ParentSpanId) != string(episodeSpan.SpanId) {
+		t.Fatalf("reward parent = %x, want episode %x", rewardSpan.ParentSpanId, episodeSpan.SpanId)
+	}
+	if got := spanAttr(episodeSpan, "ghx.eval.task_id"); got != task.ID {
+		t.Fatalf("episode task attr = %q, want %q", got, task.ID)
+	}
+	turns := spansByNamePrefix(spans, "eval.turn")
+	if len(turns) != 2 {
+		t.Fatalf("turn spans = %d, want 2", len(turns))
+	}
+	for _, turn := range turns {
+		if string(turn.ParentSpanId) != string(episodeSpan.SpanId) {
+			t.Fatalf("turn parent = %x, want episode %x", turn.ParentSpanId, episodeSpan.SpanId)
+		}
+	}
+	tools := spansByNamePrefix(spans, "tool.")
+	if len(tools) != 3 {
+		t.Fatalf("tool spans = %d, want 3", len(tools))
+	}
+	turnIDs := map[string]bool{}
+	for _, turn := range turns {
+		turnIDs[string(turn.SpanId)] = true
+	}
+	for _, tool := range tools {
+		if !turnIDs[string(tool.ParentSpanId)] {
+			t.Fatalf("tool %s parent = %x, want one of turn spans", tool.Name, tool.ParentSpanId)
+		}
+		if spanAttr(tool, "gen_ai.tool.call.id") == "" || spanAttr(tool, "ghx.eval.tool.input") == "" {
+			t.Fatalf("tool span missing core attrs: %+v", tool.Attributes)
+		}
 	}
 }
 
