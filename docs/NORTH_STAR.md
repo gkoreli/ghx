@@ -119,7 +119,7 @@ frontier milestone is not starved by it.
 | M1 | Evidence engine (CLI, MCP, codemode, map engine) | P1 | Shipped |
 | M2 | Go-native sidecar runtime over ACP (ADR-0015) | P2 | Shipped |
 | M3 | Eval kernel + validity hardening (ADR-0016.1, 0016.2) | P2 | Built; smoke pairs pass all five gates |
-| M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **← current frontier** (round 1 running, `.ghx-evals/runs/gate-run-2026-07-04`) |
+| M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **← current frontier**: framework must first prove itself token-free (ADR-0016.3: V0 mock → V1 cheap smoke → V2 spot checks); the ~90-episode V3 spend fires only on explicit engineer trigger |
 | M5 | Concise "reconnaissance service" skill: main agent needs zero ghx CLI knowledge | P2 | Blocked on M4 verdict |
 | M6 | Trajectory accumulation at scale; SFT/preference/reward exports | P4 prep | Blocked on M4 verdict |
 | M7 | Local escalation layer: clone + codemapping as internal sidecar tools | P3 | Future |
