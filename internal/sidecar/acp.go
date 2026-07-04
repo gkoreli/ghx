@@ -419,7 +419,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	}
 
 	var sessionID acp.SessionId
-	if opts.ACPSessionID == "" {
+	if opts.ACPSessionID == "" || !initResp.AgentCapabilities.LoadSession {
 		resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 			Cwd:        cwd,
 			McpServers: []acp.McpServer{},

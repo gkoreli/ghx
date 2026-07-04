@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+var runTurnWithOptions = RunTurnWithOptions
+
 // AskRequest is the input for a single sidecar investigation.
 type AskRequest struct {
 	// Session is the named session to use (created if it does not exist).
@@ -31,8 +33,9 @@ type AskRequest struct {
 // Session lifecycle:
 //   - If the named session has never been used, InitSession is called and
 //     an ACP NewSession is created.
-//   - If the session exists and has an ACP session ID, LoadSession is called
-//     so the agent retains its prior context.
+//   - If the session exists and the adapter supports ACP LoadSession, the
+//     transport session is resumed. Otherwise a fresh ACP NewSession is used;
+//     durable evidence memory still travels through the prompt ledger.
 //
 // The structured Report is extracted from the <ghx-report> block in the
 // agent's output. If no report is found the turn still succeeds but the
@@ -58,6 +61,10 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	if err != nil {
 		return nil, nil, fmt.Errorf("read meta: %w", err)
 	}
+	ledger, err := LoadLedger(sessionsDir, req.Session)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read ledger: %w", err)
+	}
 
 	prompt := BuildPrompt(Request{
 		Session:         req.Session,
@@ -65,14 +72,14 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		Question:        req.Question,
 		Depth:           req.Depth,
 		AllowedBackends: req.AllowedBackends,
-	}, meta)
+	}, meta, ledger)
 
 	acpSessionID := ""
 	if meta != nil {
 		acpSessionID = meta.ACPSessionID
 	}
 
-	turnResult, newSessionID, err := RunTurnWithOptions(ctx, RunTurnOptions{
+	turnResult, newSessionID, err := runTurnWithOptions(ctx, RunTurnOptions{
 		AgentCmd:     cfg.AgentCmd,
 		ACPSessionID: acpSessionID,
 		Prompt:       prompt,
@@ -92,16 +99,24 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		}
 	}
 
-	if err := RecordTurn(sessionsDir, req.Session); err != nil {
-		// Non-fatal: metadata is informational.
-		fmt.Fprintf(os.Stderr, "warning: failed to record turn: %v\n", err)
-	}
-
 	report := ExtractReport(turnResult.FullText)
 	if report == nil {
 		report = &Report{
 			Answer: "WARN: sidecar did not emit a <ghx-report> block — raw output was produced but no structured report was found.",
 		}
+	}
+	turn := 1
+	if meta != nil {
+		turn = meta.TurnCount + 1
+	}
+	UpdateLedgerFromTurn(ledger, meta, report, turnResult.ToolTraces, turn)
+	if saveErr := SaveLedger(sessionsDir, req.Session, ledger); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save ledger: %v\n", saveErr)
+	}
+
+	if err := RecordTurn(sessionsDir, req.Session); err != nil {
+		// Non-fatal: metadata is informational.
+		fmt.Fprintf(os.Stderr, "warning: failed to record turn: %v\n", err)
 	}
 
 	if _, saveErr := SaveReport(sessionsDir, req.Session, report); saveErr != nil {

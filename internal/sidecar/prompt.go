@@ -26,7 +26,7 @@ type Request struct {
 // On the first turn (meta == nil) the prompt includes the full persona, role
 // description, operating loop, and budget. On follow-up turns it prepends a
 // compact prior-context block so the agent knows what it has already found.
-func BuildPrompt(req Request, meta *SessionMeta) string {
+func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 	depth := req.Depth
 	if depth == "" {
 		depth = "normal"
@@ -64,6 +64,9 @@ func BuildPrompt(req Request, meta *SessionMeta) string {
 		}
 		fmt.Fprintf(&sb, "Turns completed: %d\n", meta.TurnCount)
 		fmt.Fprintf(&sb, "Scope: %s\n\n", meta.Scope)
+		if len(ledgers) > 0 && ledgers[0] != nil {
+			sb.WriteString(formatEvidenceLedger(ledgers[0]))
+		}
 	}
 
 	sb.WriteString(`
@@ -117,4 +120,73 @@ If ghx is unavailable, call submit_report immediately with:
   relevantFiles: []
 `)
 	return sb.String()
+}
+
+func formatEvidenceLedger(ledger *Ledger) string {
+	if ledger == nil {
+		return ""
+	}
+	const max = 1500
+	commandLimit := len(ledger.CommandsRun)
+	pathLimit := len(ledger.InspectedPaths)
+	var block string
+	for {
+		block = buildEvidenceLedgerBlock(ledger, commandLimit, pathLimit)
+		if len(block) <= max || commandLimit == 0 && pathLimit == 0 {
+			break
+		}
+		if commandLimit > 0 {
+			commandLimit--
+			continue
+		}
+		if pathLimit > 0 {
+			pathLimit--
+		}
+	}
+	return block
+}
+
+func buildEvidenceLedgerBlock(ledger *Ledger, commandLimit, pathLimit int) string {
+	var sb strings.Builder
+	sb.WriteString("## Evidence ledger\n\n")
+	sb.WriteString("Files already inspected must not be re-read unless the new question requires different lines; cite ledger evidence instead.\n")
+	writeLedgerValues(&sb, "Inspected paths", ledger.InspectedPaths, pathLimit)
+	writeRelevantFiles(&sb, ledger.RelevantFiles)
+	writeRelevantFilesSection(&sb, "Rejected paths", ledger.RejectedPaths)
+	writeLedgerValues(&sb, "Open questions", ledger.OpenQuestions, len(ledger.OpenQuestions))
+	writeLedgerValues(&sb, "Recent commands", ledger.CommandsRun, commandLimit)
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+func writeLedgerValues(sb *strings.Builder, title string, entries []LedgerEntry, limit int) {
+	if len(entries) == 0 || limit <= 0 {
+		return
+	}
+	if limit > len(entries) {
+		limit = len(entries)
+	}
+	fmt.Fprintf(sb, "\n%s:\n", title)
+	start := len(entries) - limit
+	for i := len(entries) - 1; i >= start; i-- {
+		fmt.Fprintf(sb, "- %s (turn %d)\n", entries[i].Value, entries[i].Turn)
+	}
+}
+
+func writeRelevantFiles(sb *strings.Builder, entries []RelevantFileEntry) {
+	writeRelevantFilesSection(sb, "Relevant files", entries)
+}
+
+func writeRelevantFilesSection(sb *strings.Builder, title string, entries []RelevantFileEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "\n%s:\n", title)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Reason != "" {
+			fmt.Fprintf(sb, "- %s - %s (turn %d)\n", entries[i].Path, entries[i].Reason, entries[i].Turn)
+		} else {
+			fmt.Fprintf(sb, "- %s (turn %d)\n", entries[i].Path, entries[i].Turn)
+		}
+	}
 }

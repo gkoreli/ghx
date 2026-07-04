@@ -144,6 +144,31 @@ var sidecarSessionsShowCmd = &cobra.Command{
 	},
 }
 
+// sidecarSessionsLedgerCmd prints the persisted evidence ledger for one session.
+var sidecarSessionsLedgerCmd = &cobra.Command{
+	Use:   "ledger <session-name>",
+	Short: "Print the evidence ledger for a named session",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg := sidecar.LoadConfig()
+		name := args[0]
+		meta, err := sidecar.ReadMeta(cfg.SessionsDir, name)
+		if err != nil {
+			return err
+		}
+		if meta == nil {
+			return fmt.Errorf("session %q not found", name)
+		}
+		ledger, err := sidecar.LoadLedger(cfg.SessionsDir, name)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(ledger)
+	},
+}
+
 // sidecarConfigCmd groups config subcommands.
 var sidecarConfigCmd = &cobra.Command{
 	Use:   "config",
@@ -189,7 +214,7 @@ func init() {
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 
-	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd)
+	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
 	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarSessionsCmd, sidecarConfigCmd)
 }
