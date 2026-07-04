@@ -60,6 +60,47 @@ Each phase is valuable standalone and feeds the next:
 | P3 | **Swallow the tools**: the ghx CLI itself, codemap, local clone + codemapping for deeper understanding — all become internal tools of the sidecar brain. Codemap is popular today; in this future it is just one tool under ghx. The outside world talks only to the sidecar | Future |
 | P4 | **Below ACP**: a custom-trained reconnaissance model inside a lower-level agent runtime (agent SDK) that fully owns the sidecar's context, tools, knowledge, and model weights | Future; ADR-0016's training-data gold mine exists to enable this |
 
+## Sidecar Product Capabilities (the P2→P3 feature arc)
+
+The names: the **Sidecar Agent Framework (SAF)** is the runtime product; the
+**Sidecar Agent Framework Evals (SAFE)** is the proof machinery. They share
+one trace/artifact infrastructure — a trace is a trace whether it came from
+an eval episode or a real question; the OTel capture layer is configurable,
+modular, and reused across both.
+
+1. **Escalation tiers, decided by the sidecar.** Tier 0/1: remote evidence
+   via ghx CLI (explore/map/grep/search). Tier 2: when questions demand
+   deeper structural understanding, the sidecar decides to pull the codebase
+   locally and run codemapping under the hood — integrating
+   [codemap](https://github.com/JordanCoin/codemap) (and repomap-style
+   analysis) as internal tools. Tier 3: hand back to the main agent. The
+   customer agent sees one sidecar and one small skill; which tier answered
+   is always visible in the report and traces (ADR-0014.1's tiers, now a
+   product phase).
+2. **Eager anticipation, configurable.** Questions arrive about a project or
+   an exploration thread; the sidecar anticipates the follow-ups and starts
+   exploring *before* they are asked — capturing traces and reports so an
+   anticipated question answers in under a second instead of 30. Anticipation
+   has 3–5 configurable styles (from "answer precisely, do not anticipate"
+   to "anticipate aggressively"), settable globally, per project, per
+   session, or per question — smart defaults out of the box. Example: asked
+   for open-source competitors to CodeRabbit, the sidecar has already mapped
+   the landscape — cross-references, stars, recent commits/PRs/issues,
+   maturity, direction — and returns a comparison instantly.
+3. **Full visibility, full control.** Everything the sidecar does is
+   traceable: every question and literal response, every command, every
+   escalation decision, every anticipated question, every failure pattern —
+   captured as OTel traces and reports per question, per session, per
+   project. `~/.ghx` is the product's root storage (sessions, ledgers,
+   reports, traces, caches, config). Any human or agent can open it and see
+   exactly what ghx did and why. Control mirrors visibility: anticipation
+   level, escalation policy, budgets — all configurable at every scope, with
+   defaults that just work. Reconnaissance is abstracted away; awareness
+   never is.
+4. **Dogfooding is the ergonomics bar.** The founder uses ghx-with-sidecar
+   for daily development instead of the bare CLI. Friction found while
+   dogfooding outranks speculative features.
+
 ## Tenets
 
 - **Evals and benchmarking are how we know.** Heavy investment in
@@ -118,12 +159,14 @@ frontier milestone is not starved by it.
 |---|-----------|-------|--------|
 | M1 | Evidence engine (CLI, MCP, codemode, map engine) | P1 | Shipped |
 | M2 | Go-native sidecar runtime over ACP (ADR-0015) | P2 | Shipped |
-| M3 | Eval kernel + validity hardening (ADR-0016.1, 0016.2) | P2 | Built; smoke pairs pass all five gates |
-| M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **← staged**: framework proven (V0–V2 closed, ADR-0016.3/.4/.5), evidence ledger shipped (ADR-0015.1), all five gates pass on live spot checks — the ~90-episode V3 run awaits the explicit engineer trigger |
-| M5 | Concise "reconnaissance service" skill: main agent needs zero ghx CLI knowledge | P2 | Blocked on M4 verdict |
-| M6 | Trajectory accumulation at scale; SFT/preference/reward exports | P4 prep | Blocked on M4 verdict |
-| M7 | Local escalation layer: clone + codemapping as internal sidecar tools | P3 | Future |
-| M8 | Trained `ghx-sidecar` model behind the same boundary; re-run the same suite | P4 | Blocked on M6 |
+| M3 | Eval kernel + validity hardening + observability (ADR-0016.1–.5, 0015.1) | P2 | Done; all five gates pass on live spot checks |
+| M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **← running** (triggered 2026-07-04); rounds accumulate across session-cap windows |
+| M5 | Concise "reconnaissance service" skill + integration ergonomics: main agent needs zero ghx CLI knowledge; founder dogfoods the sidecar daily | P2 | Next after M4 verdict |
+| M6 | Shared SAF/SAFE trace infrastructure: runtime sessions emit the same OTel traces/reports as evals; `~/.ghx` root storage; full visibility surface | P2 | Next after M4 verdict |
+| M7 | Escalation tiers: codemap CLI + local clone as internal sidecar tools, sidecar-decided, fully visible | P3 | Future (ADR before build) |
+| M8 | Eager anticipation with configurable styles; sub-second answers to anticipated questions | P3 | Future (ADR before build) |
+| M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Blocked on M4 verdict |
+| M10 | Trained `ghx-sidecar` model behind the same boundary; re-run the same suite | P4 | Blocked on M9 |
 
 M4's verdict gates the investment: G1 (correctness) or G3 (compression)
 failing means the sidecar thesis is not supported and P3/P4 spending pauses.
