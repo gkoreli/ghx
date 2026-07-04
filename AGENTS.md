@@ -4,6 +4,20 @@
 
 ghx — GitHub code exploration for AI agents. Go binary distributed via npm, Homebrew, and `go install`.
 
+## North Star
+
+`docs/NORTH_STAR.md` is the durable steering document. The project creates two
+things: the Agent Sidecar Framework (a new mental model — expensive main agents
+delegate a whole competence domain to a cheap specialized sidecar) and ghx (the
+code reconnaissance sidecar, the only tool an agent reaches for to explore the
+GitHub open-source world). End state: the main agent needs zero ghx CLI
+knowledge — the CLI, codemap, and local codemapping all become tools under the
+sidecar brain, proven better by pre-registered benchmarks. Before taking on
+substantial work, check it passes the north-star filter (removes tokens from
+the main agent's context, cheaper/more proficient reconnaissance, more
+auditable evidence, or better training trajectories) and identify which
+milestone it advances. Update the milestone table there when status changes.
+
 ## Architecture
 
 ```
@@ -17,6 +31,105 @@ skills/             — CLI and MCP agent skills, embedded into binary via go:em
 npm/             — platform-specific npm packages (one per OS/arch, contains Go binary)
 scripts/         — CI and release scripts
 ```
+
+## ADR-Driven Engineering
+
+Use ADRs as living engineering records, not one-time proposals. For substantial
+architecture, product, workflow, sidecar, eval, release, or agent-behavior
+changes, write or update an ADR before implementation, engineer against it, and
+then update the ADR after implementation with the decisions that were made while
+building.
+
+ADRs live in `docs/adr/` and use YAML frontmatter. Preserve the existing style:
+
+```markdown
+---
+title: "ADR-0016.1: Sidecar Eval Implementation — Minimal Validation Kernel"
+date: "2026-07-03"
+status: "proposed"
+parent: ADR-0016
+thread: "sidecar-agentic-eval"
+author: "Goga Koreli"
+---
+```
+
+Thread related decisions with decimal numbering when the work belongs to an
+existing decision family, for example `0015.1`, `0015.2`, or `0016.1`. Use
+`parent`, `thread`, `supersedes`, or cross-reference sections when that
+relationship is important. Do not flatten related follow-up decisions into a
+single vague ADR.
+
+Before writing an ADR:
+
+- understand the relevant code paths, module boundaries, and runtime behavior
+- read the directly relevant prior ADRs
+- ground claims in evidence from code, docs, tests, command output, or committed
+  artifacts
+- do not assume how existing code works without checking authoritative sources
+
+An ADR should include distilled sections with rationale, insights, bullets, and
+cross-references. Prefer clear claims that explain why a decision is being made,
+what alternatives were rejected, and what evidence supports the conclusion.
+When referencing another ADR, source file, command, or test, explain why that
+reference matters.
+
+During implementation, keep track of engineering decisions made on the fly:
+boundary changes, API shape changes, permission/runtime constraints, test
+strategy, rejected approaches, and mismatches between the initial design and the
+actual code.
+
+After implementation, update the ADR so it is not a misleading historical plan.
+Record what changed, what was learned, what decisions were revised, and what
+follow-up remains. If the implementation disproves the original direction,
+state that directly and update `status` or add a superseding ADR instead of
+leaving stale guidance.
+
+## Evidence Contract
+
+Any completed task — delegated or direct — must report evidence, not vibes.
+
+Required report shape:
+
+```text
+answer
+files changed or inspected
+commands run
+test results
+evidence snippets or line references
+uncertainty
+suggested next step
+```
+
+For repository exploration, prefer reports shaped like:
+
+```text
+question
+answer
+relevant files
+evidence snippets
+commands run
+backends used
+uncertainty
+suggested next reads
+```
+
+A result that cannot cite files, commands, or outputs is a hypothesis, not a
+finding.
+
+## Commits
+
+Commit at meaningful checkpoints, not only at the end of a task. A meaningful
+checkpoint is a coherent, verifiable unit: an ADR written or updated, a test
+slice passing, a completed refactor step, a committed eval verdict. Rules:
+
+- Follow the existing message style: `type(scope): summary` — e.g.
+  `feat(evals):`, `fix(sidecar):`, `docs(adr):`.
+- Code checkpoints must build and pass `go test ./...`, or the commit message
+  must say why tests were skipped.
+- Never push unless explicitly asked — pushing `package.json` changes to
+  `mainline` triggers the release pipeline.
+- `.ghx-evals/` is gitignored; curated eval evidence goes under `docs/evals/`.
+- Never commit secrets, tokens, or personal config.
 
 ## Version Bumping
 
