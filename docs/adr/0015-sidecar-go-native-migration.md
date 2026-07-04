@@ -44,7 +44,8 @@ Migrate the `ghx` sidecar from TypeScript/acpx to Go inside the Go binary.
 
 Delete `packages/ghx-sidecar` entirely. The Go implementation is the canonical sidecar
 runtime going forward. `packages/ghx-bench` is kept as-is (no equivalent eval engine
-exists in Go yet).
+exists in Go yet). *(Update 2026-07-04: the Go eval suite in `internal/sidecar/evals`
+— ADR-0016.1/0016.2 — replaced it; `packages/ghx-bench` is deleted.)*
 
 ## What Changed
 
