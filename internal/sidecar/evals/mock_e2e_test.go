@@ -230,8 +230,9 @@ func TestMockSidecarEpisode(t *testing.T) {
 			"text": turn0Report,
 		},
 		{
-			"toolCalls": []string{"ghx read honojs/hono src/hono-base.ts --grep onError"},
-			"text":      turn1Report,
+			"replayOnLoad": []string{"ghx read honojs/hono src/compose.ts --map"},
+			"toolCalls":    []string{"ghx read honojs/hono src/hono-base.ts --grep onError"},
+			"text":         turn1Report,
 		},
 	})
 
@@ -260,6 +261,16 @@ func TestMockSidecarEpisode(t *testing.T) {
 	}
 	if len(ep.Turns[0].ToolCalls) != 2 {
 		t.Errorf("turn 0 tool calls = %v, want 2 captured", ep.Turns[0].ToolCalls)
+	}
+	if len(ep.Turns[1].ToolCalls) != 1 || strings.Contains(strings.Join(ep.Turns[1].ToolCalls, "\n"), "src/compose.ts") {
+		t.Errorf("turn 1 live tool calls = %v, want only prompt-era command", ep.Turns[1].ToolCalls)
+	}
+	if len(ep.Turns[1].ReplayedToolTraces) != 1 || !strings.Contains(ep.Turns[1].ReplayedText, "replayed prior answer") {
+		t.Fatalf("turn 1 replay audit missing: text=%q traces=%+v", ep.Turns[1].ReplayedText, ep.Turns[1].ReplayedToolTraces)
+	}
+	if len(ep.Turns[1].ToolTraces) != 1 || ep.Turns[1].ToolOutputChars != ep.Turns[1].ToolTraces[0].OutputSize {
+		t.Fatalf("turn 1 replay contaminated live trace/accounting: traces=%+v replay=%+v chars=%d",
+			ep.Turns[1].ToolTraces, ep.Turns[1].ReplayedToolTraces, ep.Turns[1].ToolOutputChars)
 	}
 	if !strings.Contains(ep.Turns[0].ToolCalls[0], "execute: ghx tree honojs/hono") {
 		t.Errorf("tool summary did not resolve command: %v", ep.Turns[0].ToolCalls)

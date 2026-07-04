@@ -8,7 +8,8 @@
 //
 // Configuration via environment:
 //
-//	MOCKAGENT_SCRIPT — path to a JSON file: [{"toolCalls": [...], "text": "..."}]
+//	MOCKAGENT_SCRIPT — path to a JSON file:
+//	                   [{"toolCalls": [...], "replayOnLoad": [...], "text": "..."}]
 //	MOCKAGENT_STATE  — path to a counter file persisted across process spawns,
 //	                   so per-turn agent processes (the sidecar production
 //	                   pattern) advance through the script.
@@ -27,8 +28,9 @@ import (
 
 // reply is one scripted prompt response.
 type reply struct {
-	ToolCalls []string `json:"toolCalls"`
-	Text      string   `json:"text"`
+	ToolCalls    []string `json:"toolCalls"`
+	ReplayOnLoad []string `json:"replayOnLoad"`
+	Text         string   `json:"text"`
 }
 
 // mockAgent implements acp.Agent and acp.AgentLoader with scripted behavior.
@@ -48,6 +50,14 @@ func (m *mockAgent) nextIndex() int {
 	return n
 }
 
+func (m *mockAgent) currentIndex() int {
+	n := 0
+	if data, err := os.ReadFile(m.state); err == nil {
+		n, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+	}
+	return n
+}
+
 func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.ProtocolVersionNumber,
@@ -60,8 +70,31 @@ func (m *mockAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
 }
 
-// LoadSession accepts any session ID — resumption always succeeds.
-func (m *mockAgent) LoadSession(_ context.Context, _ acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+// LoadSession accepts any session ID — resumption always succeeds. Scripted
+// replay updates simulate ACP adapters that emit prior session history before
+// the follow-up prompt request is sent.
+func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	idx := m.currentIndex()
+	if idx >= len(m.replies) {
+		idx = len(m.replies) - 1
+	}
+	if idx >= 0 {
+		if err := m.emitToolCalls(ctx, params.SessionId, idx, "replay", m.replies[idx].ReplayOnLoad); err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+		if len(m.replies[idx].ReplayOnLoad) > 0 {
+			if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+				SessionId: params.SessionId,
+				Update: acp.SessionUpdate{
+					AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+						Content: acp.TextBlock("replayed prior answer"),
+					},
+				},
+			}); err != nil {
+				return acp.LoadSessionResponse{}, err
+			}
+		}
+	}
 	return acp.LoadSessionResponse{}, nil
 }
 
@@ -72,37 +105,8 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 	}
 	r := m.replies[idx]
 
-	for i, title := range r.ToolCalls {
-		id := acp.ToolCallId(fmt.Sprintf("tc-%d-%d", idx, i))
-		update := acp.SessionUpdate{
-			ToolCall: &acp.SessionUpdateToolCall{
-				ToolCallId: id,
-				Title:      "Terminal",
-				Kind:       acp.ToolKindExecute,
-				Status:     acp.ToolCallStatusPending,
-				RawInput:   map[string]any{"command": title},
-			},
-		}
-		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
-			SessionId: params.SessionId,
-			Update:    update,
-		}); err != nil {
-			return acp.PromptResponse{}, err
-		}
-		status := acp.ToolCallStatusCompleted
-		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
-			SessionId: params.SessionId,
-			Update: acp.SessionUpdate{
-				ToolCallUpdate: &acp.SessionToolCallUpdate{
-					ToolCallId: id,
-					Status:     &status,
-					RawInput:   map[string]any{"command": title},
-					Content:    []acp.ToolCallContent{acp.ToolContent(acp.TextBlock("mock output for " + title))},
-				},
-			},
-		}); err != nil {
-			return acp.PromptResponse{}, err
-		}
+	if err := m.emitToolCalls(ctx, params.SessionId, idx, "tc", r.ToolCalls); err != nil {
+		return acp.PromptResponse{}, err
 	}
 
 	if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
@@ -117,6 +121,42 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 	}
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (m *mockAgent) emitToolCalls(ctx context.Context, sessionID acp.SessionId, idx int, prefix string, calls []string) error {
+	for i, title := range calls {
+		id := acp.ToolCallId(fmt.Sprintf("%s-%d-%d", prefix, idx, i))
+		update := acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: id,
+				Title:      "Terminal",
+				Kind:       acp.ToolKindExecute,
+				Status:     acp.ToolCallStatusPending,
+				RawInput:   map[string]any{"command": title},
+			},
+		}
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update:    update,
+		}); err != nil {
+			return err
+		}
+		status := acp.ToolCallStatusCompleted
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.SessionUpdate{
+				ToolCallUpdate: &acp.SessionToolCallUpdate{
+					ToolCallId: id,
+					Status:     &status,
+					RawInput:   map[string]any{"command": title},
+					Content:    []acp.ToolCallContent{acp.ToolContent(acp.TextBlock("mock output for " + title))},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {

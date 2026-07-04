@@ -20,18 +20,25 @@ type evalClient struct {
 	// current is the turn record being captured; the runner points this at
 	// a fresh record before each prompt. Turns run sequentially.
 	current *TurnRecord
+	// promptSent is raised immediately before session/prompt is sent. Updates
+	// received earlier are ACP history replay, not activity for this turn.
+	promptSent bool
 	// violations accumulates safety-contract breaches for the episode.
 	violations []string
 }
 
-func (c *evalClient) upsertTrace(id string) *ToolCallTrace {
-	for i := range c.current.ToolTraces {
-		if c.current.ToolTraces[i].ID == id {
-			return &c.current.ToolTraces[i]
+func (c *evalClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
+	traces := &c.current.ToolTraces
+	if replayed {
+		traces = &c.current.ReplayedToolTraces
+	}
+	for i := range *traces {
+		if (*traces)[i].ID == id {
+			return &(*traces)[i]
 		}
 	}
-	c.current.ToolTraces = append(c.current.ToolTraces, ToolCallTrace{ID: id})
-	return &c.current.ToolTraces[len(c.current.ToolTraces)-1]
+	*traces = append(*traces, ToolCallTrace{ID: id})
+	return &(*traces)[len(*traces)-1]
 }
 
 func isWriteKind(k *acp.ToolKind) bool {
@@ -82,14 +89,19 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		return nil
 	}
 	u := params.Update
+	replayed := !c.promptSent
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
+			if replayed {
+				c.current.ReplayedText += u.AgentMessageChunk.Content.Text.Text
+				return nil
+			}
 			c.current.Text += u.AgentMessageChunk.Content.Text.Text
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
-		tr := c.upsertTrace(string(tc.ToolCallId))
+		tr := c.upsertTrace(string(tc.ToolCallId), replayed)
 		tr.Title = tc.Title
 		tr.Kind = string(tc.Kind)
 		if tc.RawInput != nil {
@@ -99,11 +111,13 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		size := sidecar.ContentSize(tc.Content, tc.RawOutput)
 		tr.OutputSize += size
 		appendExcerpt(tr, sidecar.ToolOutputText(tc.Content, tc.RawOutput))
-		c.current.ToolOutputChars += size
-		rebuildToolSummaries(c.current)
+		if !replayed {
+			c.current.ToolOutputChars += size
+			rebuildToolSummaries(c.current)
+		}
 	case u.ToolCallUpdate != nil:
 		tcu := u.ToolCallUpdate
-		tr := c.upsertTrace(string(tcu.ToolCallId))
+		tr := c.upsertTrace(string(tcu.ToolCallId), replayed)
 		if tcu.Title != nil {
 			tr.Title = *tcu.Title
 		}
@@ -119,8 +133,10 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		size := sidecar.ContentSize(tcu.Content, tcu.RawOutput)
 		tr.OutputSize += size
 		appendExcerpt(tr, sidecar.ToolOutputText(tcu.Content, tcu.RawOutput))
-		c.current.ToolOutputChars += size
-		rebuildToolSummaries(c.current)
+		if !replayed {
+			c.current.ToolOutputChars += size
+			rebuildToolSummaries(c.current)
+		}
 	}
 	return nil
 }

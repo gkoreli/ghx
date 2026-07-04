@@ -197,6 +197,63 @@ func TestMemoryPenalizesRepeatReads(t *testing.T) {
 	}
 }
 
+func TestMemoryIdenticalRereadCounts(t *testing.T) {
+	ep := sidecarEpisode()
+	ep.Turns[0].ToolCalls = []string{"execute: ghx read honojs/hono src/compose.ts --grep dispatch (completed)"}
+	ep.Turns[1].ToolCalls = []string{"execute: ghx read honojs/hono src/compose.ts --grep dispatch (completed)"}
+	if got := memoryReward(ep); got != 0 {
+		t.Errorf("memory = %v, want 0 for identical re-read", got)
+	}
+	if got := repeatReadRatio(ep); got != 1 {
+		t.Errorf("repeatReadRatio = %v, want 1 for identical re-read", got)
+	}
+}
+
+func TestMemoryLinesNarrowingDoesNotCount(t *testing.T) {
+	ep := sidecarEpisode()
+	ep.Turns[0].ToolCalls = []string{"ghx read honojs/hono src/compose.ts (completed)"}
+	ep.Turns[1].ToolCalls = []string{"ghx read honojs/hono src/compose.ts --lines 20-60 (completed)"}
+	if got := memoryReward(ep); got != 1 {
+		t.Errorf("memory = %v, want 1 for --lines narrowing", got)
+	}
+	if got := repeatReadRatio(ep); got != 0 {
+		t.Errorf("repeatReadRatio = %v, want 0 for --lines narrowing", got)
+	}
+}
+
+func TestMemoryNewGrepPatternDoesNotCount(t *testing.T) {
+	ep := sidecarEpisode()
+	ep.Turns[0].ToolCalls = []string{"ghx read honojs/hono src/compose.ts --grep dispatch (completed)"}
+	ep.Turns[1].ToolCalls = []string{"ghx read honojs/hono src/compose.ts --grep compose (completed)"}
+	if got := memoryReward(ep); got != 1 {
+		t.Errorf("memory = %v, want 1 for new --grep pattern", got)
+	}
+	if got := repeatReadRatio(ep); got != 0 {
+		t.Errorf("repeatReadRatio = %v, want 0 for new --grep pattern", got)
+	}
+}
+
+func TestMemorySameGrepPatternRepeatedCounts(t *testing.T) {
+	ep := sidecarEpisode()
+	ep.Turns[0].ToolCalls = []string{"ghx read honojs/hono src/compose.ts --grep dispatch (completed)"}
+	ep.Turns[1].ToolCalls = []string{"ghx read honojs/hono src/compose.ts --grep dispatch --context 2 (completed)"}
+	if got := memoryReward(ep); got != 0 {
+		t.Errorf("memory = %v, want 0 for repeated --grep pattern", got)
+	}
+	if got := repeatReadRatio(ep); got != 1 {
+		t.Errorf("repeatReadRatio = %v, want 1 for repeated --grep pattern", got)
+	}
+}
+
+func TestMemoryBareMentionDoesNotCount(t *testing.T) {
+	ep := sidecarEpisode()
+	ep.Turns[0].ToolCalls = []string{"ghx read honojs/hono src/compose.ts (completed)"}
+	ep.Turns[1].ToolCalls = []string{"ghx search honojs/hono src/compose.ts dispatch (completed)"}
+	if got := memoryReward(ep); got != 1 {
+		t.Errorf("memory = %v, want 1 when later command only mentions the path", got)
+	}
+}
+
 func TestSafetyZeroOnViolation(t *testing.T) {
 	ep := sidecarEpisode()
 	ep.Violations = []string{"write attempted: /tmp/x"}

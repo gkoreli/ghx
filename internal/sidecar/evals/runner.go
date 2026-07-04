@@ -88,10 +88,14 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		}
 
 		rec.Text = turn.FullText
+		rec.ReplayedText = turn.ReplayedText
 		rec.ToolCalls = turn.ToolCalls
 		rec.ToolOutputChars = turn.ToolOutputChars
 		for _, tr := range turn.ToolTraces {
 			rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
+		}
+		for _, tr := range turn.ReplayedToolTraces {
+			rec.ReplayedToolTraces = append(rec.ReplayedToolTraces, convertSidecarTrace(tr))
 		}
 		rebuildToolSummaries(&rec)
 		rec.Report = report
@@ -154,7 +158,9 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 	for i, q := range task.Turns {
 		record := TurnRecord{Turn: i, Question: q, Resumed: i > 0}
 		client.current = &record
+		client.promptSent = false
 		start := time.Now()
+		client.promptSent = true
 		_, err := conn.Prompt(ctx, acp.PromptRequest{
 			SessionId: sess.SessionId,
 			Prompt:    []acp.ContentBlock{acp.TextBlock(directPrompt(profile, task.Repo, q, i))},

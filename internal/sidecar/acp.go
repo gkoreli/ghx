@@ -17,11 +17,18 @@ import (
 type TurnResult struct {
 	// FullText is the complete text emitted by the agent.
 	FullText string
+	// ReplayedText is message text replayed before this turn's prompt was sent.
+	// It is retained for audit and excluded from turn output/accounting.
+	ReplayedText string
 	// ToolCalls lists the tool calls observed during the turn (kind: command + status).
 	ToolCalls []string
 	// ToolTraces records full per-call audit data for eval/training artifacts.
 	ToolTraces []ToolCallTrace
-	AgentInfo  *ImplementationInfo
+	// ReplayedToolTraces records tool history replayed before this turn's
+	// prompt was sent. These traces are audit-only and excluded from turn
+	// activity, ledger derivation, repeat-read scoring, and char accounting.
+	ReplayedToolTraces []ToolCallTrace
+	AgentInfo          *ImplementationInfo
 	// ToolOutputChars approximates the size of tool outputs the agent
 	// consumed (content blocks and raw output on tool_call/tool_call_update
 	// events). Produced text alone understates context burden; this is the
@@ -103,17 +110,22 @@ func ToolOutputText(content []acp.ToolCallContent, rawOutput any) string {
 // Text deltas are streamed to stdout; tool call events are written to stderr.
 // Write-shaped operations are rejected so the sidecar cannot mutate state.
 type denyClient struct {
-	result *TurnResult
+	result     *TurnResult
+	promptSent bool
 }
 
-func (c *denyClient) upsertTrace(id string) *ToolCallTrace {
-	for i := range c.result.ToolTraces {
-		if c.result.ToolTraces[i].ID == id {
-			return &c.result.ToolTraces[i]
+func (c *denyClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
+	traces := &c.result.ToolTraces
+	if replayed {
+		traces = &c.result.ReplayedToolTraces
+	}
+	for i := range *traces {
+		if (*traces)[i].ID == id {
+			return &(*traces)[i]
 		}
 	}
-	c.result.ToolTraces = append(c.result.ToolTraces, ToolCallTrace{ID: id})
-	return &c.result.ToolTraces[len(c.result.ToolTraces)-1]
+	*traces = append(*traces, ToolCallTrace{ID: id})
+	return &(*traces)[len(*traces)-1]
 }
 
 func (c *denyClient) refreshToolSummaries() {
@@ -244,16 +256,21 @@ func (c *denyClient) RequestPermission(_ context.Context, params acp.RequestPerm
 // SessionUpdate streams text to stdout and records tool call observations.
 func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotification) error {
 	u := params.Update
+	replayed := !c.promptSent
 	switch {
 	case u.AgentMessageChunk != nil:
 		if u.AgentMessageChunk.Content.Text != nil {
 			text := u.AgentMessageChunk.Content.Text.Text
+			if replayed {
+				c.result.ReplayedText += text
+				return nil
+			}
 			os.Stdout.WriteString(text)
 			c.result.FullText += text
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
-		tr := c.upsertTrace(string(tc.ToolCallId))
+		tr := c.upsertTrace(string(tc.ToolCallId), replayed)
 		tr.Title = tc.Title
 		tr.Kind = string(tc.Kind)
 		if tc.RawInput != nil {
@@ -263,13 +280,15 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		size := ContentSize(tc.Content, tc.RawOutput)
 		tr.OutputSize += size
 		appendExcerpt(tr, ToolOutputText(tc.Content, tc.RawOutput))
-		c.result.ToolOutputChars += size
-		c.refreshToolSummaries()
-		entry := toolSummary(*tr)
-		fmt.Fprintf(os.Stderr, "  ▶ %s\n", entry)
+		if !replayed {
+			c.result.ToolOutputChars += size
+			c.refreshToolSummaries()
+			entry := toolSummary(*tr)
+			fmt.Fprintf(os.Stderr, "  ▶ %s\n", entry)
+		}
 	case u.ToolCallUpdate != nil:
 		tcu := u.ToolCallUpdate
-		tr := c.upsertTrace(string(tcu.ToolCallId))
+		tr := c.upsertTrace(string(tcu.ToolCallId), replayed)
 		if tcu.Title != nil {
 			tr.Title = *tcu.Title
 		}
@@ -285,8 +304,10 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		size := ContentSize(tcu.Content, tcu.RawOutput)
 		tr.OutputSize += size
 		appendExcerpt(tr, ToolOutputText(tcu.Content, tcu.RawOutput))
-		c.result.ToolOutputChars += size
-		c.refreshToolSummaries()
+		if !replayed {
+			c.result.ToolOutputChars += size
+			c.refreshToolSummaries()
+		}
 	}
 	return nil
 }
@@ -440,6 +461,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		sessionID = acp.SessionId(opts.ACPSessionID)
 	}
 
+	client.promptSent = true
 	if _, err := conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(opts.Prompt)},

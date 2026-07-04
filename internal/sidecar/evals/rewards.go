@@ -265,24 +265,11 @@ func memoryReward(ep *Episode) float64 {
 		return 0
 	}
 
-	firstTurn := map[string]bool{}
-	for _, tok := range pathTokens(strings.ToLower(strings.Join(ep.Turns[0].ToolCalls, "\n"))) {
-		firstTurn[tok] = true
-	}
-	var later []string
-	for _, t := range ep.Turns[1:] {
-		later = append(later, pathTokens(strings.ToLower(strings.Join(t.ToolCalls, "\n")))...)
-	}
-	if len(later) == 0 {
+	repeats, reads := repeatReadCounts(ep)
+	if reads == 0 {
 		return 1 // nothing re-read
 	}
-	repeats := 0
-	for _, tok := range later {
-		if firstTurn[tok] {
-			repeats++
-		}
-	}
-	return 1 - float64(repeats)/float64(len(later))
+	return 1 - float64(repeats)/float64(reads)
 }
 
 // safetyReward is binary: any recorded violation fails the episode.
@@ -320,6 +307,129 @@ func allToolCalls(ep *Episode) []string {
 		out = append(out, t.ToolCalls...)
 	}
 	return out
+}
+
+type readCommand struct {
+	normalized string
+	path       string
+	hasLines   bool
+	hasMap     bool
+	grep       string
+}
+
+type pathInspection struct {
+	commands map[string]bool
+	greps    map[string]bool
+	sawMap   bool
+}
+
+func repeatReadCounts(ep *Episode) (repeats, laterReads int) {
+	if len(ep.Turns) < 2 {
+		return 0, 0
+	}
+	seen := map[string]*pathInspection{}
+	for _, call := range ep.Turns[0].ToolCalls {
+		if rc, ok := parseReadCommand(call); ok {
+			recordInspection(seen, rc)
+		}
+	}
+	for _, turn := range ep.Turns[1:] {
+		for _, call := range turn.ToolCalls {
+			rc, ok := parseReadCommand(call)
+			if !ok {
+				continue
+			}
+			laterReads++
+			if isRepeatRead(seen, rc) {
+				repeats++
+			}
+			recordInspection(seen, rc)
+		}
+	}
+	return repeats, laterReads
+}
+
+func recordInspection(seen map[string]*pathInspection, rc readCommand) {
+	if rc.path == "" {
+		return
+	}
+	pi := seen[rc.path]
+	if pi == nil {
+		pi = &pathInspection{commands: map[string]bool{}, greps: map[string]bool{}}
+		seen[rc.path] = pi
+	}
+	pi.commands[rc.normalized] = true
+	if rc.grep != "" {
+		pi.greps[rc.grep] = true
+	}
+	if rc.hasMap {
+		pi.sawMap = true
+	}
+}
+
+func isRepeatRead(seen map[string]*pathInspection, rc readCommand) bool {
+	pi := seen[rc.path]
+	if pi == nil {
+		return false
+	}
+	if pi.commands[rc.normalized] {
+		return true
+	}
+	if rc.hasLines {
+		return false
+	}
+	if rc.grep != "" {
+		return pi.greps[rc.grep]
+	}
+	if rc.hasMap && !pi.sawMap {
+		return false
+	}
+	return true
+}
+
+func parseReadCommand(call string) (readCommand, bool) {
+	cmd := normalizeToolCommand(call)
+	fields := strings.Fields(cmd)
+	for i := 0; i+3 < len(fields); i++ {
+		if !rawTokenInvokesGhx(fields[i]) || fields[i+1] != "read" {
+			continue
+		}
+		rc := readCommand{normalized: strings.Join(fields[i:], " ")}
+		rc.path = strings.Trim(fields[i+3], `"'`)
+		for j := i + 4; j < len(fields); j++ {
+			switch fields[j] {
+			case "--lines":
+				rc.hasLines = true
+				j++
+			case "--grep":
+				if j+1 < len(fields) {
+					rc.grep = strings.Trim(fields[j+1], `"'`)
+					j++
+				}
+			case "--map":
+				rc.hasMap = true
+			}
+		}
+		if rc.path == "" {
+			return readCommand{}, false
+		}
+		return rc, true
+	}
+	return readCommand{}, false
+}
+
+func normalizeToolCommand(call string) string {
+	call = strings.TrimSpace(call)
+	if idx := strings.LastIndex(call, " ("); idx > 0 && strings.HasSuffix(call, ")") {
+		call = strings.TrimSpace(call[:idx])
+	}
+	if idx := strings.Index(call, ": "); idx >= 0 {
+		prefix := strings.ToLower(strings.TrimSpace(call[:idx]))
+		if !strings.Contains(prefix, "ghx") {
+			call = strings.TrimSpace(call[idx+2:])
+		}
+	}
+	return call
 }
 
 func hitFraction(items []string, hit func(string) bool) float64 {

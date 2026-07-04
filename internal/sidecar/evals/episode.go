@@ -90,6 +90,13 @@ type TurnRecord struct {
 	ToolCalls []string `json:"toolCalls"`
 	// ToolTraces carries full ACP tool-call audit data for this turn.
 	ToolTraces []ToolCallTrace `json:"toolTraces,omitempty"`
+	// ReplayedText is message text replayed before this turn's prompt was sent.
+	// It is audit-only and excluded from turn output/accounting.
+	ReplayedText string `json:"replayedText,omitempty"`
+	// ReplayedToolTraces carries ACP tool-call history replayed before this
+	// turn's prompt was sent. It is excluded from actions, observations,
+	// memory/repeat-read scoring, ledger derivation, and char accounting.
+	ReplayedToolTraces []ToolCallTrace `json:"replayedToolTraces,omitempty"`
 	// Report is the structured report extracted this turn (sidecar profile).
 	Report *sidecar.Report `json:"report,omitempty"`
 	// Resumed reports whether this turn continued prior agent context

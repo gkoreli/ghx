@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,90 @@ func TestRequestPermissionCancelsWithoutMatchingOption(t *testing.T) {
 	}
 	if resp.Outcome.Cancelled == nil {
 		t.Error("expected cancelled outcome when no allow option exists for an approvable kind")
+	}
+}
+
+func toolCallNotification(id, command string, status acp.ToolCallStatus) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: acp.ToolCallId(id),
+				Title:      "Terminal",
+				Kind:       acp.ToolKindExecute,
+				Status:     status,
+				RawInput:   map[string]any{"command": command},
+			},
+		},
+	}
+}
+
+func toolCallUpdateNotification(id, command, output string, status acp.ToolCallStatus) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			ToolCallUpdate: &acp.SessionToolCallUpdate{
+				ToolCallId: acp.ToolCallId(id),
+				Status:     &status,
+				RawInput:   map[string]any{"command": command},
+				Content:    []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(output))},
+			},
+		},
+	}
+}
+
+func messageNotification(text string) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock(text)},
+		},
+	}
+}
+
+func TestReplayBeforePromptIsAuditOnly(t *testing.T) {
+	result := TurnResult{}
+	c := &denyClient{result: &result}
+	completed := acp.ToolCallStatusCompleted
+
+	if err := c.SessionUpdate(context.Background(), toolCallNotification("replay-1", "ghx read o/r src/old.ts", acp.ToolCallStatusPending)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SessionUpdate(context.Background(), toolCallUpdateNotification("replay-1", "ghx read o/r src/old.ts", "replayed output", completed)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SessionUpdate(context.Background(), messageNotification("replayed answer")); err != nil {
+		t.Fatal(err)
+	}
+
+	c.promptSent = true
+	if err := c.SessionUpdate(context.Background(), toolCallNotification("live-1", "ghx read o/r src/new.ts", acp.ToolCallStatusPending)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SessionUpdate(context.Background(), toolCallUpdateNotification("live-1", "ghx read o/r src/new.ts", "live output", completed)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SessionUpdate(context.Background(), messageNotification("live answer")); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.ToolTraces) != 1 || result.ToolTraces[0].ID != "live-1" {
+		t.Fatalf("live traces = %+v, want only live-1", result.ToolTraces)
+	}
+	if len(result.ReplayedToolTraces) != 1 || result.ReplayedToolTraces[0].ID != "replay-1" {
+		t.Fatalf("replayed traces = %+v, want only replay-1", result.ReplayedToolTraces)
+	}
+	if strings.Contains(result.FullText, "replayed") || result.FullText != "live answer" {
+		t.Fatalf("FullText = %q, want only live answer", result.FullText)
+	}
+	if result.ReplayedText != "replayed answer" {
+		t.Fatalf("ReplayedText = %q, want replayed answer", result.ReplayedText)
+	}
+	if result.ToolOutputChars != len("live output") {
+		t.Fatalf("ToolOutputChars = %d, want %d", result.ToolOutputChars, len("live output"))
+	}
+	if len(result.ToolCalls) != 1 || !strings.Contains(result.ToolCalls[0], "src/new.ts") || strings.Contains(result.ToolCalls[0], "src/old.ts") {
+		t.Fatalf("ToolCalls = %v, want only live command", result.ToolCalls)
 	}
 }
 

@@ -155,24 +155,11 @@ func repeatReadRatio(ep *Episode) float64 {
 	if len(ep.Turns) < 2 {
 		return 0
 	}
-	firstTurn := map[string]bool{}
-	for _, tok := range pathTokens(strings.ToLower(strings.Join(ep.Turns[0].ToolCalls, "\n"))) {
-		firstTurn[tok] = true
-	}
-	var later []string
-	for _, t := range ep.Turns[1:] {
-		later = append(later, pathTokens(strings.ToLower(strings.Join(t.ToolCalls, "\n")))...)
-	}
-	if len(later) == 0 {
+	repeats, reads := repeatReadCounts(ep)
+	if reads == 0 {
 		return 0
 	}
-	repeats := 0
-	for _, tok := range later {
-		if firstTurn[tok] {
-			repeats++
-		}
-	}
-	return float64(repeats) / float64(len(later))
+	return float64(repeats) / float64(reads)
 }
 
 // EvaluateGates applies the pre-registered ADR-0016.1 gates to a set of
