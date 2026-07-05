@@ -60,6 +60,39 @@ Each phase is valuable standalone and feeds the next:
 | P3 | **Swallow the tools**: the ghx CLI itself, codemap, local clone + codemapping for deeper understanding — all become internal tools of the sidecar brain. Codemap is popular today; in this future it is just one tool under ghx. The outside world talks only to the sidecar | Future |
 | P4 | **Below ACP**: a custom-trained reconnaissance model inside a lower-level agent runtime (agent SDK) that fully owns the sidecar's context, tools, knowledge, and model weights | Future; ADR-0016's training-data gold mine exists to enable this |
 
+## The Moat
+
+**The moat is the agentic brain, not the tools.** CLI tools, frameworks, and
+ergonomics are reusable, replaceable building blocks that anyone can
+replicate. Designing the code-reconnaissance brain — the mental models, the
+exploration doctrine, what enters the context window, which tool to reach
+for and when to stop — is the hard, defensible work. Tools like
+[codemap](https://github.com/JordanCoin/codemap) looked like competition at
+first; on this path they become tiny building blocks the sidecar swallows —
+they may be more popular than us today, but they are tools, and we are
+building a product with much higher-level thinking. There may be no real
+competition in code reconnaissance at all: others design CLIs; designing
+agent brains where the tools disappear into thin air is a different class of
+problem.
+
+**The optimization target is signals per token.** Every unit of context the
+sidecar's brain consumes should carry maximum reconnaissance signal. That is
+why the path bends below ACP eventually (P4): an owned harness (agent SDK)
+with fine-grained control over the model's context, tools, and knowledge —
+and ultimately a trained model where today's ~400 lines of quirky
+instructions are baked into the weights. Deleting that preamble alone raises
+signal per token, makes inference cheaper and faster, and improves
+exploration quality. Getting rid of waste *is* getting better.
+
+**The framework will outgrow ghx — later.** The same sidecar pattern applies
+to web-browser exploration and many other domains; many brains, many
+products; eventually many people will think this way. For now, everything
+funnels into proving ghx and the framework: evals are the baseline answer to
+"why does ghx deserve to exist," the confidence to make aggressive
+engineering moves (like model training), the public marketing proof, and
+eventually a published benchmark others can run their own agents against —
+and see for themselves that they don't compare.
+
 ## Sidecar Product Capabilities (the P2→P3 feature arc)
 
 The names: the **Sidecar Agent Framework (SAF)** is the runtime product; the
@@ -140,6 +173,10 @@ never worth steering by:
 - **An eval framework for agent sidecar frameworks** — the local-first
   episode/reward/gate machinery built for ghx could generalize to evaluating
   any sidecar-shaped agent.
+- **A public code-reconnaissance benchmark** — the SAFE task/gate corpus,
+  published so others can run their agents against it and compare to ghx.
+- **Sidecar brains for other domains** — the same framework applied to
+  web-browser exploration and beyond, once ghx is proven.
 
 These are consequences. The main goal is the ghx north star; a consequence
 product only gets investment when the north-star filter passes and the ghx
