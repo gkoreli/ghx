@@ -46,3 +46,10 @@ deliberately skipped — neither fix affects it and it does not enter G3.
 
 Files: two episode artifacts plus `verdict.json` / `verdict.md` generated
 by `evals.EvaluateGates`.
+
+## Known capture gap in these artifacts (fixed before the gate run)
+
+Same title-only `toolCalls` limitation as `2026-07-03-smoke` (see that
+README): literal commands were not yet captured from ACP
+`rawInput`/`tool_call_update`. Fixed via `ToolCallTrace` before the gate
+run; kept verbatim as honest history.
