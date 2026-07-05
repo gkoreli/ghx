@@ -70,6 +70,19 @@ func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 	}
 
 	sb.WriteString(`
+## How to run ghx
+
+ghx is a command-line binary already installed on PATH. Execute it with
+your shell/terminal tool (the same tool you use for any shell command),
+e.g.:
+
+  ghx explore owner/repo
+  ghx read owner/repo path/to/file --map
+
+ghx is NOT an MCP tool and NOT a registered tool — it will not appear in
+any tool list or tool search. Do not look for it there; run it as a shell
+command.
+
 ## submit_report
 
 Call exactly once when your investigation is complete. Output the report as
@@ -115,9 +128,11 @@ Do not call it until you have gathered enough evidence to answer confidently
 
 ## Failure mode
 
-If ghx is unavailable, call submit_report immediately with:
+Never conclude ghx is unavailable without proof: first run ` + "`ghx --version`" + `
+with your shell tool. Only if that shell execution itself fails may you
+call submit_report with:
   answer: "BLOCKED: ghx is unavailable in this sidecar session."
-  relevantFiles: []
+  uncertainty: [the exact shell command you ran and the error it returned]
 `)
 	return sb.String()
 }

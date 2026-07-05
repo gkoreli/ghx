@@ -76,3 +76,55 @@ func TestExtractReportMultilineContent(t *testing.T) {
 		t.Fatalf("got %+v", r)
 	}
 }
+
+// TestExtractReportCoercesNearConformantShapes is the ADR-0016.7 RC2
+// regression: the exact shape drift observed in gate-run episode
+// hono-middleware_ghx-sidecar_1783285987325 turn 1 — bare strings where
+// the schema wants arrays ([]Claim, []string) and single objects where it
+// wants object arrays. Strict parsing discarded that entire report and
+// scored completed work as zero evidence.
+func TestExtractReportCoercesNearConformantShapes(t *testing.T) {
+	text := `<ghx-report>
+{
+  "answer": "Errors propagate on two layers: compose.ts dispatch and hono-base onError.",
+  "verified": {"summary": "compose() dispatch try/catches handler calls", "evidence": "src/compose.ts"},
+  "inferred": [],
+  "unverified": "Whether HTTPException is the sole implementer of getResponse()",
+  "relevantFiles": {"path": "src/compose.ts", "reason": "inner try/catch"},
+  "evidence": {"source": "ghx read honojs/hono src/hono-base.ts --grep onError", "summary": "error handler wiring"},
+  "backendsUsed": "remote",
+  "commandsRun": "ghx read honojs/hono src/hono-base.ts --grep onError",
+  "uncertainty": "Did not re-confirm HTTPException.getResponse() this turn",
+  "nextReads": "src/http-exception.ts"
+}
+</ghx-report>`
+
+	r := ExtractReport(text)
+	if r == nil {
+		t.Fatal("near-conformant report was rejected, want coerced parse")
+	}
+	if len(r.Verified) != 1 || r.Verified[0].Evidence != "src/compose.ts" {
+		t.Errorf("verified = %+v, want single-object coerced to 1 claim", r.Verified)
+	}
+	if len(r.Unverified) != 1 || !strings.Contains(r.Unverified[0].Summary, "HTTPException") {
+		t.Errorf("unverified = %+v, want bare string lifted to claim", r.Unverified)
+	}
+	if len(r.RelevantFiles) != 1 || r.RelevantFiles[0].Path != "src/compose.ts" {
+		t.Errorf("relevantFiles = %+v, want single object wrapped", r.RelevantFiles)
+	}
+	if len(r.Evidence) != 1 || r.Evidence[0].Source == "" {
+		t.Errorf("evidence = %+v, want single object wrapped", r.Evidence)
+	}
+	if len(r.CommandsRun) != 1 || len(r.BackendsUsed) != 1 || len(r.Uncertainty) != 1 || len(r.NextReads) != 1 {
+		t.Errorf("string lists not wrapped: commands=%v backends=%v uncertainty=%v nextReads=%v",
+			r.CommandsRun, r.BackendsUsed, r.Uncertainty, r.NextReads)
+	}
+}
+
+// TestExtractReportCoercionRejectsGarbage: coercion must not resurrect
+// reports that are wrong beyond shape drift.
+func TestExtractReportCoercionRejectsGarbage(t *testing.T) {
+	if r := ExtractReport(`<ghx-report>{"answer": "x", "verified": 42}</ghx-report>`); r != nil {
+		t.Errorf("numeric claim list should stay rejected, got %+v", r)
+	}
+}

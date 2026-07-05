@@ -22,10 +22,19 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"under\n  2000 characters", // report compactness bound (ADR-0016.1)
 		"normal",                   // default depth
 		"- remote",                 // default backend
+		// CLI-invocation contract (ADR-0016.7): the agent must know ghx is
+		// a shell command, not a registered tool, and must verify before
+		// ever reporting BLOCKED.
+		"command-line binary already installed on PATH",
+		"NOT an MCP tool",
+		"ghx --version",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("first-turn prompt missing %q", want)
 		}
+	}
+	if strings.Contains(p, "If ghx is unavailable, call submit_report immediately") {
+		t.Error("blind BLOCKED escape hatch must be gone (ADR-0016.7 RC1)")
 	}
 	if strings.Contains(p, "Prior session context") {
 		t.Error("first-turn prompt must not contain prior session context")
@@ -107,11 +116,12 @@ func TestBuildPromptEvidenceLedgerBoundedAndNewestFirst(t *testing.T) {
 	if start == -1 {
 		t.Fatal("missing evidence ledger")
 	}
-	end := strings.Index(p[start:], "## submit_report")
+	rest := p[start+len("## Evidence ledger"):]
+	end := strings.Index(rest, "\n## ")
 	if end == -1 {
-		t.Fatal("missing submit_report after ledger")
+		t.Fatal("missing next section after ledger")
 	}
-	block := p[start : start+end]
+	block := p[start : start+len("## Evidence ledger")+end]
 	if len(block) > 1500 {
 		t.Fatalf("ledger block length = %d, want <= 1500\n%s", len(block), block)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -237,4 +238,34 @@ func finalizeContext(ep *Episode) {
 		SidecarInternalChars: internal,
 		TotalWorkflowChars:   total,
 	}
+}
+
+// EpisodeAnomalies flags sidecar episodes whose reports contradict a
+// verified precondition (ADR-0016.7): preflight guarantees ghx is
+// installed, so a BLOCKED report means the downstream agent never ran
+// ghx via the shell, and a WARN placeholder means a completed turn's
+// report was lost. Both are loud harness alarms — smoke runs fail on
+// them; gate runs score them honestly but the operator must investigate
+// before spending further rounds.
+func EpisodeAnomalies(ep *Episode) []string {
+	if ep == nil || ep.Profile != ProfileSidecar {
+		return nil
+	}
+	var anomalies []string
+	for _, turn := range ep.Turns {
+		if turn.Report == nil {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(turn.Report.Answer, "BLOCKED:"):
+			anomalies = append(anomalies, fmt.Sprintf(
+				"turn %d report is BLOCKED (%q) despite preflight-verified ghx — agent never ran ghx via shell",
+				turn.Turn, turn.Report.Answer))
+		case strings.HasPrefix(turn.Report.Answer, "WARN: sidecar did not emit"):
+			anomalies = append(anomalies, fmt.Sprintf(
+				"turn %d produced no extractable <ghx-report> even after the one-shot retry",
+				turn.Turn))
+		}
+	}
+	return anomalies
 }

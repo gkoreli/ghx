@@ -34,6 +34,10 @@ type TurnResult struct {
 	// events). Produced text alone understates context burden; this is the
 	// other half.
 	ToolOutputChars int
+	// ReportRetried is true when the turn needed the one-shot corrective
+	// follow-up (ADR-0016.7) to obtain a <ghx-report> block. Recorded so
+	// evals can count retries honestly instead of hiding them.
+	ReportRetried bool
 }
 
 // ImplementationInfo records the ACP adapter identity returned by initialize.

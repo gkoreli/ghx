@@ -8,6 +8,14 @@ import (
 
 var runTurnWithOptions = RunTurnWithOptions
 
+// reportRetryPrompt is the one-shot corrective follow-up sent when a turn
+// produced no extractable <ghx-report> block (ADR-0016.7 RC3).
+const reportRetryPrompt = `Your previous reply did not include a valid <ghx-report> block.
+Emit it now based on the work you already did: output ONLY the report JSON
+inside <ghx-report></ghx-report> tags, following the schema from your
+instructions exactly (all list fields must be JSON arrays). Do not run any
+more commands. No text before or after the tags.`
+
 // AskRequest is the input for a single sidecar investigation.
 type AskRequest struct {
 	// Session is the named session to use (created if it does not exist).
@@ -90,7 +98,46 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		return nil, nil, fmt.Errorf("run turn: %w", err)
 	}
 
-	// Persist the ACP session ID so the next turn can resume.
+	report := ExtractReport(turnResult.FullText)
+	if report == nil {
+		// One-shot corrective follow-up in the same ACP session before
+		// giving up (ADR-0016.7 RC3): the exploration is done and paid
+		// for; a missing report block should cost one nudge, not the
+		// whole turn's evidence. The retry is recorded on the result so
+		// eval accounting stays honest.
+		retrySessionID := newSessionID
+		if retrySessionID == "" {
+			retrySessionID = acpSessionID
+		}
+		if retrySessionID != "" {
+			retryResult, retryNewID, retryErr := runTurnWithOptions(ctx, RunTurnOptions{
+				AgentCmd:     cfg.AgentCmd,
+				ACPSessionID: retrySessionID,
+				Prompt:       reportRetryPrompt,
+				Cwd:          cfg.Cwd,
+				Env:          cfg.Env,
+			})
+			if retryErr == nil {
+				report = ExtractReport(retryResult.FullText)
+				turnResult.ReportRetried = true
+				turnResult.FullText += retryResult.FullText
+				turnResult.ToolCalls = append(turnResult.ToolCalls, retryResult.ToolCalls...)
+				turnResult.ToolTraces = append(turnResult.ToolTraces, retryResult.ToolTraces...)
+				turnResult.ToolOutputChars += retryResult.ToolOutputChars
+				if retryNewID != "" {
+					newSessionID = retryNewID
+				}
+			}
+		}
+	}
+	if report == nil {
+		report = &Report{
+			Answer: "WARN: sidecar did not emit a <ghx-report> block — raw output was produced but no structured report was found.",
+		}
+	}
+
+	// Persist the ACP session ID so the next turn can resume. Runs after
+	// the retry block, which may advance the session ID.
 	if meta != nil && newSessionID != "" && meta.ACPSessionID != newSessionID {
 		meta.ACPSessionID = newSessionID
 		if saveErr := SaveMeta(sessionsDir, *meta); saveErr != nil {
@@ -99,12 +146,6 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		}
 	}
 
-	report := ExtractReport(turnResult.FullText)
-	if report == nil {
-		report = &Report{
-			Answer: "WARN: sidecar did not emit a <ghx-report> block — raw output was produced but no structured report was found.",
-		}
-	}
 	turn := 1
 	if meta != nil {
 		turn = meta.TurnCount + 1
