@@ -267,14 +267,38 @@ func TestPlainGhxInvocationInvalidAndExcluded(t *testing.T) {
 
 func TestPlainGhxInvocationDetectsNpxAndScopedPackage(t *testing.T) {
 	for _, input := range []string{
+		"ghx read o/r f",
+		"foo | ghx read",
+		"x; ghx tree o/r",
 		"npx ghx read owner/repo src/a.ts",
-		"npx -y @gkoreli/ghx read owner/repo src/a.ts",
+		"npx -y @gkoreli/ghx explore o/r",
+		"$(ghx search q)",
 	} {
 		t.Run(input, func(t *testing.T) {
 			plain := mkEpisode(ProfilePlain, 1.0, 1.0, 1.0, 100, 100, false, false)
 			plain.Actions = []Action{{Input: input}}
 			if !invokesGhx(plain) {
 				t.Fatalf("invokesGhx(%q) = false, want true", input)
+			}
+		})
+	}
+}
+
+func TestPlainGhxInvocationIgnoresRepoPathArguments(t *testing.T) {
+	for _, input := range []string{
+		"gh api repos/gkoreli/ghx/git/trees/HEAD",
+		"gh repo view gkoreli/ghx --json x",
+		"echo ghx",
+		"grep ghx file",
+		`for path in internal/mapengine/parser.go internal/mapengine/parser_test.go; do
+  gh api repos/gkoreli/ghx/contents/$path --jq '.content' | base64 -d
+done`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			plain := mkEpisode(ProfilePlain, 1.0, 1.0, 1.0, 100, 100, false, false)
+			plain.Actions = []Action{{Input: input}}
+			if invokesGhx(plain) {
+				t.Fatalf("invokesGhx(%q) = true, want false", input)
 			}
 		})
 	}

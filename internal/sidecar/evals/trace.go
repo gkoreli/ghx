@@ -86,14 +86,20 @@ func rawTokenInvokesGhx(token string) bool {
 	if token == "" {
 		return false
 	}
-	base := token
-	if i := strings.LastIndex(base, "/"); i >= 0 {
-		base = base[i+1:]
-	}
-	if base == "ghx" || base == "ghx.exe" {
+	if token == "ghx" || token == "ghx.exe" {
 		return true
 	}
-	return token == "@gkoreli/ghx" || strings.HasSuffix(token, "/@gkoreli/ghx")
+	return false
+}
+
+func rawNpxPackageInvokesGhx(token string) bool {
+	token = strings.Trim(strings.ToLower(token), `"'()[],:;`)
+	token = strings.TrimSuffix(token, ".cmd")
+	return token == "ghx" ||
+		token == "ghx.exe" ||
+		token == "@gkoreli/ghx" ||
+		strings.HasSuffix(token, "/ghx") ||
+		strings.HasSuffix(token, "/@gkoreli/ghx")
 }
 
 func commandWithArgs(command string, rawArgs any) string {
@@ -173,12 +179,99 @@ func commandsFromEpisode(ep *Episode) []string {
 
 func invokesGhx(ep *Episode) bool {
 	for _, cmd := range commandsFromEpisode(ep) {
-		fields := strings.Fields(strings.ToLower(cmd))
-		for _, f := range fields {
-			if rawTokenInvokesGhx(f) {
-				return true
+		if commandInvokesGhx(cmd) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandInvokesGhx(cmd string) bool {
+	for _, start := range commandStartIndexes(cmd) {
+		if commandHeadInvokesGhx(cmd[start:]) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandStartIndexes(cmd string) []int {
+	starts := []int{0}
+	var quote byte
+	escaped := false
+	for i := 0; i < len(cmd); i++ {
+		ch := cmd[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if quote == '"' {
+				if ch == '$' && i+1 < len(cmd) && cmd[i+1] == '(' {
+					starts = append(starts, i+2)
+					i++
+					continue
+				}
+				if ch == '`' {
+					starts = append(starts, i+1)
+					continue
+				}
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		switch ch {
+		case '$':
+			if i+1 < len(cmd) && cmd[i+1] == '(' {
+				starts = append(starts, i+2)
+				i++
+			}
+		case '`':
+			starts = append(starts, i+1)
+		case '\n', ';', '|':
+			if ch == '|' && i+1 < len(cmd) && cmd[i+1] == '|' {
+				starts = append(starts, i+2)
+				i++
+				continue
+			}
+			starts = append(starts, i+1)
+		case '&':
+			if i+1 < len(cmd) && cmd[i+1] == '&' {
+				starts = append(starts, i+2)
+				i++
 			}
 		}
+	}
+	return starts
+}
+
+func commandHeadInvokesGhx(segment string) bool {
+	fields := strings.Fields(segment)
+	if len(fields) == 0 {
+		return false
+	}
+	if rawTokenInvokesGhx(fields[0]) {
+		return true
+	}
+	if strings.Trim(strings.ToLower(fields[0]), `"'()[],:;`) != "npx" {
+		return false
+	}
+	for _, field := range fields[1:] {
+		token := strings.Trim(strings.ToLower(field), `"'()[],:;`)
+		if token == "" || strings.HasPrefix(token, "-") {
+			continue
+		}
+		return rawNpxPackageInvokesGhx(token)
 	}
 	return false
 }
