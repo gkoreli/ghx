@@ -43,6 +43,19 @@ count, and most of it is hard to quantify:
   tree/map/grep loops are pure waste when a specialized cheap agent can do
   the same reconnaissance better.
 
+**The rebuttal to "my main agent is already good at code exploration":**
+that misses where the cost lands. By deferring exploration to ghx — removing
+the exploration skills, instructions, and step-by-step tool output from the
+main agent's context — the main agent gets measurably better at *its own
+objective* (engineering, or whatever it is good at) **and** receives better
+exploration answers than it would have produced itself. Both, not one. The
+dead weight of exploration steps is what fills context windows and forces
+session restarts; without it, coding sessions live longer, coherence holds,
+and cost drops drastically. The claim to measure is combined: engineering
+SPT and exploration SPT both rise, just by using ghx (ADR-0016.6 defines
+exploration SPT today; combined-objective measurement is the host-task eval
+class noted there).
+
 ghx is genuinely needed as a tool — so the resolution is not "less ghx," it
 is moving ghx entirely behind a sidecar boundary. Eventually, with a
 custom-trained model, the sidecar will be so cheap, fast, and proficient at
