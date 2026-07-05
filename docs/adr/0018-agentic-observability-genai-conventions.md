@@ -76,22 +76,51 @@ sessions, and (later) judge scorers:
    level inspection; otel-desktop-viewer stays documented for quick span
    timing. No custom viewer unless both fail a concrete need (tenet).
 
-## Research phase (before any implementation)
+## Research findings (delegated worker memo, 2026-07-05; re-verify against the live spec at implementation time)
 
-The GenAI conventions are young and move quickly; implementation must be
-against the current published spec, not memory. Research tasks:
+A web-research pass against current official documentation (OTel semconv
+GenAI docs, file-exporter spec, Phoenix docs, ACP schema) returned these
+load-bearing facts, each changing part of the original proposal:
 
-- Read the current OTel GenAI semantic conventions (semconv registry):
-  agent-span shape, content-capture events vs attributes status, the
-  standard env var for content capture, metrics instrument names/units.
-- Verify Phoenix's OTLP ingestion and its convention dialect
-  (OpenInference vs GenAI semconv) — confirm which renders our content.
-- Confirm what `@agentclientprotocol/claude-agent-acp` actually emits for
-  thought chunks at our pinned version (0.55.0) and whether thinking is
-  complete or summarized.
-- Check the OTel Go SDK's metrics file-export options so metrics.jsonl
-  follows an official encoding exactly (the traces.jsonl base64-ID lesson,
-  commit 02c663c, must not repeat on the metrics side).
+1. **Content capture is Log events now, not span events.** Since semconv
+   ~v1.37 the per-role span events (`gen_ai.system.message` etc.) are
+   superseded: content is emitted via the **Logs API** as a
+   `gen_ai.client.inference.operation.details` event on the active span,
+   carrying `gen_ai.input.messages`/`gen_ai.output.messages` as
+   `{role, parts}` JSON. Consequence: we need the Logs signal (emission +
+   a `logs.jsonl` file exporter) in addition to traces and metrics.
+2. **Scores have an official home**: the `gen_ai.evaluation.result` event
+   (`gen_ai.evaluation.name`, `gen_ai.evaluation.score.value`). Our reward
+   components and per-check explanations map onto it — no homegrown score
+   event needed. The future judge scorer emits the same event.
+3. **Reasoning**: no dedicated reasoning event exists; thinking is a
+   `{"type": "reasoning"}` part inside output messages, plus
+   `gen_ai.usage.reasoning.output_tokens` on the span. ACP's
+   `agent_thought_chunk` streams full raw reasoning — but emission is
+   adapter-dependent (Gemini's adapter famously never emits it), so
+   whether `claude-agent-acp@0.55.0` emits thought chunks must be verified
+   empirically on one live turn before the capture work is scoped.
+4. **Content is off by default**:
+   `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` gates it.
+   Eval runs set it (our artifacts already store full text; traces should
+   match); production sidecar sessions leave it off unless the user opts
+   in.
+5. **Metrics**: instruments `gen_ai.client.operation.duration` (s) and
+   `gen_ai.client.token.usage` ({token}, split by `gen_ai.token.type`),
+   plus our ghx-native reward/anomaly metrics. There is **no official Go
+   OTLP file exporter**; the OTel file-exporter spec defines the exact
+   JSONL encoding (protobuf JSON mapping, **hex IDs** — confirming our
+   02c663c fix was spec-correct). A custom exporter must follow that spec
+   exactly, mirroring the traces one.
+6. **Viewer reality check**: otel-desktop-viewer v0.3.2 ingests traces,
+   metrics, and logs (metrics/logs rendering maturity unverified — test
+   early). Phoenix ingests OTLP at `:6006` but natively renders
+   OpenInference conventions; GenAI-semconv spans from Go get a degraded
+   (though queryable) UI, and no Go GenAI→OpenInference translator
+   exists. Consequence: desktop viewer stays the primary local surface;
+   Phoenix is secondary until its GenAI rendering matures or a thin
+   mapping layer proves worth it (open-source-leverage tenet: prefer
+   waiting on upstream over building a dialect converter).
 
 ## Sequencing and constraints
 
