@@ -82,7 +82,9 @@ with fine-grained control over the model's context, tools, and knowledge —
 and ultimately a trained model where today's ~400 lines of quirky
 instructions are baked into the weights. Deleting that preamble alone raises
 signal per token, makes inference cheaper and faster, and improves
-exploration quality. Getting rid of waste *is* getting better.
+exploration quality. Getting rid of waste *is* getting better. Measured,
+not aspirational: ADR-0016.6 defines SPT at three levels (main-agent,
+sidecar-internal, whole-workflow) and every run reports it.
 
 **The framework will outgrow ghx — later.** The same sidecar pattern applies
 to web-browser exploration and many other domains; many brains, many
