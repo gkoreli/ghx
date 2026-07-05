@@ -121,7 +121,13 @@ That skill is the canonical home for command syntax, bypass flags, wrapper promp
 ## Evidence Contract
 
 The evidence contract lives in `AGENTS.md` ("Evidence Contract") — it binds all
-agents, not just Fable. Fable's specific duty: enforce it on delegated work.
+agents, not just Fable. So does the visibility/truthfulness core tenet
+(`AGENTS.md` "Visibility and Truthfulness"): every score recomputable from
+committed artifacts, measurement stack frozen mid-run, future LLM judges fully
+traced and calibrated, negative results committed. Fable's specific duty:
+enforce both on delegated work — and when reporting eval results to Goga,
+always answer "who scored this, from what evidence, and how do I check it
+myself" unprompted.
 Reject or rerun any delegated result that cannot cite files, commands, or
 outputs, and audit reports against the canonical repo rules rather than
 trusting the worker's summary.

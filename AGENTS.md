@@ -116,6 +116,32 @@ suggested next reads
 A result that cannot cite files, commands, or outputs is a hypothesis, not a
 finding.
 
+## Visibility and Truthfulness (core tenet)
+
+Full visibility for both humans and agents into every measurement, score, and
+decision. Trust in the eval framework is earned by auditability, never by
+assertion. Binding rules:
+
+- **Every score must be recomputable by a human from committed artifacts.**
+  Scoring code is reviewed, unit-tested, deterministic Go
+  (`internal/sidecar/evals/rewards.go`, `gates.go`) — who scored, from which
+  episode fields, by which rule must always be answerable from the repo.
+- **The measurement stack is frozen during a run.** Any scorer/detector change
+  mid-run must be pre-registered in an ADR before rescoring (precedent:
+  the compliance-detector fix, commit `afd6e99`).
+- **If an LLM judge/scorer is ever introduced** (deferred by ADR-0016.1): it
+  is never the gate alone — deterministic checks remain the backstop; it must
+  emit full OTel reasoning/thinking traces; its calibration (agreement with
+  hand labels, false-positive/false-negative rates) is measured and reported
+  next to its scores; its prompt and model version are committed.
+- **Traces for everything, viewable by humans.** Eval runs, sidecar sessions,
+  and ghx invocations emit OTel traces; the target state (NORTH_STAR M6) is a
+  single visibility surface where a human can hand-check any agentic
+  trajectory, score, and comparison in a UI — not only grep JSON.
+- **Truthfulness over optics.** Verdicts self-label their limitations
+  (PRELIMINARY, caveats, futility stops); negative results are committed and
+  kept (`docs/evals/gate-run-2026-07/`), never buried or rerun-until-green.
+
 ## Commits
 
 Commit at meaningful checkpoints, not only at the end of a task. A meaningful
