@@ -63,6 +63,20 @@ func main() {
 	}
 	fmt.Println()
 
+	fmt.Println("Signal per token (informational, not a gate):")
+	fmt.Println("profile n meanSignal mainAgentSPT sidecarInternalSPT workflowSPT")
+	spt := evals.AggregateSignalPerToken(episodes)
+	for _, p := range evals.AllProfiles() {
+		row := spt[p]
+		fmt.Printf("%s %d %.3f %s %s %s\n",
+			p, row.Episodes, row.MeanSignal,
+			formatSPT(row.MainAgentSPT),
+			formatSPT(row.SidecarInternalSPT),
+			formatSPT(row.WorkflowSPT),
+		)
+	}
+	fmt.Println()
+
 	fmt.Println("Task x profile matrix:")
 	printMatrix(episodes)
 	fmt.Println()
@@ -99,6 +113,13 @@ func printIdentity(id evals.AgentIdentity) {
 	if id.WrapperSHA256 != "" {
 		fmt.Printf("wrapperSha256: %s\n", id.WrapperSHA256)
 	}
+}
+
+func formatSPT(v evals.SPTValue) string {
+	if !v.Defined {
+		return "undefined"
+	}
+	return fmt.Sprintf("%.3f", v.Value)
 }
 
 func printMatrix(episodes []*evals.Episode) {
