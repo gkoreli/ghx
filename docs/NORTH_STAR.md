@@ -214,7 +214,7 @@ frontier milestone is not starved by it.
 | M3 | Eval kernel + validity hardening + observability (ADR-0016.1–.5, 0015.1) | P2 | Done; all five gates pass on live spot checks |
 | M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **Measured 2026-07-05** (futility stop at 68/90): thesis NOT SUPPORTED on current build — G1/G2 fail on reliability defects (36% BLOCKED, 18% report-extraction loss), G3/G4/G5 pass; healthy episodes pass everything. Evidence: `docs/evals/gate-run-2026-07/`. **← fix per ADR-0016.7, then confirmatory rerun** |
 | M5 | Concise "reconnaissance service" skill + integration ergonomics: main agent needs zero ghx CLI knowledge; founder dogfoods the sidecar daily | P2 | Next after M4 rerun; ADR-0016.7's persona contract is the first slice |
-| M6 | Shared SAF/SAFE trace infrastructure: runtime sessions emit the same OTel traces/reports as evals; `~/.ghx` root storage; full visibility surface | P2 | Next after M4 verdict |
+| M6 | Shared SAF/SAFE trace infrastructure: runtime sessions emit the same OTel traces/reports as evals; `~/.ghx` root storage; full visibility surface | P2 | Next after M4 rerun; governed by the ADR-0018 agentic-observability thread (official OTel GenAI conventions: reasoning capture, content events, metrics, score explanations, LLM-native viewer) |
 | M7 | Escalation tiers: codemap CLI + local clone as internal sidecar tools, sidecar-decided, fully visible | P3 | Future (ADR before build) |
 | M8 | Eager anticipation with configurable styles; sub-second answers to anticipated questions | P3 | Future (ADR before build) |
 | M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Blocked on M4 verdict |
