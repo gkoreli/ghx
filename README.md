@@ -163,6 +163,25 @@ skills/             — CLI and MCP agent skills, embedded into binary via go:em
 
 See [docs/adr/](docs/adr/) for architectural decisions.
 
+## Built on Open Source, Openly
+
+ghx exists because exploring open source for ideas is where good products
+come from — "good artists copy, great artists steal," and we steal in the
+Picasso sense: openly, with attribution, and with stewardship for future
+generations. The rule we build by: **use official standards and existing
+open-source tools, libraries, and ideas first; hand-roll a framework or
+format only when nothing existing serves the need or the vision.** Agent
+traces are official OTel (OTLP/JSON) so any industry tool — Jaeger,
+[otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer),
+the collector — consumes them in seconds; parsing rides on
+[gotreesitter](https://github.com/odvcencio/gotreesitter) and `go/ast`;
+globbing on [doublestar](https://github.com/bmatcuk/doublestar); codemode on
+[goja](https://github.com/nicholasgasior/goja). Where we do build new —
+ghx itself, the Agent Sidecar Framework — it is because the thing did not
+exist, and it is inspired loudly by what does (tools like
+[codemap](https://github.com/JordanCoin/codemap) shape where the sidecar's
+internal toolbox goes next). MIT in, MIT out.
+
 ## License
 
 MIT

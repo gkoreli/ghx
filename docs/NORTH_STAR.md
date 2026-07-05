@@ -244,6 +244,18 @@ evidence more auditable, or produce better training trajectories?** If none
 of the four, reject or defer it — ADR-0016.2's "Considered and rejected"
 section shows the filter in action.
 
+A second filter governs *how* we build (Goga, 2026-07-05; canonical rules in
+AGENTS.md "Open Source Leverage"): explore open source for ideas, libraries,
+and established patterns first — steal greatly in the Picasso sense, openly
+and with attribution — and hand-roll frameworks, formats, or tools only when
+nothing existing serves the need or the vision. That test is where ghx and
+the Agent Sidecar Framework themselves come from: both are novel, both are
+loudly inspired by what exists (codemap-style local mapping is slated to be
+just another internal sidecar tool in M7). Concretely: agent traces are
+official OTel exactly per spec so open-source tooling works within seconds;
+our own metrics ride alongside in attributes or sibling artifacts, never as
+a fork of the standard.
+
 ## Working the Loop
 
 Iterations toward the north star follow ADR-driven engineering (AGENTS.md):

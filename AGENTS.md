@@ -156,6 +156,27 @@ assertion. Binding rules:
   (PRELIMINARY, caveats, futility stops); negative results are committed and
   kept (`docs/evals/gate-run-2026-07/`), never buried or rerun-until-green.
 
+## Open Source Leverage (core tenet)
+
+Do not hand-roll OTel variants, eval formats, or frameworks when official
+standards and open-source tools exist. We build with velocity by exploring
+open source for ideas, libraries, and established patterns — "good artists
+copy, great artists steal" in the Picasso sense: openly, vocally, with
+attribution and stewardship (MIT in, MIT out). Binding rules:
+
+- **Official formats exactly, not approximately.** Agent traces are OTLP
+  per the actual spec (including its deviations, e.g. hex span IDs — the
+  2026-07-05 protojson lesson), so industry tooling works within seconds.
+  Custom data (our metrics, rewards, reports) may ride alongside in
+  attributes or sibling files, never as a mutation of the standard format.
+- **Engineer new things only when nothing existing serves the need or the
+  vision.** ghx and the Agent Sidecar Framework pass that test; a trace
+  format or a viewer does not. When something almost serves, prefer
+  adopting it or being inspired by it (e.g. codemap as a future internal
+  sidecar tool per NORTH_STAR M7) over rebuilding it.
+- **Be vocal about inspiration.** Credit upstream projects in docs and
+  README; hiding influences is both bad stewardship and bad marketing.
+
 ## Commits
 
 Commit at meaningful checkpoints, not only at the end of a task. A meaningful
