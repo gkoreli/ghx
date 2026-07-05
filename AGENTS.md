@@ -129,11 +129,25 @@ assertion. Binding rules:
 - **The measurement stack is frozen during a run.** Any scorer/detector change
   mid-run must be pre-registered in an ADR before rescoring (precedent:
   the compliance-detector fix, commit `afd6e99`).
-- **If an LLM judge/scorer is ever introduced** (deferred by ADR-0016.1): it
-  is never the gate alone — deterministic checks remain the backstop; it must
-  emit full OTel reasoning/thinking traces; its calibration (agreement with
-  hand labels, false-positive/false-negative rates) is measured and reported
-  next to its scores; its prompt and model version are committed.
+- **Eval truthfulness, deterministic or not, is a top ideology — we must not
+  lie to ourselves or our customers** (Goga, 2026-07-05). Deterministic
+  checks (substring/suffix matching against pre-registered ground truth) are
+  frozen-in-time baselines: reproducible, cheap, gameable-in-principle, and
+  honest only about what they actually measure — "did the pre-registered
+  facts appear", never "was the reasoning, tool use, or output *better*".
+  Exploration is a non-deterministic task; ranking the quality of plain vs
+  ghx vs ghx-sidecar trajectories requires a judge scorer. Neither layer may
+  masquerade as the other: never present an indexOf-style check as a quality
+  judgment, and never present a judge opinion as ground truth.
+- **The judge scorer is required, not optional** (upgrades ADR-0016.1's
+  deferral): full confidence in north-star claims needs both layers —
+  deterministic gates as the frozen backstop, a calibrated judge for
+  trajectory/reasoning/output quality. The judge is never the gate alone;
+  it must emit full OTel reasoning/thinking traces; its calibration
+  (agreement with hand labels, false-positive/false-negative rates) is
+  measured and reported next to its scores; its prompt and model version
+  are committed. Disagreement between the two layers is a first-class
+  signal to investigate, not noise to average away.
 - **Traces for everything, viewable by humans.** Eval runs, sidecar sessions,
   and ghx invocations emit OTel traces; the target state (NORTH_STAR M6) is a
   single visibility surface where a human can hand-check any agentic

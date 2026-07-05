@@ -225,6 +225,17 @@ failing means the sidecar thesis is not supported and P3/P4 spending pauses.
 The north star includes the possibility of learning the boundary is wrong —
 cheaply and with evidence.
 
+The eval stack itself has a required next layer (Goga, 2026-07-05, tenet in
+AGENTS.md): the deterministic gates are frozen baselines that measure
+pre-registered fact recall, not exploration quality. A **calibrated judge
+scorer** (LLM judge with full OTel reasoning traces, hand-label calibration,
+committed prompt/model version, never the gate alone) is needed to compare
+plain vs ghx vs ghx-sidecar reasoning, tool calls, and outputs — real-world
+quality claims to customers must rest on both layers. ADR before build;
+natural sequencing: alongside or immediately after the ADR-0016.7
+confirmatory rerun, and definitely before M9 preference/reward exports
+(which need trajectory-quality labels anyway).
+
 ## The North-Star Filter
 
 Before taking on work, ask: **does this remove tokens/knowledge from the main
