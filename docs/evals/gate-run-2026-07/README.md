@@ -23,18 +23,26 @@ honest and correct call, not a shortcut.
 
 ## Hand-inspecting the traces in a UI
 
+`traces.jsonl` is spec-compliant OTLP/JSON (one `TracesData` per line), so
+any standard OTLP receiver ingests it directly — no custom tooling:
+
 ```
 go install github.com/CtrlSpice/otel-desktop-viewer@latest
 otel-desktop-viewer --db /tmp/ghx-evals.duckdb   # UI on :8000, OTLP on :4318
-python3 scripts/replay-eval-traces.py \
-    internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07/traces.jsonl
+while IFS= read -r line; do
+  curl -s -o /dev/null -X POST http://localhost:4318/v1/traces \
+    -H 'Content-Type: application/json' -d "$line"
+done < internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07/traces.jsonl
 ```
 
 Every episode appears as an `eval.episode` trace with `eval.turn` →
 `tool.execute`/`tool.read` child spans (per-command timings, agent identity,
 per-episode char accounting in `ghx.eval.*` attributes) and a final
-`eval.reward.compute` span. The replay script transcodes the exporter's
-base64 span IDs to spec-required hex (follow-up noted in ADR-0016.7).
+`eval.reward.compute` span. Historical note: this run's file was originally
+written with protojson base64 span IDs (violating the OTLP/JSON spec's hex
+deviation, which broke ingestion by standard receivers); the exporter was
+fixed the same day and this local file migrated in place — IDs are
+losslessly transcoded, span data untouched.
 
 ## Gates
 

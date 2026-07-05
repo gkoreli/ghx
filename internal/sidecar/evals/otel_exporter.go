@@ -2,6 +2,9 @@ package evals
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -51,6 +54,10 @@ func (e *otlpJSONFileExporter) ExportSpans(ctx context.Context, spans []sdktrace
 	if err != nil {
 		return fmt.Errorf("marshal OTLP trace json: %w", err)
 	}
+	line, err = hexEncodeSpanIDs(line)
+	if err != nil {
+		return fmt.Errorf("hex-encode OTLP span ids: %w", err)
+	}
 	line = append(line, '\n')
 
 	e.mu.Lock()
@@ -73,6 +80,46 @@ func (e *otlpJSONFileExporter) Shutdown(ctx context.Context) error {
 		return ctx.Err()
 	default:
 		return nil
+	}
+}
+
+// hexEncodeSpanIDs rewrites the base64 ID strings protojson produces for
+// proto bytes fields into lowercase hex. The OTLP/JSON spec deviates from
+// the proto3 JSON mapping for exactly these fields — trace_id, span_id,
+// parent_span_id MUST be hex — and spec-compliant receivers (Jaeger,
+// otel-desktop-viewer, the collector) reject base64 IDs.
+func hexEncodeSpanIDs(line []byte) ([]byte, error) {
+	var doc any
+	if err := json.Unmarshal(line, &doc); err != nil {
+		return nil, err
+	}
+	transcodeSpanIDs(doc)
+	return json.Marshal(doc)
+}
+
+func transcodeSpanIDs(node any) {
+	switch v := node.(type) {
+	case map[string]any:
+		for k, child := range v {
+			switch k {
+			case "traceId", "spanId", "parentSpanId":
+				s, ok := child.(string)
+				if !ok || s == "" {
+					continue
+				}
+				raw, err := base64.StdEncoding.DecodeString(s)
+				if err != nil {
+					continue
+				}
+				v[k] = hex.EncodeToString(raw)
+			default:
+				transcodeSpanIDs(child)
+			}
+		}
+	case []any:
+		for _, child := range v {
+			transcodeSpanIDs(child)
+		}
 	}
 }
 
