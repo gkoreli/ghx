@@ -21,6 +21,21 @@ honest and correct call, not a shortcut.
   `internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07/traces.jsonl`;
   not committed for size, reproducible from the episode JSONs' tool traces
 
+## Hand-inspecting the traces in a UI
+
+```
+go install github.com/CtrlSpice/otel-desktop-viewer@latest
+otel-desktop-viewer --db /tmp/ghx-evals.duckdb   # UI on :8000, OTLP on :4318
+python3 scripts/replay-eval-traces.py \
+    internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07/traces.jsonl
+```
+
+Every episode appears as an `eval.episode` trace with `eval.turn` →
+`tool.execute`/`tool.read` child spans (per-command timings, agent identity,
+per-episode char accounting in `ghx.eval.*` attributes) and a final
+`eval.reward.compute` span. The replay script transcodes the exporter's
+base64 span IDs to spec-required hex (follow-up noted in ADR-0016.7).
+
 ## Gates
 
 | gate | check | result | detail |
