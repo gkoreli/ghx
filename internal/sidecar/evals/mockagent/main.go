@@ -179,6 +179,11 @@ func (m *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeReques
 	return acp.SetSessionModeResponse{}, nil
 }
 
+// Logout satisfies the acp.Agent interface (promoted from unstable in v0.13.5).
+func (m *mockAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
+}
+
 func main() {
 	scriptPath := os.Getenv("MOCKAGENT_SCRIPT")
 	statePath := os.Getenv("MOCKAGENT_STATE")
