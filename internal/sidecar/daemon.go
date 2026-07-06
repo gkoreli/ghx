@@ -252,8 +252,11 @@ func ConfigDigest(cfg Config) string {
 		// degradation the doctor check exists to prevent.
 		ReportSinkExe string `json:"reportSinkExe,omitempty"`
 	}
-	sinkExe, _, _ := ResolveReportSinkExe()
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: sinkExe})
+	// Hash the explicit override only: an empty value means "own executable",
+	// which the version handshake already validates, and full resolution is
+	// process-dependent (a spawned daemon and a go-test client resolve
+	// differently, which would force restart loops).
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE")})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
