@@ -173,6 +173,21 @@ modular, and reused across both.
   layer (P3), never silent magic.
 - **Protocols are stepping stones, not identity.** ACP is the fast path
   today; the boundary must survive replacing ACP, the brain, or both (P4).
+  Clarified 2026-07-05: **we never invent a sidecar protocol or agent
+  framework** — that would fail the open-source-leverage filter. What we
+  own is the boundary contract (English question in → compact evidence
+  report out) and the brain behind it; every layer underneath is adopted.
+  "Below ACP" (P4) means dropping to an existing agent-SDK harness we
+  configure — owning context assembly, tool registry, and model choice —
+  not authoring a wire protocol. Pre-registered exit triggers, so the
+  P4 move is evidence-driven rather than a rewrite itch: (1) adapter
+  opacity keeps taxing us (e.g. claude-agent-acp thinking emission was
+  undocumented — verified only by reading the shipped tarball, ADR-0018);
+  (2) a measured SPT plateau attributable to harness overhead ACP cannot
+  remove (the ~400-line persona doctrine paid every session); (3) tool
+  surface/isolation control the adapter cannot grant (ADR-0016.3's eval
+  isolation gap); (4) serving a custom-trained model (M10), which no
+  existing ACP adapter will speak for us. Until triggers fire, ACP stays.
 - **Core capabilities live in `internal/ghx`.** Frontends — CLI, MCP,
   codemode, sidecar — wrap the same core (ADR-0010 rule).
 - **Local-first evals.** No hosted eval platform, no eval-service key; local
