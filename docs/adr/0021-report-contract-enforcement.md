@@ -197,6 +197,35 @@ under `go test` is the test binary, not `ghx`. The tool's validation and the
 real stdio transport are proven by the two round-trip tests above instead; the
 mock e2e proves the runtime sink-preference wiring.
 
+**Post-audit additions (Fable, 2026-07-05):**
+
+- `GHX_REPORT_SINK_EXE` override: under `go test` — exactly how live eval
+  episodes run — `os.Executable` is the test binary and the PATH `ghx` may
+  be an older release without the hidden command, so the sink would silently
+  degrade to the text fallback and the confirmatory re-run would never
+  exercise the contract. Live runs must build a fresh ghx and set the env
+  var; under `go test` without it the sink is disabled with a loud warning.
+- Persona failure-mode probe fixed from `ghx --version` (which fails; the
+  live smoke's first tool call proved it) to `ghx version`.
+
+**Live validation (2026-07-05, one strict episode
+`ghx-mapengine/ghx-sidecar`, run `20260706-024748`, branch build):**
+
+```sh
+go build -o /tmp/ghx-adr21 ./cmd/ghx
+GHX_REPORT_SINK_EXE=/tmp/ghx-adr21 GHX_EVAL_STRICT=1 \
+GHX_EVAL_AGENT="$(pwd)/scripts/eval-agent-acp.sh" \
+go test ./internal/sidecar/evals -tags=agent_e2e \
+  -run 'TestEpisodes/ghx-mapengine/ghx-sidecar' -v
+```
+
+The real adapter spawned the sink server, the model ran six ghx commands
+and finished with a `mcp__ghx-report-sink__submit_report` tool call
+carrying the full report; no `<ghx-report>` text block appeared in the
+output, zero anomalies, strict PASS, correctness 1.0. The submit-path
+contract is proven end-to-end against `claude-agent-acp@0.55.0`;
+per-episode counts at scale remain D4's job.
+
 ## Cross-references
 
 - ADR-0016.7 — the lenient-parsing predecessor (RC2/RC3) this ADR

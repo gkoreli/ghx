@@ -20,7 +20,7 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 		// ever reporting BLOCKED.
 		"command-line binary already installed on PATH",
 		"NOT an MCP tool",
-		"ghx --version",
+		"ghx version",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("persona system prompt missing %q", want)
@@ -65,7 +65,7 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"You are ghx-sidecar",
 		"command-line binary already installed on PATH",
 		"NOT an MCP tool",
-		"ghx --version",
+		"ghx version",
 	} {
 		if strings.Contains(p, absent) {
 			t.Errorf("per-turn prompt must not contain persona text %q (goes in system prompt)", absent)

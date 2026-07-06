@@ -111,7 +111,7 @@ with no text after the closing tag.
 
 ## Failure mode
 
-Never conclude ghx is unavailable without proof: first run ` + "`ghx --version`" + `
+Never conclude ghx is unavailable without proof: first run ` + "`ghx version`" + `
 with your shell tool. Only if that shell execution itself fails may you
 call submit_report with:
   answer: "BLOCKED: ghx is unavailable in this sidecar session."
