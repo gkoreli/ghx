@@ -30,8 +30,17 @@ For writing code through delegated CLI workers, use the bypass flags explicitly:
 
 ```bash
 claude -p --model sonnet --effort low --dangerously-skip-permissions "<prompt>"
-codex exec -C /Users/goga/Documents/goga/ghx --dangerously-bypass-approvals-and-sandbox "<prompt>"
+codex exec -C /Users/goga/Documents/goga/ghx --dangerously-bypass-approvals-and-sandbox "<prompt>" </dev/null
 ```
+
+**Always append `</dev/null` when running `codex exec` from a background or
+non-interactive shell.** With stdin open, codex exec prints "Reading
+additional input from stdin..." and blocks forever before doing any work
+(observed 2026-07-05: a delegation sat 40+ minutes at 0% CPU with no session
+rollout file — diagnose via `ls ~/.codex/sessions/<today>` and process CPU).
+Do not pipe codex stdout through `tail`/`head` in background tasks either —
+it buffers until exit, hiding all progress; let stdout stream to the task
+output file.
 
 Use `codex exec -s read-only` for investigation, review, summarization, or planning when the worker must not edit files:
 
