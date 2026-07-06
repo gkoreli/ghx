@@ -80,7 +80,7 @@ ghx sidecar ask --json "<question>"                 # {report, artifacts} envelo
 ghx sidecar ask --session <name> "<question>"       # keep parallel investigation threads apart
 ```
 
-State the goal, not the steps: *"How does hono implement middleware chaining, and which files define it?"* beats *"grep for middleware"*. The session name is derived automatically (repo slug, or a question-derived slug in discovery mode) and printed to stderr; follow-up asks reuse it, so they are faster and context-aware. Every answer ends with an artifacts footer — `artifacts: <session dir> (trace <id>)` — pointing at the on-disk trail.
+State the goal, not the steps: *"How does hono implement middleware chaining, and which files define it?"* beats *"grep for middleware"*. Normally omit `--session`: the daemon routes each ask. Explicit `--session` wins; `--repo` or an `owner/repo` mention routes to the repo-slug session; otherwise ghx checks for a warm continuation, then ledger overlap, then creates a new question-derived discovery session. Routed asks print `session: <name> (routed: <rule>)` to stderr, so follow-ups can stay context-aware without you naming sessions. Every answer ends with an artifacts footer — `artifacts: <session dir> (trace <id>)` — pointing at the on-disk trail.
 
 ### Where artifacts land, and how to inspect
 
@@ -90,6 +90,7 @@ Everything the sidecar does is durable under `~/.ghx/` (or `$GHX_HOME`): `sessio
 ghx sidecar sessions list              # all sessions with repo, turn count, last-updated
 ghx sidecar sessions show <session>    # metadata + saved report history
 ghx sidecar sessions ledger <session>  # accumulated evidence ledger (JSON) — the commands run and sources read
+ghx sidecar sessions reroute <s> <turn> <dest>  # move a mis-routed turn; both ledgers rebuilt by replay
 ghx sidecar view [session]             # spawn a local OTel viewer over the session's traces (needs otel-desktop-viewer on PATH)
 ghx sidecar view --list                # sessions with turn/report counts
 ```

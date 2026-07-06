@@ -267,7 +267,7 @@ A main agent talks to the sidecar through a single MCP tool — one tool it cann
 be tempted into step-driving:
 
 ```bash
-ghx serve --recon     # exposes exactly one MCP tool: recon(question, repo, session?)
+ghx serve --recon     # exposes exactly one MCP tool: recon(question, repo?, session?)
 ```
 
 The recommended skill for agents is the concise recon skill (`ghx skill --recon`,
@@ -319,7 +319,7 @@ matching files. Same command, always useful output.
 ### Commands
 
 ```bash
-ghx --version                               # Health check / installed version
+ghx --version                               # Health check / installed version (also: ghx version)
 ghx explore <owner/repo>                    # Compact branch + tree + README orientation
 ghx explore <owner/repo> --full             # Complete legacy explore output
 ghx explore <owner/repo> <path>             # Compact subdirectory listing
@@ -338,11 +338,35 @@ ghx search <owner/repo> "func main"         # Repo-first code search, auto-quote
 ghx search <owner/repo> "router" --lang go  # Narrow by language
 ghx search <owner/repo> "router" --glob "**/*.go" # Narrow by path glob
 ghx search "repo:gkoreli/ghx cobra.Command" # Advanced raw GitHub code-search query
+ghx inspect <owner/repo> "routing middleware" # Concern-driven search + ranked files, maps, snippets
 ghx grep <owner/repo> "func main"           # Grep-like repo search
 ghx grep <owner/repo> "RunE" --path internal/cli --limit 10
 ghx repos "<query>"                         # Repo search with README preview
 ghx tree <owner/repo> [path]                # Full recursive tree
 ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels
+ghx code "<js>"                             # Execute JS with access to all ghx tools
+ghx code --list                             # List available tools with type stubs
+ghx serve                                   # Start the direct-tools MCP server (stdio)
+ghx serve --http :8080                      # Serve MCP over streamable HTTP
+ghx serve --recon                           # Start the single-tool recon MCP service
+ghx skill                                   # Print the classic CLI skill
+ghx skill --mcp                             # Print the classic MCP skill
+ghx skill --recon                           # Print the concise recon skill
+ghx sidecar config init --claude-acp        # Write ~/.ghx/config.json for Claude ACP
+ghx sidecar config show                     # Show resolved sidecar config
+ghx sidecar doctor                          # Verify token, network, ghx binary, ACP, report sink
+ghx sidecar doctor --live                   # Run a real one-prompt ACP turn for diagnosis
+ghx sidecar ask --repo <owner/repo> "<q>"   # Delegate one repo question to the sidecar
+ghx sidecar ask "<q>"                       # Discovery question across GitHub
+ghx sidecar daemon --status                 # Inspect the warm sidecar daemon
+ghx sidecar daemon --stop                   # Stop the warm sidecar daemon
+ghx sidecar sessions list                   # List persisted sidecar sessions
+ghx sidecar sessions show <session>         # Metadata + report history
+ghx sidecar sessions ledger <session>       # Accumulated evidence ledger JSON
+ghx sidecar sessions reroute <s> <turn> <dest> # Move a mis-routed turn and rebuild ledgers
+ghx sidecar view [session]                  # Local OTel viewer over session artifacts
+ghx sidecar evals export --format sft --run <dir> --out <file> # Export committed eval episodes
+ghx sidecar report-sink --out <path>        # Internal report-sink MCP server used by ACP turns
 ghx tier2 codemap <owner/repo>              # Tier-2 cross-file structure as JSON (local snapshot)
 ghx tier2 codemap <owner/repo> --context    # Agent-ready JSON context envelope (--compact to shrink)
 ghx tier2 codemap <owner/repo> --importers <file>  # Who imports a file (fan-in; needs ast-grep)
