@@ -117,12 +117,20 @@ const agentAuthMarker = "Authentication required"
 
 // agentAuthHint tells the operator how to give the spawned agent credentials.
 // Like the trust hint it never auto-applies anything: logins and cloud env are
-// the human's own config.
+// the human's own config. The adapter's SDK keeps ITS OWN credential store —
+// an installed `claude` being logged in proves nothing about the spawned
+// agent (founder's work laptop: a toolbox-wrapped claude authenticated fine
+// while the adapter's bundled Claude Code had no credentials at all), so the
+// first remedy is the adapter's own login flow (the auth method it advertises
+// over ACP: `--cli auth login`, zed-industries/claude-agent-acp
+// src/acp-agent.ts initialize()).
 const agentAuthHint = "The spawned Claude agent has no usable credentials (auth resolves at prompt time, so\n" +
-	"handshake checks pass). Log in once on this machine: run `claude` interactively, or\n" +
-	"`claude setup-token` for a durable token. If this machine authenticates through\n" +
-	"Bedrock/Vertex or a gateway, export those env vars in the shell that runs ghx, then\n" +
-	"restart the daemon (ghx sidecar daemon --stop) so it inherits them;\n" +
+	"handshake checks pass). The agent keeps its own credential store — your `claude` CLI\n" +
+	"being logged in is NOT enough (wrapper/toolbox builds store credentials elsewhere).\n" +
+	"Log the agent itself in once:\n" +
+	"  npx -y @agentclientprotocol/claude-agent-acp --cli auth login --claudeai\n" +
+	"If this machine authenticates through Bedrock/Vertex or a gateway instead, export those\n" +
+	"env vars in the shell that runs ghx and restart the daemon (ghx sidecar daemon --stop);\n" +
 	"`ghx sidecar sessions show <session>` lists which auth env names the agent actually saw."
 
 // agentHints maps stable failure markers — observed in the turn error text or
@@ -172,10 +180,44 @@ func openAgentStderr(path string) (io.Writer, io.Closer) {
 // bloating the error the CLI prints.
 const agentStderrTailBytes = 4096
 
+// benignStderrMarkers identify adapter/SDK stderr lines that are pure noise
+// in a failure diagnosis: boilerplate warnings every healthy spawn also
+// prints. They stay in the on-disk agent-stderr.log (full evidence) but are
+// dropped from the tail surfaced in errors, where they bury the one line
+// that matters (founder feedback 2026-07-06: three repeated
+// CLAUDE_SDK_CAN_USE_TOOL_SHADOWED blocks drowned an auth failure).
+var benignStderrMarkers = []string{
+	// The SDK notes our allowedTools entry auto-approves submit_report before
+	// canUseTool runs — intentional sidecar wiring (ADR-0021), printed by
+	// every spawned agent process.
+	"CLAUDE_SDK_CAN_USE_TOOL_SHADOWED",
+	"node --trace-warnings",
+}
+
+// filterBenignStderr drops known-benign lines from a stderr excerpt.
+func filterBenignStderr(s string) string {
+	lines := strings.Split(s, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		benign := false
+		for _, m := range benignStderrMarkers {
+			if strings.Contains(line, m) {
+				benign = true
+				break
+			}
+		}
+		if !benign {
+			kept = append(kept, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 // AgentStderrTail returns the last agentStderrTailBytes of the per-session
-// adapter stderr log at path, trimmed, or "" when the log is missing or empty
-// (ADR-0033 D2/D3). It is the evidence spliced into a turn-failure error and
-// the loud-WARN answer.
+// adapter stderr log at path — with known-benign boilerplate lines filtered
+// out — or "" when the log is missing, empty, or all-benign (ADR-0033 D2/D3).
+// It is the evidence spliced into a turn-failure error and the loud-WARN
+// answer; the unfiltered log on disk remains the complete record.
 func AgentStderrTail(path string) string {
 	if path == "" {
 		return ""
@@ -198,7 +240,7 @@ func AgentStderrTail(path string) string {
 	if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
 		return ""
 	}
-	return strings.TrimSpace(string(buf))
+	return filterBenignStderr(strings.TrimSpace(string(buf)))
 }
 
 // DiagnoseTurnError enriches a turn-failure error with the tail of the

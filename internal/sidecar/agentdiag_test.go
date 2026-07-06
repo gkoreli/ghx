@@ -144,7 +144,7 @@ func TestWarnNoReportAnswer(t *testing.T) {
 func TestDiagnoseTurnErrorAuthHint(t *testing.T) {
 	base := errors.New(`run turn: acp prompt: {"code":-32000,"message":"Authentication required"}`)
 	err := DiagnoseTurnError(base, "")
-	if !strings.Contains(err.Error(), "claude setup-token") {
+	if !strings.Contains(err.Error(), "auth login --claudeai") {
 		t.Fatalf("auth hint missing from diagnosed error:\n%s", err.Error())
 	}
 	if !errors.Is(err, base) {
@@ -164,5 +164,35 @@ func TestMatchAgentHints(t *testing.T) {
 	}
 	if got := matchAgentHints("clean stderr", ""); got != nil {
 		t.Fatalf("no-marker case returned hints: %v", got)
+	}
+}
+
+// TestAgentStderrTailFiltersBenignNoise pins the founder-reported failure
+// shape (2026-07-06): repeated CLAUDE_SDK_CAN_USE_TOOL_SHADOWED blocks from
+// every spawned process buried the one meaningful auth line. The surfaced
+// tail must drop the boilerplate and keep the signal; an all-benign log
+// surfaces as empty (so no misleading "stderr evidence" block is rendered).
+func TestAgentStderrTailFiltersBenignNoise(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent-stderr.log")
+	noisy := "(node:73016) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__ghx-report-sink__submit_report.\n" +
+		"(Use `node --trace-warnings ...` to show where the warning was created)\n" +
+		"Session abc: query stream error: ACP connection closed\n"
+	if err := os.WriteFile(path, []byte(noisy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tail := AgentStderrTail(path)
+	if strings.Contains(tail, "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED") || strings.Contains(tail, "trace-warnings") {
+		t.Fatalf("benign boilerplate not filtered:\n%s", tail)
+	}
+	if !strings.Contains(tail, "query stream error") {
+		t.Fatalf("meaningful line lost:\n%s", tail)
+	}
+
+	if err := os.WriteFile(path, []byte("(node:1) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := AgentStderrTail(path); got != "" {
+		t.Fatalf("all-benign log must surface empty, got %q", got)
 	}
 }
