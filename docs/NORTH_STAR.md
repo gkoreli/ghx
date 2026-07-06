@@ -188,6 +188,19 @@ modular, and reused across both.
   surface/isolation control the adapter cannot grant (ADR-0016.3's eval
   isolation gap); (4) serving a custom-trained model (M10), which no
   existing ACP adapter will speak for us. Until triggers fire, ACP stays.
+- **Observability is the substrate for self-improvement** (Goga,
+  2026-07-05, future-facing). A coming tenet, named early so today's
+  builds don't foreclose it: continuous evaluation and observability —
+  a self-reflective, autonomously self-improving sidecar agent and
+  framework. The sidecar's own production traces become continuous
+  eval input; the judge scorer runs over real sessions, not only
+  benchmark episodes; reflection feeds persona/doctrine refinement and
+  eventually the training loop (M9/M10). None of this is buildable as
+  a separate system bolted on later — it only works if runtime and
+  evals share one trace/eval capability from the start (ADR-0022's
+  extraction rule exists for this). Today's obligation is only that:
+  never fork the visibility stack. The self-improvement loop itself
+  waits for the north-star filter like everything else.
 - **Core capabilities live in `internal/ghx`.** Frontends — CLI, MCP,
   codemode, sidecar — wrap the same core (ADR-0010 rule).
 - **Local-first evals.** No hosted eval platform, no eval-service key; local
