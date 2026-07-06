@@ -1,0 +1,77 @@
+{
+  "labelId": "gs-023",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Identifies the map engine's core types in internal/mapengine and the two distinct parser backends (Go AST and tree-sitter) rather than treating the engine as monolithic.",
+    "Explains how the engine is selected per file (the mapAuto / EngineAuto path) with evidence from the selection code, not a plausible-sounding guess.",
+    "Grounds claims in internal/mapengine source rather than README prose or CLI help text."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "ghx-mapengine",
+    "repo": "gkoreli/ghx",
+    "questions": [
+      "Where is the structural map engine implemented, and how is the parser engine selected per file?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is the structural map engine implemented, and how is the parser engine selected per file?",
+        "agentText": "I'll investigate the repository structure first to locate the relevant code.Found `internal/mapengine/` with `goast.go`, `regex.go`, `treesitter.go`, `types.go`. Let me inspect these directly.This confirms the core engine dispatch logic. Let me check `goast.go`, `regex.go`, and where `mapengine` is invoked from the CLI (`ghx map` command likely in `internal/cli` or `internal/ghx`).Now I have the complete picture. Let me quickly check the ADR doc and CLI wiring context for confirmation.I have everything needed to answer.\n\n## Structural map engine\n\nImplemented in **`internal/mapengine/`** (Go package `mapengine`), with four files:\n\n- **`types.go`** — defines the public API: `Engine` enum (`auto`, `go-ast`, `regex`, `tree-sitter`), `Options`/`Result`/`Symbol` types, and the top-level dispatch functions `Map()` and `mapAuto()`.\n- **`goast.go`** — `GoASTMapper` (uses Go's own `go/parser`/`go/ast`/`go/token` to extract package, import, type, func, const/var symbols for `.go` files with full fidelity).\n- **`treesitter.go`** — `TreeSitterMapper` (uses `github.com/odvcencio/gotreesitter` + its `grammars` package to run tree-sitter \"tags\" queries per language, producing `Symbol`s with parent/scope resolution via `computeTreeSitterParents`).\n- **`regex.go`** — `RegexMapper` (line-anchored regex rules per language extension — go, ts/tsx/js/jsx, py, rs, java, kt, rb, etc. — used as the universal fallback and for languages without tree-sitter grammars).\n\n## Engine selection per file\n\nSelection happens in `mapengine.Map()` (`internal/mapengine/types.go`), driven by the `Options.Engine` field (normalized by `normalizeEngine`, defaulting anything unrecognized to `auto`):\n\n- **`regex`** → forces `RegexMapper`.\n- **`tree-sitter`** → forces `TreeSitterMapper`, with fallback to `RegexMapper` if tree-sitter errors (`mapTreeSitterWithFallback`).\n- **`auto`** (default) → `mapAuto()` branches on the file's lowercased extension (`filepath.Ext(path)`):\n  - `.go` → `GoASTMapper`; if it errors, falls back to `RegexMapper` (fallback flagged, no warning).\n  - `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs` → `TreeSitterMapper`, falling back to `RegexMapper` on error (with a warning appended, since these are \"supported\" languages that shouldn't normally fail).\n  - any other extension → `RegexMapper` directly (covers java, kt, rb, and everything else `RegexMapper` has rules for, plus truly unknown types via its generic fallback rule).\n- Any unrecognized `Engine` value on the explicit path falls back to `RegexMapper` with a `\"unknown mapper engine; used regex fallback\"` warning.\n\nNotably, even in `tree-sitter`/`auto` mode for Go/TS/JS/Python/Rust, `TreeSitterMapper` internally re-runs `RegexMapper` and merges select symbol kinds (`MergeRegex`/`MergeRegexKinds` in `defaultTreeSitterLanguageConfigs()`) — e.g., Go merges regex-detected imports/consts/vars since tree-sitter's tags query doesn't tag those, and Rust merges `use` import statements the same way.\n\n**Where it's invoked:** `internal/ghx/read.go` (`parseFileResponse`) calls `mapengine.Map(path, content, Options{Engine: opts.MapEngine, ...})` when `ReadOpts.Map` is true. `MapEngine` is threaded through from two entry points:\n- CLI: `internal/cli/ghx.go` — `readCmd`'s `--map-engine` flag (default `\"auto\"`).\n- MCP tool: `internal/ghx/register.go` — the `mapEngine` argument on the registered tool.\n\n**Not verified:** I did not check `docs/adr/0013-ghx-map-command.md` for design rationale, nor run the Go test suite (`regex_test.go` etc.) to confirm current behavior beyond static reading; I relied on GitHub Contents/API reads of the `mainline` branch rather than a local build/execution.",
+        "toolCalls": [
+          {
+            "title": "gh repo view gkoreli/ghx --json description,defaultBranchRef,url 2\u003e\u00261",
+            "outputSummary": "```console {\"defaultBranchRef\":{\"name\":\"mainline\"},\"description\":\"Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\",\"url\":\"https://github.com/gkor",
+            "outputChars": 571
+          },
+          {
+            "title": "gh api repos/gkoreli/ghx/git/trees/HEAD?recursive=true --jq '.tree[].path' 2\u003e\u00261 | head -300",
+            "outputSummary": "```console (eval):1: no matches found: repos/gkoreli/ghx/git/trees/HEAD?recursive=true ```(eval):1: no matches found: repos/gkoreli/ghx/git/trees/HEAD?recursive=true",
+            "outputChars": 165
+          },
+          {
+            "title": "gh api \"repos/gkoreli/ghx/git/trees/mainline?recursive=true\" --jq '.tree[].path' 2\u003e\u00261 | head -500",
+            "outputSummary": "```console .claude-plugin .claude-plugin/plugin.json .claude .claude/skills .claude/skills/fable-delegation .claude/skills/fable-delegation/SKILL.md .envrc.example .github .github/workflows .github/workflows/auto-tag.yml .gitignore .goreleaser.yml .mise.toml AGENTS.md CLAUDE.md L",
+            "outputChars": 38785
+          },
+          {
+            "title": "gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go --jq '.content' | base64 -d 2\u003e\u00261",
+            "outputSummary": "```console package mapengine import ( \"errors\" \"fmt\" \"path/filepath\" \"sort\" \"strings\" ) type Engine string const ( EngineAuto Engine = \"auto\" EngineGoAST Engine = \"go-ast\" EngineRegex Engine = \"regex\" EngineTreeSitter Engine = \"tree-sitter\" ) type Level string const ( LevelCompac",
+            "outputChars": 11179
+          },
+          {
+            "title": "gh api repos/gkoreli/ghx/contents/internal/mapengine/treesitter.go --jq '.content' | base64 -d 2\u003e\u00261",
+            "outputSummary": "```console package mapengine import ( \"fmt\" \"sort\" \"strings\" \"github.com/odvcencio/gotreesitter\" \"github.com/odvcencio/gotreesitter/grammars\" ) type TreeSitterMapper struct { Languages map[string]TreeSitterLanguageConfig } type TreeSitterLanguageConfig struct { TagsQuery func(gra",
+            "outputChars": 18139
+          },
+          {
+            "title": "gh api repos/gkoreli/ghx/contents/internal/mapengine/goast.go --jq '.content' | base64 -d 2\u003e\u00261 | head -80\necho \"---REGEX---\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/regex.go --jq '.content' | base64 -d 2\u003e\u00261 | head -60",
+            "outputSummary": "```console package mapengine import ( \"fmt\" \"go/ast\" \"go/parser\" \"go/token\" \"strings\" ) type GoASTMapper struct{} func (GoASTMapper) Map(path string, content []byte, opts Options) (Result, error) { opts = NormalizeOptions(opts) fset := token.NewFileSet() f, err := parser.ParseFil",
+            "outputChars": 7769
+          },
+          {
+            "title": "gh api \"repos/gkoreli/ghx/search/code?q=mapengine.Map+repo:gkoreli/ghx\" --jq '.items[].path' 2\u003e\u00261\necho \"---\"\ngh api \"repos/gkoreli/ghx/search/code?q=mapengine+in:file+extension:go+repo:gkoreli/ghx\" --jq '.items[].path' 2\u003e\u00261",
+            "outputSummary": "``` Exit code 1 { \"message\": \"Not Found\", \"documentation_url\": \"https://docs.github.com/rest\", \"status\": \"404\" }gh: Not Found (HTTP 404) --- { \"message\": \"Not Found\", \"documentation_url\": \"https://docs.github.com/rest\", \"status\": \"404\" }gh: Not Found (HTTP 404) ```Exit code 1 { \"",
+            "outputChars": 562
+          },
+          {
+            "title": "for f in internal/ghx/tree.go internal/cli/ghx.go internal/cli/code.go internal/ghx/register.go; do\necho \"=== $f ===\"\ngh api \"repos/gkoreli/ghx/contents/$f\" --jq '.content' | base64 -d 2\u003e\u00261 | grep -n -i \"mapengine\\|Engine\\b\" \ndone",
+            "outputSummary": "```console === internal/ghx/tree.go === === internal/cli/ghx.go === 112: mapEngine, _ := cmd.Flags().GetString(\"map-engine\") 120: MapEngine: mapEngine, 211: readCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\") === internal/cli/code.go === === interna",
+            "outputChars": 1593
+          },
+          {
+            "title": "gh api \"repos/gkoreli/ghx/contents/internal/ghx/read.go\" --jq '.content' | base64 -d 2\u003e\u00261",
+            "outputSummary": "```console package ghx import ( \"fmt\" \"regexp\" \"strconv\" \"strings\" \"github.com/cli/go-gh/v2/pkg/api\" \"github.com/gkoreli/ghx/v2/internal/mapengine\" ) type GrepMatch struct { LineNum int `json:\"lineNum\"` Line string `json:\"line\"` IsMatch bool `json:\"isMatch\"` // true for the match",
+            "outputChars": 18037
+          },
+          {
+            "title": "gh api \"repos/gkoreli/ghx/contents/internal/cli/ghx.go\" --jq '.content' | base64 -d 2\u003e\u00261 | sed -n '80,220p'",
+            "outputSummary": "```console fmt.Printf(\" %s\\n\", e.Name) } } readme := result.Readme if readme == \"\" { readme = \"(no README.md)\" } fmt.Printf(\"\\nREADME:\\n%s\\n\", readme) } else { fmt.Println(\"entries:\") for _, e := range result.Files { if e.Type == \"tree\" { fmt.Printf(\" %s/\\n\", e.Name) } else { fmt",
+            "outputChars": 8385
+          }
+        ]
+      }
+    ]
+  }
+}

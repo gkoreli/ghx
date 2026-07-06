@@ -1,0 +1,87 @@
+{
+  "labelId": "gs-024",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Traces the route() decorator to its real implementation in src/flask/sansio/scaffold.py rather than stopping at a call site or the docs.",
+    "Follows registered URL rules through add_url_rule to where they land on the application object in src/flask/sansio/app.py.",
+    "Anchors each claim to specific Flask source files, not example apps or tests."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "flask-routing",
+    "repo": "pallets/flask",
+    "questions": [
+      "Where is the route() decorator implemented, and where do registered URL rules end up?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is the route() decorator implemented, and where do registered URL rules end up?",
+        "agentText": "I'll investigate this using the GitHub API via `gh` without cloning.Now let's check the concrete `add_url_rule` implementation in `sansio/app.py` (Flask app class) where the actual registration happens.Now let's check the Blueprint's version of `add_url_rule` (it defers registration since blueprints don't have a `url_map` until registered on an app), and confirm `app.py`/`blueprints.py` (non-sansio) don't override these.This confirms blueprint route registration defers via `self.record(...)` until `register()` calls the app's real `add_url_rule`. I have enough evidence now.Confirmed: `flask.app.Flask` extends `flask.sansio.app.App` and does not override `route`/`add_url_rule` — the real implementation lives in the sansio module.\n\n## Answer\n\n**`route()` decorator**: `src/flask/sansio/scaffold.py`, class `Scaffold`, method `route()` (line 336). It's a thin wrapper:\n```python\ndef decorator(f):\n    endpoint = options.pop(\"endpoint\", None)\n    self.add_url_rule(rule, endpoint, f, **options)\n    return f\nreturn decorator\n```\n`Scaffold` is the shared base class for both `Flask` (app) and `Blueprint`, so `@app.route(...)` and `@blueprint.route(...)` both go through this one method. `Scaffold.add_url_rule` itself (line 368) is abstract in the base — it only documents the contract; the real work happens in subclasses.\n\n**Where rules end up — two implementations of `add_url_rule`:**\n\n1. **App-level** (used directly for `Flask` instances): `src/flask/sansio/app.py`, class `App`, method `add_url_rule()` (line 605). It builds a `werkzeug.routing.Rule` object (`self.url_rule_class`, aliased to `werkzeug.routing.Rule`, set at line 254) and:\n   - `self.url_map.add(rule_obj)` (line 653) — inserts the compiled rule into a `werkzeug.routing.Map` instance stored at `self.url_map` (created in `App.__init__`, `self.url_map = self.url_map_class(...)`, line 402; `url_map_class = Map` at line 260).\n   - `self.view_functions[endpoint] = view_func` (line 661) — stores the actual callable in a dict keyed by endpoint name.\n\n2. **Blueprint-level**: `src/flask/sansio/blueprints.py`, class `Blueprint`, method `add_url_rule()` (line 413). Blueprints don't own a `url_map` yet at decoration time, so it doesn't register immediately — instead it defers via `self.record(lambda s: s.add_url_rule(rule, endpoint, view_func, ...))` (line 433), pushing a closure onto `self.deferred_functions`. These closures run later inside `Blueprint.register()` (line 273, loop at line 334), where `s` is the actual `Flask` app, so the closure calls back into `App.add_url_rule` above — ending up in the same `self.url_map` / `self.view_functions`.\n\n`flask/app.py`'s public `Flask` class (line 109: `class Flask(App)`) does not override `route` or `add_url_rule`, confirming the app-facing decorator you import as `from flask import Flask; app = Flask(__name__); @app.route(...)` resolves to the `sansio` implementations above.\n\n**Not verified**: I read this from GitHub's default branch via the API/gh CLI (no clone), so I did not check out a specific tagged release — line numbers reflect the current main branch and could shift between versions. I also did not trace `werkzeug.routing.Map`/`Rule` internals themselves (that's outside Flask, in the `werkzeug` package) or how `url_map` is later consulted during request dispatch (`full_dispatch_request`/`match_request` in `flask/app.py` / `ctx.py`), since the question only asked about registration, not dispatch.",
+        "toolCalls": [
+          {
+            "title": "gh api repos/pallets/flask/contents/src/flask --jq '.[].name'",
+            "outputSummary": "List files in flask source directory```console",
+            "outputChars": 485
+          },
+          {
+            "title": "gh api repos/pallets/flask/contents/src/flask/sansio --jq '.[].name'",
+            "outputSummary": "List files in flask sansio subdirectory```console",
+            "outputChars": 138
+          },
+          {
+            "title": "gh api repos/pallets/flask/contents/src/flask/sansio/scaffold.py --jq '.content' | base64 -d \u003e /tmp/scaffold.py\ngrep -n \"def route\\|def add_url_rule\\|class Scaffold\" /tmp/scaffold.py",
+            "outputSummary": "Fetch scaffold.py and search for route/add_url_rule defs```console",
+            "outputChars": 335
+          },
+          {
+            "title": "Read /tmp/scaffold.py (330 - 379)",
+            "outputSummary": "``` 330 331 .. versionadded:: 2.0 332 \"\"\" 333 return self._method_route(\"PATCH\", rule, options) 334 335 @setupmethod 336 def route(self, rule: str, **options: t.Any) -\u003e t.Callable[[T_route], T_route]: 337 \"\"\"Decorate a view function to register it with the given URL 338 rule and ",
+            "outputChars": 3672
+          },
+          {
+            "title": "Read /tmp/scaffold.py (379 - 418)",
+            "outputSummary": "``` 379 380 .. code-block:: python 381 382 @app.route(\"/\") 383 def index(): 384 ... 385 386 .. code-block:: python 387 388 def index(): 389 ... 390 391 app.add_url_rule(\"/\", view_func=index) 392 393 See :ref:`url-route-registrations`. 394 395 The endpoint name for the route defau",
+            "outputChars": 2784
+          },
+          {
+            "title": "gh api repos/pallets/flask/contents/src/flask/sansio/app.py --jq '.content' | base64 -d \u003e /tmp/app.py\ngrep -n \"def add_url_rule\\|self.url_map\\|url_rule_class\\|self.view_functions\" /tmp/app.py",
+            "outputSummary": "Fetch sansio/app.py and search for add_url_rule implementation```console",
+            "outputChars": 807
+          },
+          {
+            "title": "Read /tmp/app.py (595 - 664)",
+            "outputSummary": "``` 595 blueprint.register(self, options) 596 597 def iter_blueprints(self) -\u003e t.ValuesView[Blueprint]: 598 \"\"\"Iterates over all blueprints by the order they were registered. 599 600 .. versionadded:: 0.11 601 \"\"\" 602 return self.blueprints.values() 603 604 @setupmethod 605 def a",
+            "outputChars": 5858
+          },
+          {
+            "title": "Read /tmp/app.py (240 - 259)",
+            "outputSummary": "``` 240 #: :meth:`create_jinja_environment`. Changing these options after 241 #: the environment is created (accessing :attr:`jinja_env`) will 242 #: have no effect. 243 #: 244 #: .. versionchanged:: 1.1.0 245 #: This is a ``dict`` instead of an ``ImmutableDict`` to allow 246 #: ",
+            "outputChars": 1652
+          },
+          {
+            "title": "Read /tmp/app.py (256 - 270)",
+            "outputSummary": "``` 256 #: The map object to use for storing the URL rules and routing 257 #: configuration parameters. Defaults to :class:`werkzeug.routing.Map`. 258 #: 259 #: .. versionadded:: 1.1.0 260 url_map_class = Map 261 262 #: The :meth:`test_client` method creates an instance of this t",
+            "outputChars": 1400
+          },
+          {
+            "title": "gh api repos/pallets/flask/contents/src/flask/sansio/blueprints.py --jq '.content' | base64 -d \u003e /tmp/blueprints_sansio.py\ngrep -n \"def add_url_rule\\|deferred_functions\\|def register\\b\" /tmp/blueprints_sansio.py",
+            "outputSummary": "Search sansio/blueprints.py for add_url_rule and registration logic```console",
+            "outputChars": 672
+          },
+          {
+            "title": "Read /tmp/blueprints_sansio.py (405 - 449)",
+            "outputSummary": "``` 405 self.teardown_request_funcs, 406 app.teardown_request_funcs, 407 ) 408 extend(self.url_default_functions, app.url_default_functions) 409 extend(self.url_value_preprocessors, app.url_value_preprocessors) 410 extend(self.template_context_processors, app.template_context_pro",
+            "outputChars": 3722
+          },
+          {
+            "title": "grep -n \"^from\\|^import\\|class App\\|class Flask\" /tmp/app.py | head -20\necho \"---\"\ngh api repos/pallets/flask/contents/src/flask/app.py --jq '.content' | base64 -d \u003e /tmp/app_top.py\ngrep -n \"class Flask\\|def route\\|def add_url_rule\" /tmp/app_top.py",
+            "outputSummary": "Confirm Flask class inherits from App and doesn't override route/add_url_rule```console",
+            "outputChars": 1562
+          }
+        ]
+      }
+    ]
+  }
+}

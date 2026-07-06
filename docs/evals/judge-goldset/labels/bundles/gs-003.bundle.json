@@ -1,0 +1,105 @@
+{
+  "labelId": "gs-003",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Turn 1 locates route registration (RouterGroup / addRoute in routergroup.go and gin.go) and the request-matching path through the radix tree in tree.go.",
+    "Turn 2 explains :name parameter capture during tree traversal, building on the turn-1 findings instead of re-exploring the repository from scratch.",
+    "Distinguishes the internal routing-tree implementation from the public RouterGroup API, each with file-level evidence."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "gin-routing",
+    "repo": "gin-gonic/gin",
+    "questions": [
+      "Where are routes registered, and how are incoming requests matched to handlers?",
+      "How are route parameters like :name captured during tree matching?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where are routes registered, and how are incoming requests matched to handlers?",
+        "agentText": "Now let's look at `ServeHTTP` and `handleHTTPRequest`, the request dispatch path:Now let's look at the radix tree matching logic in `tree.go` — `addRoute`, `insertChild`, and `getValue`:I have enough detail on the matching algorithm. Now let me check `Context.Next()` for the middleware chain execution, and confirm how `methodTrees` structures per-HTTP-method radix trees.I now have everything needed to give a complete, evidence-backed answer.\n\n## Route registration\n\n**File: `routergroup.go`** — `RouterGroup` is gin's public API for registering routes (`Engine` embeds it).\n\n- `RouterGroup.handle(httpMethod, relativePath, handlers)` (routergroup.go:86) is the common core: it resolves the full path via `calculateAbsolutePath`, merges group middleware with handlers via `combineHandlers`, and calls `group.engine.addRoute(httpMethod, absolutePath, handlers)`.\n- Public methods `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `Handle`, `Any`, `Match` (routergroup.go:103–164) are all thin wrappers around `handle`.\n- `Group(relativePath, handlers...)` (routergroup.go:72) creates a nested `*RouterGroup` sharing the same `engine` pointer, letting sub-routes register into the same underlying trees with a combined path prefix and inherited middleware.\n\n**File: `gin.go`** — `Engine.addRoute(method, path, handlers)` (gin.go:364) is where registration actually lands:\n- It fetches (or lazily creates) the per-method radix tree root from `engine.trees` (a `methodTrees`, i.e., one root `*node` per HTTP method — tree.go:45-58).\n- It calls `root.addRoute(path, handlers)` (implemented in `tree.go`) to insert the route into that method's radix tree.\n- It tracks `maxParams`/`maxSections` for later `Context`/param-slice preallocation.\n\n**File: `tree.go`** — `(*node).addRoute` (tree.go:135) and its helper `insertChild` (tree.go:288) build a compressed **radix tree** (adapted from httprouter) per HTTP method: common path prefixes are split into shared nodes, and `:param`/`*catchAll` wildcard segments become special child node types (`nodeType`, tree.go:90-99).\n\nSo: one radix tree per HTTP method, keyed off `engine.trees`, populated at startup by `router.GET/POST/...` calls chaining `RouterGroup.handle → Engine.addRoute → node.addRoute`.\n\n## Request matching / dispatch\n\n**File: `gin.go`**\n- `Engine.ServeHTTP(w, req)` (gin.go:662) is the `http.Handler` entry point (Gin's `*Engine` implements `net/http`'s `Handler` interface directly — no external router). It pulls a `*Context` from a `sync.Pool`, resets it, and calls `engine.handleHTTPRequest(c)`.\n- `Engine.handleHTTPRequest(c)` (gin.go:690):\n  1. Reads `httpMethod := c.Request.Method` and `rPath := c.Request.URL.Path` (with optional raw/escaped-path handling).\n  2. Scans `engine.trees` for the tree matching `httpMethod`.\n  3. Calls `root.getValue(rPath, c.params, c.skippedNodes, unescape)` to look up the path in that method's radix tree.\n  4. If handlers are found (`value.handlers != nil`), sets `c.handlers = value.handlers`, `c.Params`, `c.fullPath`, then calls `c.Next()` to run the middleware/handler chain, and writes the response headers.\n  5. If not found, it optionally does trailing-slash redirect (`redirectTrailingSlash`, gin.go:781) or fixed-path redirect (`redirectFixedPath`, gin.go:808) when `RedirectTrailingSlash`/`RedirectFixedPath` are enabled.\n  6. If still not found, checks other method trees for `HandleMethodNotAllowed` → 405, otherwise falls through to the `NoRoute` handler chain → 404 (`serveError`, gin.go:764).\n\n**File: `tree.go`** — `(*node).getValue(path, params, skippedNodes, unescape)` (tree.go:418) is the actual matching algorithm: it walks the radix tree consuming the longest static prefix at each node, follows the `indices` byte-map to pick the next static child, falls into wildcard/param or catch-all children when no static match exists, and pushes visited fallback branches onto `skippedNodes` so it can backtrack if a deeper match fails (needed to handle overlapping static/wildcard routes correctly). Path parameters are appended into the `params *Params` slice as they're matched.\n\n**File: `context.go`** — Once handlers are matched, `Context.Next()` (context.go:199) drives the middleware chain: it increments `c.index` and invokes `c.handlers[c.index](c)` in a loop, letting each middleware call `c.Next()` to continue down the chain or `c.Abort()` (context.go:218, sets `c.index = abortIndex`) to short-circuit.\n\n## Summary of the call path\nRegistration: `router.GET(...)` → `RouterGroup.handle` (routergroup.go:86) → `Engine.addRoute` (gin.go:364) → `node.addRoute`/`insertChild` (tree.go:135/288), building one radix tree per method in `Engine.trees`.\n\nMatching: `net/http` → `Engine.ServeHTTP` (gin.go:662) → `Engine.handleHTTPRequest` (gin.go:690) → `node.getValue` (tree.go:418) → `Context.Next()` (context.go:199) executes the matched middleware+handler chain.\n\n**Not verified:** I did not read `path.go` (path cleaning, used by `calculateAbsolutePath`/`cleanPath`), `context.go`'s `reset()`/pool allocation details, or the full `insertChild`/`findWildcard` bodies beyond what's shown — these support the flow above but weren't needed to answer where registration/matching happen. I also didn't run or test the code (remote, read-only investigation per instructions).",
+        "toolCalls": [
+          {
+            "title": "ghx explore gin-gonic/gin 2\u003e\u00261 | head -150",
+            "outputSummary": "```console description: Gin is a high-performance HTTP web framework written in Go. It provides a Martini-like API but with significantly better performance—up to 40 times faster—thanks to httprouter. Gin is designed for building REST APIs, web applications, and microservices",
+            "outputChars": 10583
+          },
+          {
+            "title": "ghx read gin-gonic/gin routergroup.go --map 2\u003e\u00261\necho \"-----\"\nghx read gin-gonic/gin gin.go --map 2\u003e\u00261\necho \"-----\"\nghx read gin-gonic/gin tree.go --map 2\u003e\u00261",
+            "outputSummary": "```console === routergroup.go (9279 bytes) === 5: package gin 7: import ( 14: var ( 27: type IRouter interface { 33: type IRoutes interface { 55: type RouterGroup struct { 62: var _ IRouter = (*RouterGroup)(nil) 65: func (group *RouterGroup) Use(middleware ...HandlerFunc) IRoutes",
+            "outputChars": 13899
+          },
+          {
+            "title": "ghx read gin-gonic/gin routergroup.go 2\u003e\u00261 | sed -n '1,115p'",
+            "outputSummary": "```console === routergroup.go (9279 bytes) === // Copyright 2014 Manu Martinez-Almeida. All rights reserved. // Use of this source code is governed by a MIT style // license that can be found in the LICENSE file. package gin import ( \"net/http\" \"path\" \"regexp\" \"strings\" ) var ( /",
+            "outputChars": 7957
+          },
+          {
+            "title": "ghx read gin-gonic/gin gin.go 2\u003e\u00261 | sed -n '355,420p'",
+            "outputSummary": "```console } func (engine *Engine) rebuild404Handlers() { engine.allNoRoute = engine.combineHandlers(engine.noRoute) } func (engine *Engine) rebuild405Handlers() { engine.allNoMethod = engine.combineHandlers(engine.noMethod) } func (engine *Engine) addRoute(method, path string, h",
+            "outputChars": 3771
+          },
+          {
+            "title": "ghx read gin-gonic/gin gin.go 2\u003e\u00261 | sed -n '655,765p'",
+            "outputSummary": "```console server := \u0026http.Server{ // #nosec G112 Handler: engine.Handler(), } err = server.Serve(listener) return } // ServeHTTP conforms to the http.Handler interface. func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) { engine.routeTreesUpdated.Do(func()",
+            "outputChars": 5875
+          },
+          {
+            "title": "ghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '99,260p'",
+            "outputSummary": "```console type node struct { path string indices string wildChild bool nType nodeType priority uint32 children []*node // child nodes, at most 1 :param style node at the end of the array handlers HandlersChain fullPath string } // Increments priority of the given child and reord",
+            "outputChars": 8657
+          },
+          {
+            "title": "ghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '400,480p'",
+            "outputSummary": "```console // nodeValue holds return values of (*Node).getValue method type nodeValue struct { handlers HandlersChain params *Params tsr bool fullPath string } type skippedNode struct { path string node *node paramsCount int16 } // Returns the handle registered with the given pat",
+            "outputChars": 5085
+          },
+          {
+            "title": "ghx read gin-gonic/gin context.go --grep \"func (c \\*Context) Next\" 2\u003e\u00261\necho \"---\"\nghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '45,60p'\necho \"---engine struct---\"\nghx read gin-gonic/gin gin.go 2\u003e\u00261 | sed -n '92,192p'",
+            "outputSummary": "```console --- type methodTree struct { method string root *node } type methodTrees []methodTree func (trees methodTrees) get(method string) *node { for _, tree := range trees { if tree.method == method { return tree.root } } return nil } ---engine struct--- // Create an instance",
+            "outputChars": 9163
+          },
+          {
+            "title": "ghx read gin-gonic/gin context.go 2\u003e\u00261 | grep -n \"func (c \\*Context)\" | head -20",
+            "outputSummary": "```console 104:func (c *Context) reset() { 123:func (c *Context) Copy() *Context { 160:func (c *Context) HandlerName() string { 166:func (c *Context) HandlerNames() []string { 178:func (c *Context) Handler() HandlerFunc { 188:func (c *Context) FullPath() string { 199:func (c *Con",
+            "outputChars": 1923
+          },
+          {
+            "title": "ghx read gin-gonic/gin context.go 2\u003e\u00261 | sed -n '188,225p'",
+            "outputSummary": "```console func (c *Context) FullPath() string { return c.fullPath } /************************************/ /*********** FLOW CONTROL ***********/ /************************************/ // Next should be used only inside middleware. // It executes the pending handlers in the chai",
+            "outputChars": 2577
+          }
+        ]
+      },
+      {
+        "turn": 1,
+        "question": "How are route parameters like :name captured during tree matching?",
+        "agentText": "Now I have the full picture, from insertion through matching to retrieval.\n\n## How `:name` params are captured (`tree.go`)\n\n**1. At registration time — building the wildcard node**\n\n`insertChild` (tree.go:288) scans the route path with `findWildcard` (tree.go:253), which finds a `:` or `*` and returns the wildcard token (e.g. `:name`) plus its start index. For a `:param` token:\n\n- If there's a static prefix before the wildcard, `insertChild` splits it off as the parent node's `path`.\n- It creates a dedicated child `node{nType: param, path: wildcard, ...}` — note `path` here is stored as the literal `\":name\"` (including the colon), and the parent gets `n.wildChild = true` (tree.go:308-317).\n- If more path follows the param (e.g. `:name/edit`), a further child node is chained off it; the actual handler ends up on whichever node terminates the full registered path.\n\nA `*catchAll` wildcard is handled similarly but stores the full remaining path as one node with `nType: catchAll` and is only legal at the end of a path (tree.go:344-378).\n\nBecause `wildChild` marks a node as having a param/catch-all child, and only one such child is allowed per node (a static/wildcard conflict panics at registration — see `addRoute`, tree.go:210-232), lookups can cheaply check \"is there a wildcard branch here?\" without scanning.\n\n**2. At match time — extracting the value**\n\nIn `(*node).getValue` (tree.go:418), once the static-index scan (`n.indices`) finds no matching literal child but `n.wildChild` is true, the algorithm drops into the wildcard branch (tree.go:483 `n = n.children[len(n.children)-1]` — the wildcard child is always kept last):\n\n- **`case param`** (tree.go:487-543): it scans the remaining `path` up to the next `/` or end-of-string (`end`) — that substring is the captured value. It appends `Param{Key: n.path[1:], Value: val}` into the params slice (`n.path[1:]` strips the leading `:`, so `:name` → key `\"name\"`). If `unescape` is set, it URL-unescapes the value first. If there's more path after `end` (a nested segment), it continues walking from the next child; otherwise it looks for handlers on this node.\n- **`case catchAll`** (tree.go:545-568): takes the *entire* remaining path as the value and stores it under key `n.path[2:]` (stripping the leading `*/`), then immediately returns the node's handlers — catch-all is always a terminal match.\n\nParams are written into a `*Params` slice passed down from `Context.params` (preallocated to `engine.maxParams` capacity, computed at registration in `Engine.addRoute`, gin.go:388-390), avoiding heap allocation per request.\n\n**3. Retrieval in handlers (`context.go`)**\n\nAfter `handleHTTPRequest` gets `value.params` back from `getValue`, it assigns `c.Params = *value.params` (gin.go:718-719). Handlers then read a param via `Context.Param(key)` (context.go:514) → `c.Params.ByName(key)` → `Params.Get` (tree.go:29-35), a linear scan over the small slice matching `Key == name`.\n\n**Backtracking note:** if a param match's subtree fails to yield handlers further down, `getValue`'s `skippedNodes` mechanism (tree.go:429-441, 507-522) can roll back to a previously-skipped static branch, and it also truncates `*value.params` back to `skippedNode.paramsCount` to undo any partially-captured params from the abandoned path — this is what lets gin correctly disambiguate routes like `/users/new` (static) vs `/users/:id` (param) regardless of registration order.",
+        "toolCalls": [
+          {
+            "title": "ghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '480,670p'",
+            "outputSummary": "```console return value } // Handle wildcard child, which is always at the end of the array n = n.children[len(n.children)-1] globalParamsCount++ switch n.nType { case param: // fix truncate the parameter // tree_test.go line: 204 // Find param end (either '/' or path end) end :=",
+            "outputChars": 10767
+          },
+          {
+            "title": "ghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '253,400p'",
+            "outputSummary": "```console // Returns -1 as index, if no wildcard was found. func findWildcard(path string) (wildcard string, i int, valid bool) { // Find start escapeColon := false for start, c := range []byte(path) { if escapeColon { escapeColon = false if c == ':' { continue } panic(\"invalid ",
+            "outputChars": 6723
+          },
+          {
+            "title": "ghx read gin-gonic/gin context.go 2\u003e\u00261 | grep -n \"func (c \\*Context) Param\\|func (ps Params)\" \necho \"---\"\nghx read gin-gonic/gin tree.go 2\u003e\u00261 | sed -n '17,45p'",
+            "outputSummary": "```console 514:func (c *Context) Param(key string) string { --- // Param is a single URL parameter, consisting of a key and a value. type Param struct { Key string Value string } // Params is a Param-slice, as returned by the router. // The slice is ordered, the first URL paramet",
+            "outputChars": 1913
+          },
+          {
+            "title": "ghx read gin-gonic/gin context.go 2\u003e\u00261 | sed -n '510,520p'",
+            "outputSummary": "```console // id := c.Param(\"id\") // id == \"john\" // // a GET request to /user/john/ // id := c.Param(\"id\") // id == \"/john/\" // }) func (c *Context) Param(key string) string { return c.Params.ByName(key) } // AddParam adds param to context and // replaces path param key with giv",
+            "outputChars": 707
+          }
+        ]
+      }
+    ]
+  }
+}

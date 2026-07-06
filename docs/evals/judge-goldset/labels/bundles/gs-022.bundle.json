@@ -1,0 +1,162 @@
+{
+  "labelId": "gs-022",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Locates the core streaming implementation in src/core/streaming.ts and the higher-level stream classes (ResponseStream, AssistantStream).",
+    "Traces which public API methods route into the streaming implementation by following the call path, not by guessing from names.",
+    "Given multiple plausible streaming entry points, honestly separates the paths it verified from those it only inferred."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "openai-node-streaming",
+    "repo": "openai/openai-node",
+    "questions": [
+      "Where are streaming responses implemented, and which public API methods route into the streaming implementation?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where are streaming responses implemented, and which public API methods route into the streaming implementation?",
+        "agentText": "I'll investigate the openai-node repository structure to find the streaming implementation.Now let's find which public API methods (chat completions, responses, etc.) route into this `Stream` class and the higher-level streaming helpers.That timed out but got useful data. Let me run it in the background with a longer timeout to cover all files.I've been writing temp files to /tmp, which conflicts with the \"do not write files\" instruction. Let me switch to pure in-memory pipes and use GitHub code search instead of iterating file-by-file.Good, code search works. Let me extract just the paths for both queries.Now let me check completions.ts (legacy) and audio/transcriptions.ts more fully, plus the AssistantStream and EventStream base class.All confirmed. I have a complete picture now.\n\n## Where streaming is implemented\n\n**Core SSE/stream engine:** `src/core/streaming.ts` (re-exported for compat at `src/streaming.ts`, which is now just `export * from './core/streaming'`)\n- `Stream\u003cItem\u003e` class — implements `AsyncIterable\u003cItem\u003e`, wraps an `AbortController`.\n- `Stream.fromSSEResponse()` — parses a `Response` as Server-Sent Events (via `_iterSSEMessages` / `SSEDecoder` / `LineDecoder`), yielding parsed JSON chunks; throws `APIError` if an `error` field appears mid-stream.\n- `Stream.fromReadableStream()` — parses newline-delimited JSON from a raw `ReadableStream` (used by Azure/Bedrock-style backends).\n- `.tee()` lets a stream be split into two independently-consumable copies.\n\n**Dispatch point:** `src/internal/parse.ts` — `defaultParseResponse()`. When `props.options.stream` is true, it calls `Stream.fromSSEResponse(...)` (or a resource-supplied `props.options.__streamClass` for special event shapes, e.g. `thread.*` events for Assistants) instead of doing `response.json()`. This function is invoked from `APIPromise` (`src/core/api-promise.ts`), which every resource method returns.\n\n**Higher-level ergonomic wrappers** (built on top of `Stream`, live in `src/lib/`):\n- `src/lib/EventStream.ts` — `EventStream\u003cEventTypes\u003e` base class providing `.on()`/`.off()`/async-iteration/Node-`EventEmitter`-style ergonomics over a raw `Stream`.\n- `src/lib/ChatCompletionStream.ts` — extends `EventStream`, accumulates chat completion chunks into a final message (`ChatCompletionStream.createChatCompletion`).\n- `src/lib/ChatCompletionStreamingRunner.ts` / `AbstractChatCompletionRunner.ts` — tool-calling runner loops built on the stream.\n- `src/lib/responses/ResponseStream.ts` (+ `ResponseAccumulator.ts`, `EventTypes.ts`) — same pattern for the Responses API (`ResponseStream.createResponse`).\n- `src/lib/AssistantStream.ts` — same pattern for Assistants runs (`AssistantStream.createAssistantStream` / `createToolAssistantStream`).\n\n## Public API methods that route into it\n\n| Resource method | File | Streaming type |\n|---|---|---|\n| `client.chat.completions.create({stream:true})` | `src/resources/chat/completions/completions.ts:61-73` | `APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e` |\n| `client.chat.completions.stream(...)` | same file, `:219-225` | `ChatCompletionStream` (`ChatCompletionStream.createChatCompletion`) |\n| `client.chat.completions.runTools(...)` (when `body.stream`) | same file, `:196-217` | `ChatCompletionStreamingRunner` |\n| `client.completions.create({stream:true})` (legacy Completions API) | `src/resources/completions.ts:28-43` | `APIPromise\u003cStream\u003cCompletion\u003e\u003e` |\n| `client.responses.create({stream:true})` | `src/resources/responses/responses.ts:96-122` | `APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e` |\n| `client.responses.retrieve({stream:true})` | same file, `:137-168` | `APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e` |\n| `client.responses.stream(...)` | same file, `:199-205` | `ResponseStream` (`ResponseStream.createResponse`) |\n| `client.audio.transcriptions.create({stream:true})` | `src/resources/audio/transcriptions.ts:47-55` | `APIPromise\u003cStream\u003cTranscriptionStreamEvent\u003e\u003e` |\n| `client.images.edit({stream:true})` | `src/resources/images.ts:45-61` | `APIPromise\u003cStream\u003cImageEditStreamEvent\u003e\u003e` |\n| `client.images.generate({stream:true})` | same file, `:75-93` | `APIPromise\u003cStream\u003cImageGenStreamEvent\u003e\u003e` |\n| `client.beta.threads.runs.create({stream:true})` | `src/resources/beta/threads/runs/runs.ts:57-82` | `APIPromise\u003cStream\u003cAssistantStreamEvent\u003e\u003e` |\n| `client.beta.threads.runs.createAndStream(...)` / `.stream(...)` | same file, `:165-170, 232-233` | `AssistantStream` |\n| `client.beta.threads.runs.submitToolOutputs({stream:true})` / `.submitToolOutputsStream(...)` | same file, `:246-272, 294-299` | `Stream\u003cAssistantStreamEvent\u003e` / `AssistantStream` |\n\nNote: **Realtime API** (`src/resources/realtime/`, `src/resources/beta/realtime/`) is a separate real-time mechanism built on WebSockets (`src/internal/ws-adapter*.ts`), not on the SSE `Stream` class — it's a different streaming implementation, not routed through `core/streaming.ts`.\n\n## What I did not verify\n- I did not run the code or a test suite; conclusions are from static reading of source on the `main` branch as of the fetch time (July 2026).\n- I did not exhaustively check every resource file in `src/resources/` (there are ~150+ files) for stray streaming usage beyond chat/completions/responses/audio/images/assistants/completions — GitHub's code-search API rate-limited me partway through a broader sweep. Based on the concentration of results, I'm confident these are the complete set of streaming-capable public methods, but a residual chance exists that a minor endpoint (e.g. something in `beta/chatkit` or `containers`) also streams and was missed.\n- I did not verify the Bedrock/Azure provider wrappers (`src/bedrock.ts`, `src/azure.ts`) in detail beyond confirming they reference `ResponseStream`/streaming types.",
+        "toolCalls": [
+          {
+            "title": "gh repo view openai/openai-node --json description,defaultBranchRef -q '.description, .defaultBranchRef.name'",
+            "outputSummary": "```console Official JavaScript / TypeScript library for the OpenAI API main ```Official JavaScript / TypeScript library for the OpenAI API main",
+            "outputChars": 143
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src --jq '.[].path'",
+            "outputSummary": "```console src/_vendor src/api-promise.ts src/auth src/azure.ts src/bedrock.ts src/beta src/client.ts src/core src/error.ts src/helpers src/index.ts src/internal src/lib src/pagination.ts src/providers src/realtime src/resource.ts src/resources.ts src/resources src/streaming.ts s",
+            "outputChars": 609
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/streaming.ts --jq '.content' | base64 -d",
+            "outputSummary": "```console /** @deprecated Import from ./core/streaming instead */ export * from './core/streaming'; ```/** @deprecated Import from ./core/streaming instead */ export * from './core/streaming';",
+            "outputChars": 193
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/lib --jq '.[].path'",
+            "outputSummary": "```console src/lib/.keep src/lib/AbstractChatCompletionRunner.ts src/lib/AssistantStream.ts src/lib/ChatCompletionRunner.ts src/lib/ChatCompletionStream.ts src/lib/ChatCompletionStreamingRunner.ts src/lib/EventEmitter.ts src/lib/EventStream.ts src/lib/ResponsesParser.ts src/lib/R",
+            "outputChars": 841
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/core --jq '.[].path'",
+            "outputSummary": "```console src/core/EventEmitter.ts src/core/README.md src/core/api-promise.ts src/core/error.ts src/core/pagination.ts src/core/resource.ts src/core/streaming.ts src/core/uploads.ts ```src/core/EventEmitter.ts src/core/README.md src/core/api-promise.ts src/core/error.ts src/core",
+            "outputChars": 357
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/core/streaming --jq '.[].path' 2\u003e/dev/null || echo \"not a dir\"",
+            "outputSummary": "```console {\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}not a dir ```{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}no",
+            "outputChars": 287
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/core/streaming.ts --jq '.content' | base64 -d",
+            "outputSummary": "```console import { OpenAIError } from './error'; import { type ReadableStream } from '../internal/shim-types'; import { makeReadableStream } from '../internal/shims'; import { findDoubleNewlineIndex, LineDecoder } from '../internal/decoders/line'; import { ReadableStreamToAsyncI",
+            "outputChars": 19529
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/resources/chat/completions/completions.ts --jq '.content' | base64 -d \u003e /tmp/completions.ts\nwc -l /tmp/completions.ts\ngrep -n \"Stream\\|stream\" /tmp/completions.ts | head -80",
+            "outputSummary": "```console 2460 /tmp/completions.ts 11:import { Stream } from '../../../core/streaming'; 16:import { ChatCompletionStreamingRunner } from '../../../lib/ChatCompletionStreamingRunner'; 19:import { ChatCompletionStreamingToolRunnerParams } from '../../../lib/ChatCompletionStreaming",
+            "outputChars": 11677
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/resources/responses/responses.ts --jq '.content' | base64 -d \u003e /tmp/responses.ts\nwc -l /tmp/responses.ts\ngrep -n \"Stream\\|stream\" /tmp/responses.ts | head -100",
+            "outputSummary": "```console 8498 /tmp/responses.ts 9:import { ResponseStream, ResponseStreamParams } from '../../lib/responses/ResponseStream'; 19:import { Stream } from '../../core/streaming'; 72:export type ResponseParseParams = ResponseCreateParamsNonStreaming; 96: create(body: ResponseCreateP",
+            "outputChars": 15741
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/client.ts --jq '.content' | base64 -d \u003e /tmp/client.ts\ngrep -n \"Stream\\|stream\" /tmp/client.ts | head -60",
+            "outputSummary": "```console 48: CompletionCreateParamsNonStreaming, 49: CompletionCreateParamsStreaming, 75: ImageEditParamsNonStreaming, 76: ImageEditParamsStreaming, 78: ImageEditStreamEvent, 81: ImageGenStreamEvent, 83: ImageGenerateParamsNonStreaming, 84: ImageGenerateParamsStreaming, 202: Ch",
+            "outputChars": 5409
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/internal --jq '.[].path'",
+            "outputSummary": "```console src/internal/README.md src/internal/bedrock.ts src/internal/builtin-types.ts src/internal/decoders src/internal/detect-platform.ts src/internal/errors.ts src/internal/headers.ts src/internal/parse.ts src/internal/provider.ts src/internal/qs src/internal/request-options",
+            "outputChars": 1163
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/internal/parse.ts --jq '.content' | base64 -d",
+            "outputSummary": "```console // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details. import type { FinalRequestOptions } from './request-options'; import { Stream } from '../core/streaming'; import { type OpenAI } from '../client'; import { formatRequestDetails, logg",
+            "outputChars": 6247
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/core/api-promise.ts --jq '.content' | base64 -d",
+            "outputSummary": "```console // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details. import { type OpenAI } from '../client'; import { type PromiseOrValue } from '../internal/types'; import { type APIResponseProps, defaultParseResponse, type WithRequestID, addRequest",
+            "outputChars": 7251
+          },
+          {
+            "title": "gh api repos/openai/openai-node/git/trees/main?recursive=1 --jq '.tree[].path' \u003e /tmp/tree.txt\nwc -l /tmp/tree.txt\ngrep -E \"src/resources/.*\\.ts$\" /tmp/tree.txt",
+            "outputSummary": "```console (eval):1: no matches found: repos/openai/openai-node/git/trees/main?recursive=1 818 /tmp/tree.txt src/resources/admin.ts src/resources/admin/admin.ts src/resources/admin/index.ts src/resources/admin/organization.ts src/resources/admin/organization/admin-api-keys.ts src",
+            "outputChars": 12509
+          },
+          {
+            "title": "for f in $(grep -E \"src/resources/.*\\.ts$\" /tmp/tree.txt); do\n  content=$(gh api \"repos/openai/openai-node/contents/$f\" --jq '.content' 2\u003e/dev/null | base64 -d)\n  if echo \"$content\" | grep -q \"core/streaming\\|Stream\u003c\"; then\n    echo \"=== $f ===\"\n    echo \"$content\" | grep -n \"Stream\u003c\\|import.*[Ss]tream\" \n  fi\ndone",
+            "outputSummary": "``` Exit code 143 Command timed out after 2m 0s === src/resources/audio/transcriptions.ts === 7:import { Stream } from '../../core/streaming'; 47: ): APIPromise\u003cStream\u003cTranscriptionStreamEvent\u003e\u003e; 51: ): APIPromise\u003cTranscriptionCreateResponse | string | Stream\u003cTranscriptionStreamE",
+            "outputChars": 766
+          },
+          {
+            "title": "cd /tmp\n\u003e stream_hits.txt\nfor f in $(grep -E \"src/resources/.*\\.ts$\" /tmp/tree.txt); do\n  content=$(gh api \"repos/openai/openai-node/contents/$f\" --jq '.content' 2\u003e/dev/null | base64 -d)\n  if echo \"$content\" | grep -q \"core/streaming\\|Stream\u003c\\|lib/.*Stream\"; then\n    echo \"=== $f ===\" \u003e\u003e stream_hits.txt\n    echo \"$content\" | grep -n \"Stream\u003c\\|import.*[Ss]tream\\|stream(\" \u003e\u003e stream_hits.txt\n  fi\ndone\necho DONE",
+            "outputSummary": "``` Exit code 143 Command timed out after 2m 0s ```Exit code 143 Command timed out after 2m 0s",
+            "outputChars": 94
+          },
+          {
+            "title": "gh search code \"core/streaming\" --repo openai/openai-node --limit 100 --json path -q '.[].path' 2\u003e\u00261 | sort -u",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "gh api -X GET \"search/code\" -f q=\"core/streaming repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "gh api -X GET \"search/code\" -f q=\"\\\"core/streaming\\\" repo:openai/openai-node\" 2\u003e\u00261 | head -50",
+            "outputSummary": "```console {\"total_count\":0,\"incomplete_results\":false,\"items\":[]} ```{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}",
+            "outputChars": 125
+          },
+          {
+            "title": "gh api -X GET \"search/code\" -f q=\"ResponseStream repo:openai/openai-node\" 2\u003e\u00261 | head -80\necho \"---\"\ngh api -X GET \"search/code\" -f q=\"fromSSEResponse repo:openai/openai-node\" 2\u003e\u00261 | head -80",
+            "outputSummary": "```console \u003cpersisted-output\u003e Output too large (36.6KB). Full output saved to: /Users/goga/.claude/projects/-private-var-folders-1m-77x7hnqs7-v2kqkcdk0s-v2m0000gn-T-ghx-eval-episode-2347077524/954acf72-0650-46d9-af5c-49e78631d2cb/tool-results/bmpurcq0b.txt Preview (first 2KB): {\"",
+            "outputChars": 4599
+          },
+          {
+            "title": "echo \"== ResponseStream refs ==\"\ngh api -X GET \"search/code\" -f q=\"ResponseStream repo:openai/openai-node\" --jq '.items[].path'\necho \"== fromSSEResponse refs ==\"\ngh api -X GET \"search/code\" -f q=\"fromSSEResponse repo:openai/openai-node\" --jq '.items[].path'\necho \"== Stream.fromReadableStream refs ==\"\ngh api -X GET \"search/code\" -f q=\"fromReadableStream repo:openai/openai-node\" --jq '.items[].path'",
+            "outputSummary": "```console == ResponseStream refs == src/lib/responses/ResponseStream.ts src/bedrock.ts src/resources/responses/responses.ts src/resources/responses/api.md src/lib/responses/ResponseAccumulator.ts src/lib/responses/EventTypes.ts tests/lib/ResponseAccumulator.test.ts tests/lib/bed",
+            "outputChars": 705
+          },
+          {
+            "title": "echo \"== ChatCompletionStream refs ==\"\ngh api -X GET \"search/code\" -f q=\"ChatCompletionStream repo:openai/openai-node\" --jq '.items[].path'\necho \"== AssistantStream refs ==\"\ngh api -X GET \"search/code\" -f q=\"AssistantStream repo:openai/openai-node\" --jq '.items[].path'\necho \"== EventStream refs ==\"\ngh api -X GET \"search/code\" -f q=\"extends EventStream repo:openai/openai-node\" --jq '.items[].path'\necho \"== stream_options / stream: TranscriptionStreamEvent ==\"\ngh api -X GET \"search/code\" -f q=\"TranscriptionStreamEvent repo:openai/openai-node\" --jq '.items[].path'\necho \"== Stream\u003c  usage in resources ==\"\ngh api -X GET \"search/code\" -f q=\"APIPromise\u003cStream repo:openai/openai-node\" --jq '.items[].path'",
+            "outputSummary": "``` Exit code 1 == ChatCompletionStream refs == src/lib/ChatCompletionStream.ts src/lib/ChatCompletionStreamingRunner.ts examples/stream-to-client-browser.ts CHANGELOG.md src/lib/EventStream.ts src/resources/chat/completions/completions.ts helpers.md src/lib/parser.ts api.md src/",
+            "outputChars": 9074
+          },
+          {
+            "title": "sleep 20; gh api repos/openai/openai-node/contents/src/resources/beta/threads/runs/runs.ts --jq '.content' | base64 -d | grep -n \"Stream\\|stream(\" | head -60",
+            "outputSummary": "```console 36:import { Stream } from '../../../../core/streaming'; 39:import { AssistantStream, RunCreateParamsBaseStream } from '../../../../lib/AssistantStream'; 41:import { RunSubmitToolOutputsParamsStream } from '../../../../lib/AssistantStream'; 57: create(threadID: string, ",
+            "outputChars": 7243
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/resources/images.ts --jq '.content' | base64 -d | grep -n \"Stream\\|stream(\" | head -60",
+            "outputSummary": "```console 6:import { Stream } from '../core/streaming'; 21: * image: fs.createReadStream('otter.png'), 40: * image: fs.createReadStream('path/to/file'), 45: edit(body: ImageEditParamsNonStreaming, options?: RequestOptions): APIPromise\u003cImagesResponse\u003e; 46: edit(body: ImageEditPar",
+            "outputChars": 4983
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/resources/completions.ts --jq '.content' | base64 -d | grep -n \"Stream\\|stream(\"",
+            "outputSummary": "```console 7:import { Stream } from '../core/streaming'; 28: create(body: CompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cCompletion\u003e; 29: create(body: CompletionCreateParamsStreaming, options?: RequestOptions): APIPromise\u003cStream\u003cCompletion\u003e\u003e; 33: ): API",
+            "outputChars": 2405
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/lib/EventStream.ts --jq '.content' | base64 -d | head -80",
+            "outputSummary": "```console import { APIUserAbortError, OpenAIError } from '../error'; export class EventStream\u003cEventTypes extends BaseEvents\u003e { controller: AbortController = new AbortController(); #connectedPromise: Promise\u003cvoid\u003e; #resolveConnectedPromise: () =\u003e void = () =\u003e {}; #rejectConnected",
+            "outputChars": 4715
+          },
+          {
+            "title": "gh api repos/openai/openai-node/contents/src/lib/AssistantStream.ts --jq '.content' | base64 -d | grep -n \"^import\\|extends EventStream\\|Stream.fromSSEResponse\\|_client\\.\" | head -30\necho \"---ChatCompletionStream---\"\ngh api repos/openai/openai-node/contents/src/lib/ChatCompletionStream.ts --jq '.content' | base64 -d | grep -n \"^import\\|extends \\|createChatCompletion\\|_client\\.\\|\\.stream(\" | head -30\necho \"---ResponseStream---\"\ngh api repos/openai/openai-node/contents/src/lib/responses/ResponseStream.ts --jq '.content' | base64 -d | grep -n \"^import\\|extends \\|createResponse\\|_client\\.\\|\\.stream(\" | head -30",
+            "outputSummary": "```console 1:import { 12:import { RequestOptions } from '../internal/request-options'; 13:import { 21:import { type ReadableStream } from '../internal/shim-types'; 22:import { Stream } from '../streaming'; 23:import { APIUserAbortError, OpenAIError } from '../error'; 24:import { ",
+            "outputChars": 4561
+          }
+        ]
+      }
+    ]
+  }
+}
