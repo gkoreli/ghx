@@ -24,13 +24,15 @@ type PreflightResult struct {
 	Checks []PreflightCheck
 }
 
-// RunPreflight executes all three standard checks in parallel.
-// All checks complete within a 5-second wall-clock timeout.
+// RunPreflight executes all standard checks in parallel.
 func RunPreflight(ctx context.Context) PreflightResult {
 	type fn func(context.Context) PreflightCheck
-	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary}
+	cfg := LoadConfig()
+	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary, func(ctx context.Context) PreflightCheck {
+		return checkACPAgent(ctx, cfg)
+	}}
 
-	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	tctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
 	results := make([]PreflightCheck, len(checks))
@@ -52,6 +54,13 @@ func RunPreflight(ctx context.Context) PreflightResult {
 		}
 	}
 	return PreflightResult{Passed: passed, Checks: results}
+}
+
+func checkACPAgent(ctx context.Context, cfg Config) PreflightCheck {
+	if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
+		return PreflightCheck{Name: "acp-handshake", Passed: false, Message: err.Error()}
+	}
+	return PreflightCheck{Name: "acp-handshake", Passed: true, Message: cfg.AgentCmd + " completed ACP initialize"}
 }
 
 // FormatPreflight returns a human-readable diagnostic block.

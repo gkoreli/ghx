@@ -23,8 +23,9 @@ type skillFrontmatter struct {
 
 func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 	docs := map[string]string{
-		"ghx/SKILL.md":     SkillMD,
-		"ghx-mcp/SKILL.md": MCPSkillMD,
+		"ghx/SKILL.md":       SkillMD,
+		"ghx-mcp/SKILL.md":   MCPSkillMD,
+		"ghx-recon/SKILL.md": ReconSkillMD,
 	}
 
 	for name, content := range docs {
@@ -59,6 +60,23 @@ func TestEmbeddedSkillsHaveCompleteFrontmatter(t *testing.T) {
 	}
 }
 
+func TestReconSkillBodyLineBudget(t *testing.T) {
+	body := skillBody(t, ReconSkillMD)
+	if strings.TrimSpace(body) == "" {
+		t.Fatal("recon skill body must be non-empty")
+	}
+
+	lines := 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines++
+		}
+	}
+	if lines > 30 {
+		t.Fatalf("recon skill body has %d non-empty lines, want <= 30", lines)
+	}
+}
+
 func parseFrontmatter(t *testing.T, content string) skillFrontmatter {
 	t.Helper()
 	if !strings.HasPrefix(content, "---\n") {
@@ -70,8 +88,7 @@ func parseFrontmatter(t *testing.T, content string) skillFrontmatter {
 		t.Fatal("skill doc must close frontmatter with ---")
 	}
 
-	bodyStart := len("---\n") + end + len("\n---\n")
-	if strings.TrimSpace(content[bodyStart:]) == "" {
+	if strings.TrimSpace(skillBody(t, content)) == "" {
 		t.Fatal("skill doc body must be non-empty")
 	}
 
@@ -80,4 +97,17 @@ func parseFrontmatter(t *testing.T, content string) skillFrontmatter {
 		t.Fatalf("frontmatter must parse as YAML: %v", err)
 	}
 	return fm
+}
+
+func skillBody(t *testing.T, content string) string {
+	t.Helper()
+	if !strings.HasPrefix(content, "---\n") {
+		t.Fatal("skill doc must start with frontmatter at byte 0")
+	}
+	end := strings.Index(content[len("---\n"):], "\n---\n")
+	if end < 0 {
+		t.Fatal("skill doc must close frontmatter with ---")
+	}
+	bodyStart := len("---\n") + end + len("\n---\n")
+	return content[bodyStart:]
 }

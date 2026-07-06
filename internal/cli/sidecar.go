@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"unicode"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/spf13/cobra"
@@ -24,7 +26,7 @@ invocations so follow-up questions retain prior context.`,
 
 // sidecarAskCmd sends one investigation turn to the sidecar agent.
 var sidecarAskCmd = &cobra.Command{
-	Use:   "ask --session <name> --repo <owner/repo> <question>",
+	Use:   "ask --repo <owner/repo> <question>",
 	Short: "Ask a repo question using the sidecar agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,11 +35,11 @@ var sidecarAskCmd = &cobra.Command{
 		depth, _ := cmd.Flags().GetString("depth")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		if session == "" {
-			return fmt.Errorf("--session is required")
-		}
 		if repo == "" {
 			return fmt.Errorf("--repo is required")
+		}
+		if session == "" {
+			session = defaultReconSession(repo)
 		}
 
 		cfg := sidecar.LoadConfig()
@@ -56,7 +58,7 @@ var sidecarAskCmd = &cobra.Command{
 			enc.SetIndent("", "  ")
 			return enc.Encode(report)
 		}
-		fmt.Println(report.Answer)
+		printHumanReport(report)
 		return nil
 	},
 }
@@ -209,7 +211,7 @@ var sidecarConfigInitCmd = &cobra.Command{
 }
 
 func init() {
-	sidecarAskCmd.Flags().String("session", "", "Named session (required)")
+	sidecarAskCmd.Flags().String("session", "", "Named session (default: repo slug, e.g. owner-repo)")
 	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (required)")
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
@@ -217,4 +219,70 @@ func init() {
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
 	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarSessionsCmd, sidecarConfigCmd)
+}
+
+func defaultReconSession(repo string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(repo) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "repo"
+	}
+	return s
+}
+
+func printHumanReport(report *sidecar.Report) {
+	fmt.Println(report.Answer)
+	printClaims("Verified", report.Verified)
+	printRelevantFiles(report.RelevantFiles)
+	printStrings("Uncertainty", report.Uncertainty)
+}
+
+func printClaims(title string, claims []sidecar.Claim) {
+	if len(claims) == 0 {
+		return
+	}
+	fmt.Printf("\n%s:\n", title)
+	for _, c := range claims {
+		if c.Evidence != "" {
+			fmt.Printf("- %s — %s\n", c.Summary, c.Evidence)
+		} else {
+			fmt.Printf("- %s\n", c.Summary)
+		}
+	}
+}
+
+func printRelevantFiles(files []sidecar.RelevantFile) {
+	if len(files) == 0 {
+		return
+	}
+	fmt.Println("\nRelevant files:")
+	for _, f := range files {
+		if f.Reason != "" {
+			fmt.Printf("- %s — %s\n", f.Path, f.Reason)
+		} else {
+			fmt.Printf("- %s\n", f.Path)
+		}
+	}
+}
+
+func printStrings(title string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Printf("\n%s:\n", title)
+	for _, item := range items {
+		fmt.Printf("- %s\n", item)
+	}
 }

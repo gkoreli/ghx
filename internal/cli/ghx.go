@@ -282,9 +282,15 @@ var skillCmd = &cobra.Command{
 	Short: "Output SKILL.md for agent context injection",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		mcpFlag, _ := cmd.Flags().GetBool("mcp")
+		reconFlag, _ := cmd.Flags().GetBool("recon")
+		if mcpFlag && reconFlag {
+			return fmt.Errorf("--mcp and --recon are mutually exclusive")
+		}
 		filename := "SKILL.md"
 		if mcpFlag {
 			filename = "MCP-SKILL.md"
+		} else if reconFlag {
+			filename = "RECON-SKILL.md"
 		}
 		return printSkill(filename)
 	},
@@ -300,15 +306,20 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	skillCmd.Flags().Bool("mcp", false, "Output MCP skill instead of CLI skill")
+	skillCmd.Flags().Bool("recon", false, "Output recon sidecar skill instead of CLI skill")
 }
 
 var SkillMD string
 var MCPSkillMD string
+var ReconSkillMD string
 
 func printSkill(filename string) error {
-	if filename == "MCP-SKILL.md" {
+	switch filename {
+	case "MCP-SKILL.md":
 		fmt.Print(MCPSkillMD)
-	} else {
+	case "RECON-SKILL.md":
+		fmt.Print(ReconSkillMD)
+	default:
 		fmt.Print(SkillMD)
 	}
 	return nil

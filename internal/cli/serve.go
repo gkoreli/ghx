@@ -10,6 +10,7 @@ import (
 
 	"github.com/gkoreli/ghx/v2/internal/codemode"
 	ghxlib "github.com/gkoreli/ghx/v2/internal/ghx"
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
@@ -59,6 +60,12 @@ func serveMCP(cmd *cobra.Command) error {
 	s := server.NewMCPServer("ghx", VERSION,
 		server.WithToolCapabilities(true),
 	)
+	reconMode, _ := cmd.Flags().GetBool("recon")
+	if reconMode {
+		registerReconTool(s)
+		transport := selectTransport(cmd)
+		return transport.Serve(s)
+	}
 
 	// Define tools
 	exploreTool := mcp.NewTool("explore",
@@ -137,6 +144,46 @@ Example: var r = codemode.explore({ repo: "vercel/next.js" }); return r.files;`,
 	// Select and use transport
 	transport := selectTransport(cmd)
 	return transport.Serve(s)
+}
+
+func registerReconTool(s *server.MCPServer) {
+	reconTool := mcp.NewTool("recon",
+		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration."),
+		mcp.WithString("question", mcp.Required(), mcp.Description("English question about the repo")),
+		mcp.WithString("repo", mcp.Required(), mcp.Description("owner/repo")),
+		mcp.WithString("session", mcp.Description("optional named session for parallel investigation threads")),
+	)
+	s.AddTool(reconTool, handleRecon)
+}
+
+var askSidecar = sidecar.Ask
+
+func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	question, err := request.RequireString("question")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	repo, err := request.RequireString("repo")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	session := request.GetString("session", "")
+	if session == "" {
+		session = defaultReconSession(repo)
+	}
+
+	cfg := sidecar.LoadConfig()
+	report, _, err := askSidecar(ctx, cfg, sidecar.AskRequest{
+		Session:  session,
+		Repo:     repo,
+		Question: question,
+		Depth:    "normal",
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	data, _ := json.Marshal(report)
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -310,5 +357,6 @@ func handleCode(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 
 func init() {
 	serveCmd.Flags().String("http", "", "Start streamable HTTP server on address (e.g., :8080)")
+	serveCmd.Flags().Bool("recon", false, "Serve one recon sidecar tool instead of direct ghx tools")
 	RootCmd.AddCommand(serveCmd)
 }

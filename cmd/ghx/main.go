@@ -11,6 +11,7 @@ import (
 func main() {
 	cli.SkillMD = skills.SkillMD
 	cli.MCPSkillMD = skills.MCPSkillMD
+	cli.ReconSkillMD = skills.ReconSkillMD
 	if err := cli.RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,6 +46,15 @@ type ImplementationInfo struct {
 	Name    string
 	Version string
 	Meta    map[string]any
+}
+
+const defaultHandshakeTimeout = 10 * time.Second
+
+// ACPHandshakeFailureMessage is the actionable failure text shared by ask,
+// doctor, and config init when a configured binary exists but does not speak
+// ACP initialize on stdio.
+func ACPHandshakeFailureMessage(agentCmd string) string {
+	return fmt.Sprintf("agent %s did not complete the ACP handshake; run `ghx sidecar config init` or set an ACP-capable agent", agentCmd)
 }
 
 // ToolStatusTransition records one observed ACP tool-call status.
@@ -475,4 +485,52 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 
 	os.Stdout.WriteString("\n")
 	return result, string(sessionID), nil
+}
+
+// CheckACPHandshake spawns an agent and verifies that ACP initialize completes
+// over stdio before the timeout. It intentionally stops after initialize:
+// preflight needs protocol compatibility, not a working prompt turn.
+func CheckACPHandshake(ctx context.Context, agentCmd, cwd string, env []string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultHandshakeTimeout
+	}
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(tctx, agentCmd)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	if env != nil {
+		cmd.Env = env
+	}
+	cmd.Stderr = os.Stderr
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start %q: %w", agentCmd, err)
+	}
+	defer ShutdownAgent(cmd, stdin)
+
+	result := TurnResult{}
+	conn := acp.NewClientSideConnection(&denyClient{result: &result}, stdin, stdout)
+	if _, err := conn.Initialize(tctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
+		},
+	}); err != nil {
+		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
+			return errors.New(ACPHandshakeFailureMessage(agentCmd))
+		}
+		return fmt.Errorf("%s: %w", ACPHandshakeFailureMessage(agentCmd), err)
+	}
+	return nil
 }
