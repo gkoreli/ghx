@@ -1,0 +1,129 @@
+// Command discovery-spot is a THROWAWAY spot-check driver for ADR-0019.2
+// discovery episodes. internal/sidecar/evals exports RunDiscoveryEpisode,
+// ComputeDiscoveryRewards (invoked inside it), EvaluateDiscoveryGates and
+// SaveDiscoveryVerdict, but no agent_e2e test drives them live yet. This
+// driver ONLY calls those frozen exported functions — zero scoring or
+// detection logic lives here — so the measurement stack is untouched
+// (AGENTS.md "Delegated Workers"). It is run once for the
+// spot-instrumented-2026-07-06 evidence and then deleted; a copy is kept
+// in docs/evals/spot-instrumented-2026-07-06/ for recomputability.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
+	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
+)
+
+func main() {
+	taskID := flag.String("task", "openai-compatible-ai-gateways", "discovery task id")
+	profile := flag.String("profile", "", "profile to run (plain|ghx|ghx-sidecar); empty runs none")
+	runDir := flag.String("rundir", "", "run directory for episode artifacts")
+	tasksDir := flag.String("tasksdir", "", "absolute path to testdata/discovery-tasks")
+	verdict := flag.Bool("verdict", false, "compute and save the discovery verdict over rundir episodes")
+	flag.Parse()
+
+	if *runDir == "" || *tasksDir == "" {
+		fatal("rundir and tasksdir are required")
+	}
+
+	if *verdict {
+		eps, err := evals.LoadRunEpisodes(*runDir)
+		if err != nil {
+			fatal("load run episodes: %v", err)
+		}
+		v := evals.EvaluateDiscoveryGates(eps)
+		mdPath, err := evals.SaveDiscoveryVerdict(*runDir, v)
+		if err != nil {
+			fatal("save discovery verdict: %v", err)
+		}
+		fmt.Printf("discovery verdict: %s\n\n%s\n", mdPath, evals.FormatDiscoveryVerdict(v))
+		return
+	}
+
+	agentCmd := os.Getenv("GHX_EVAL_AGENT")
+	if agentCmd == "" {
+		fatal("GHX_EVAL_AGENT must be set")
+	}
+	pf := sidecar.RunPreflightForAgent(context.Background(), agentCmd)
+	if !pf.Passed {
+		fatal("preflight failed:\n%s", sidecar.FormatPreflight(pf))
+	}
+
+	tasks, err := evals.LoadDiscoveryTasks(*tasksDir)
+	if err != nil {
+		fatal("load discovery tasks: %v", err)
+	}
+	var task *evals.DiscoveryTask
+	for i := range tasks {
+		if tasks[i].ID == *taskID {
+			task = &tasks[i]
+		}
+	}
+	if task == nil {
+		fatal("task %q not found in %s", *taskID, *tasksDir)
+	}
+
+	sessions, err := os.MkdirTemp("", "ghx-discovery-spot-sessions-*")
+	if err != nil {
+		fatal("mkdtemp: %v", err)
+	}
+	defer os.RemoveAll(sessions)
+	cfg := evals.RunConfig{AgentCmd: agentCmd, SessionsDir: sessions}
+
+	// Provenance: record the planned round in the run manifest, mirroring
+	// eval_test.go (1 task x 3 profiles x 1 trial; each driver invocation
+	// runs one profile cell).
+	probeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	identity, err := evals.ProbeAgentIdentity(probeCtx, cfg)
+	cancel()
+	if err != nil {
+		fatal("probe agent identity: %v", err)
+	}
+	if _, err := evals.RecordManifestRound(*runDir, evals.PlannedRound{Tasks: 1, Profiles: 1, Trials: 1}, identity); err != nil {
+		fatal("record manifest round: %v", err)
+	}
+
+	p := evals.Profile(*profile)
+	switch p {
+	case evals.ProfilePlain, evals.ProfileGhx, evals.ProfileSidecar:
+	default:
+		fatal("profile must be plain|ghx|ghx-sidecar, got %q", *profile)
+	}
+
+	ctx, cancelEp := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancelEp()
+	ep, runErr := evals.RunDiscoveryEpisode(ctx, cfg, *task, p)
+	strictFail := false
+	if ep != nil {
+		path, saveErr := evals.SaveEpisode(*runDir, ep)
+		if saveErr != nil {
+			fatal("save episode: %v", saveErr)
+		}
+		fmt.Printf("artifact: %s\n", path)
+		fmt.Printf("discoveryRewards: %+v\n", *ep.DiscoveryRewards)
+		fmt.Printf("context: %+v\n", ep.Context)
+		for _, a := range ep.Anomalies {
+			fmt.Printf("ANOMALY — investigate before further rounds: %s\n", a.String())
+			if os.Getenv("GHX_EVAL_STRICT") == "1" && a.Severity == evals.SeverityBreaking {
+				strictFail = true
+			}
+		}
+	}
+	if runErr != nil {
+		fatal("episode failed: %v", runErr)
+	}
+	if strictFail {
+		fatal("ANOMALY (strict): breaking anomaly present")
+	}
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
