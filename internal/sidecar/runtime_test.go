@@ -2,11 +2,23 @@ package sidecar
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
+func stubHandshake(t *testing.T) {
+	t.Helper()
+	old := checkACPHandshake
+	checkACPHandshake = func(context.Context, string, string, []string, time.Duration) error {
+		return nil
+	}
+	t.Cleanup(func() { checkACPHandshake = old })
+}
+
 func TestAskFallbackPromptCarriesLedger(t *testing.T) {
+	stubHandshake(t)
 	dir := t.TempDir()
 	if err := InitSession(dir, "s", "o/r", "scope"); err != nil {
 		t.Fatal(err)
@@ -73,6 +85,7 @@ func TestAskFallbackPromptCarriesLedger(t *testing.T) {
 // one nudge in the same ACP session; the retry's report is used, the
 // retry is recorded, and the retried session ID is persisted.
 func TestAskRetriesOnceWhenReportMissing(t *testing.T) {
+	stubHandshake(t)
 	dir := t.TempDir()
 
 	old := runTurnWithOptions
@@ -119,6 +132,7 @@ func TestAskRetriesOnceWhenReportMissing(t *testing.T) {
 // TestAskFallsBackToWarnWhenRetryAlsoFails: the WARN placeholder remains
 // the honest last resort, and only one retry is ever attempted.
 func TestAskFallsBackToWarnWhenRetryAlsoFails(t *testing.T) {
+	stubHandshake(t)
 	dir := t.TempDir()
 
 	old := runTurnWithOptions
@@ -143,5 +157,31 @@ func TestAskFallsBackToWarnWhenRetryAlsoFails(t *testing.T) {
 	}
 	if !result.ReportRetried {
 		t.Fatal("ReportRetried should be recorded even when the retry fails")
+	}
+}
+
+func TestAskFailsBeforeTurnWhenACPHandshakeFails(t *testing.T) {
+	dir := t.TempDir()
+	oldHandshake := checkACPHandshake
+	oldRunTurn := runTurnWithOptions
+	defer func() {
+		checkACPHandshake = oldHandshake
+		runTurnWithOptions = oldRunTurn
+	}()
+
+	wantErr := errors.New(ACPHandshakeFailureMessage("mock"))
+	checkACPHandshake = func(context.Context, string, string, []string, time.Duration) error {
+		return wantErr
+	}
+	runTurnWithOptions = func(context.Context, RunTurnOptions) (TurnResult, string, error) {
+		t.Fatal("Ask should fail before running a prompt turn when handshake fails")
+		return TurnResult{}, "", nil
+	}
+
+	_, _, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err == nil || !strings.Contains(err.Error(), "did not complete the ACP handshake") {
+		t.Fatalf("Ask error = %v, want handshake failure", err)
 	}
 }

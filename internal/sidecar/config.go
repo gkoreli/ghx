@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -73,28 +72,26 @@ func SaveConfig(cfg Config) error {
 // knownAgents are ACP-compatible agents probed by DetectAgents.
 var knownAgents = []struct {
 	name string
-	cmd  string
 }{
-	{"claude", "claude --version"},
-	{"codex", "codex --version"},
-	{"kiro", "kiro --version"},
+	{"claude"},
+	{"codex"},
+	{"kiro"},
 }
 
-// DetectAgents probes PATH for known ACP-compatible agents.
-// All probes run in parallel with a 3-second timeout.
+// DetectAgents probes PATH for known agents that complete ACP initialize.
+// All probes run in parallel with a short timeout.
 func DetectAgents(ctx context.Context) []string {
 	type result struct {
 		name string
 		ok   bool
 	}
 	ch := make(chan result, len(knownAgents))
-	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	tctx, cancel := context.WithTimeout(ctx, defaultHandshakeTimeout+time.Second)
 	defer cancel()
 	for _, a := range knownAgents {
 		a := a
 		go func() {
-			cmd := exec.CommandContext(tctx, "sh", "-c", a.cmd)
-			err := cmd.Run()
+			err := checkACPHandshake(tctx, a.name, "", nil, defaultHandshakeTimeout)
 			ch <- result{a.name, err == nil}
 		}()
 	}

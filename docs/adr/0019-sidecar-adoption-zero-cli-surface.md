@@ -1,7 +1,7 @@
 ---
 title: "ADR-0019: Sidecar Adoption — Zero-CLI-Knowledge Surface and Dogfooding"
 date: "2026-07-05"
-status: "proposed"
+status: "accepted — D1-D4 implemented; dogfood exit pending"
 thread: "sidecar-adoption"
 author: "Goga Koreli"
 ---
@@ -10,12 +10,16 @@ author: "Goga Koreli"
 
 ## Status
 
-Proposed. Opened the day M4 closed with THESIS SUPPORTED
+Accepted. Opened the day M4 closed with THESIS SUPPORTED
 (`docs/evals/gate-run-2026-07-05-confirmatory/`, commit 6f69ff9). This ADR
 governs NORTH_STAR **M5**: the concise "reconnaissance service" surface and
 founder dogfooding. New thread (`sidecar-adoption`) — it is about the
 customer-facing boundary, not the runtime (ADR-0015) or the evals
 (ADR-0016.x).
+
+D1-D4 were implemented on 2026-07-06. The ADR remains open for the M5 exit
+bar: one week of founder dogfooding with breaking friction fixed or explicitly
+deferred.
 
 ## Context: the measured thesis vs the shipped surface
 
@@ -145,3 +149,31 @@ the same OTel traces as evals, so friction reports can cite traces.
   today, tiers become visible in reports at M7).
 - AGENTS.md "Visibility and Truthfulness" — verdict-is-a-floor rationale
   that makes ergonomics the highest-leverage post-M4 work.
+
+## Implementation Notes (2026-07-06)
+
+- D1 landed as `skills/ghx-recon/SKILL.md`, embedded via `skills/doc.go` and
+  printed by `ghx skill --recon`. `skills/doc_test.go` now verifies the embed
+  is non-empty, has complete frontmatter, and keeps the recon body at or under
+  the 30 non-empty-line budget. The prose is intentionally concise and leaves
+  CLI doctrine in the sidecar persona and the legacy power-user skills.
+- D2 landed as `ghx serve --recon`. The flag registers exactly one MCP tool,
+  `recon(question, repo, session?)`, and the no-flag server path still
+  registers the existing direct tools. The handler loads sidecar config,
+  defaults the session through the same repo slug used by CLI ask, calls
+  `sidecar.Ask`, and returns the full report as JSON text.
+- D3 landed in `internal/cli/sidecar.go`. `--session` is optional and defaults
+  to a lowercase repo slug (`owner/repo` -> `owner-repo`, non-alphanumerics to
+  dashes). Human output now prints the answer plus compact verified,
+  relevant-files, and uncertainty sections; `--json` still emits the report
+  struct unchanged.
+- D4 landed by adding an initialize-only ACP handshake probe that reuses the
+  same `acp.NewClientSideConnection` path as runtime turns. `sidecar ask`
+  invokes it before session setup or prompting, `sidecar doctor` reports an
+  `acp-handshake` check, and `config init` only accepts known agents that pass
+  ACP initialize rather than mere PATH or `--version` presence.
+- Tests use tiny fake stdio agents: one writes a valid initialize response,
+  one stays silent to prove the fail-fast message, and detection excludes the
+  silent PATH-only candidate.
+
+No eval scorer, OTel, or release metadata files were changed in this slice.

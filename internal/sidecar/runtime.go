@@ -7,6 +7,7 @@ import (
 )
 
 var runTurnWithOptions = RunTurnWithOptions
+var checkACPHandshake = CheckACPHandshake
 
 // reportRetryPrompt is the one-shot corrective follow-up sent when a turn
 // produced no extractable <ghx-report> block (ADR-0016.7 RC3).
@@ -50,6 +51,9 @@ type AskRequest struct {
 // returned report will have only an Answer field describing the failure.
 func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult, error) {
 	sessionsDir := cfg.SessionsDir
+	if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
+		return nil, nil, err
+	}
 
 	// Ensure session exists on disk.
 	if !IsInitialized(sessionsDir, req.Session) {
