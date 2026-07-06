@@ -93,6 +93,17 @@ type Verdict struct {
 	// ExpectedEpisodes is known; FormatVerdict renders it as the
 	// "## Sequential stopping" section. Nil leaves the verdict unchanged.
 	Stopping *StoppingBounds `json:"stopping,omitempty"`
+	// SignalPerToken is the informational ADR-0016.6 chars/4 SPT table —
+	// the primary SPT variant, computable on every committed run. Never a
+	// gate input (ADR-0016.11 D3 embeds it in the verdict).
+	SignalPerToken map[Profile]ProfileSPT `json:"signalPerToken,omitempty"`
+	// RealTokenSPT is the informational ADR-0016.11 real-token variant,
+	// reported alongside — never instead of — the chars/4 table. Profiles
+	// without full usage coverage read Available=false (UNAVAILABLE).
+	RealTokenSPT map[Profile]ProfileRealTokenSPT `json:"realTokenSpt,omitempty"`
+	// Economics is the ADR-0016.11 D4 run-cost report from persisted
+	// per-turn costUsd, over all loaded episodes including excluded ones.
+	Economics *RunEconomics `json:"economics,omitempty"`
 }
 
 // LabelBaselineReused annotates a verdict generated from a run whose plain and
@@ -208,6 +219,13 @@ func EvaluateGates(episodes []*Episode) Verdict {
 
 	v := Verdict{Aggregates: agg, Anomalies: CountAnomalies(episodes), Valid: valid}
 	v.Notes = append(v.Notes, validityNotes...)
+
+	// Informational ADR-0016.11 reporting — never a gate input: both SPT
+	// variants always shown side by side, plus run economics.
+	v.SignalPerToken = AggregateSignalPerToken(episodes)
+	v.RealTokenSPT = AggregateRealTokenSPT(episodes)
+	econ := ComputeRunEconomics(episodes)
+	v.Economics = &econ
 
 	if sc.Episodes == 0 || gx.Episodes == 0 {
 		v.Notes = append(v.Notes, fmt.Sprintf(
@@ -601,6 +619,9 @@ func FormatVerdict(v Verdict) string {
 		}
 	}
 
+	sb.WriteString(formatSPTSection(v))
+	sb.WriteString(formatEconomicsSection(v.Economics))
+
 	sb.WriteString("\n## Verdict\n\n")
 	prefix := ""
 	for _, label := range v.Labels {
@@ -636,4 +657,100 @@ func FormatVerdict(v Verdict) string {
 		"(compression is 0 by construction for direct profiles). G3 is meaningful " +
 		"only jointly with G1/G2 — a tiny useless report maximizes compression.\n")
 	return sb.String()
+}
+
+// formatSPTSection renders both SPT variants side by side (ADR-0016.11 D3):
+// the chars/4 table stays primary; the real-token table is session-level and
+// reads UNAVAILABLE for any profile without full usage coverage (D2).
+func formatSPTSection(v Verdict) string {
+	if v.SignalPerToken == nil && v.RealTokenSPT == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## Signal per token (informational, not a gate)\n")
+
+	if v.SignalPerToken != nil {
+		sb.WriteString("\nchars/4 estimate (ADR-0016.6, primary — comparable with all committed runs):\n\n")
+		sb.WriteString("| profile | episodes | mean signal | main-agent SPT | sidecar-internal SPT | workflow SPT |\n")
+		sb.WriteString("|---------|----------|-------------|----------------|----------------------|--------------|\n")
+		for _, p := range AllProfiles() {
+			row := v.SignalPerToken[p]
+			fmt.Fprintf(&sb, "| %s | %d | %.3f | %s | %s | %s |\n",
+				p, row.Episodes, row.MeanSignal,
+				formatSPTValue(row.MainAgentSPT),
+				formatSPTValue(row.SidecarInternalSPT),
+				formatSPTValue(row.WorkflowSPT))
+		}
+	}
+
+	if v.RealTokenSPT != nil {
+		sb.WriteString("\nprovider-reported tokens (ADR-0016.11, session-level; input+cacheRead+cacheCreation+output):\n\n")
+		sb.WriteString("| profile | episodes | with usage | total tokens | session SPT |\n")
+		sb.WriteString("|---------|----------|------------|--------------|-------------|\n")
+		for _, p := range AllProfiles() {
+			row := v.RealTokenSPT[p]
+			fmt.Fprintf(&sb, "| %s | %d | %d | %s | %s |\n",
+				p, row.Episodes, row.EpisodesWithUsage,
+				formatRealTokenTotal(row), formatRealTokenSPT(row))
+		}
+	}
+	return sb.String()
+}
+
+// formatEconomicsSection renders the ADR-0016.11 D4 run-cost report. Totals
+// cover all loaded episodes (including gate-excluded ones) and are labeled
+// with coverage; partial coverage is an explicit lower bound, never silent.
+func formatEconomicsSection(econ *RunEconomics) string {
+	if econ == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## Run economics (ADR-0016.11, provider-reported costUsd)\n\n")
+	if econ.EpisodesWithCost == 0 {
+		fmt.Fprintf(&sb, "- total: UNAVAILABLE (0/%d episodes carry cost data)\n", econ.Episodes)
+		return sb.String()
+	}
+	bound := ""
+	if econ.EpisodesWithCost < econ.Episodes {
+		bound = "; lower bound — coverage is partial"
+	}
+	fmt.Fprintf(&sb, "- total: $%.4f over %d/%d episodes with cost data%s\n",
+		econ.TotalCostUSD, econ.EpisodesWithCost, econ.Episodes, bound)
+	for _, pe := range econ.PerProfile {
+		if pe.Episodes == 0 {
+			continue
+		}
+		if pe.EpisodesWithCost == 0 {
+			fmt.Fprintf(&sb, "- %s: UNAVAILABLE (0/%d episodes carry cost data)\n", pe.Profile, pe.Episodes)
+			continue
+		}
+		fmt.Fprintf(&sb, "- %s: $%.4f (%d/%d episodes)\n", pe.Profile, pe.CostUSD, pe.EpisodesWithCost, pe.Episodes)
+	}
+	return sb.String()
+}
+
+func formatSPTValue(v SPTValue) string {
+	if !v.Defined {
+		return "undefined"
+	}
+	return fmt.Sprintf("%.3f", v.Value)
+}
+
+func formatRealTokenTotal(row ProfileRealTokenSPT) string {
+	if !row.Available {
+		return "—"
+	}
+	return fmt.Sprintf("%d", row.TotalTokens)
+}
+
+func formatRealTokenSPT(row ProfileRealTokenSPT) string {
+	if !row.Available {
+		return fmt.Sprintf("UNAVAILABLE (%d/%d episodes carry usage)", row.EpisodesWithUsage, row.Episodes)
+	}
+	if !row.SessionSPT.Defined {
+		return "undefined"
+	}
+	// Six decimals: provider tokens re-count cached context on every API
+	// call, so real-token SPT sits orders of magnitude below chars/4 SPT.
+	return fmt.Sprintf("%.6f", row.SessionSPT.Value)
 }
