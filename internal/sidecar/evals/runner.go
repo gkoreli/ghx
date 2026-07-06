@@ -72,7 +72,8 @@ func startDiscoveryEpisodeLiveness(task DiscoveryTask, profile Profile) (stop fu
 // needs this before deciding whether direct profiles may be skipped
 // (ADR-0025.1 D1).
 func ProbeAgentIdentity(ctx context.Context, cfg RunConfig) (AgentIdentity, error) {
-	cmd := exec.CommandContext(ctx, cfg.AgentCmd)
+	agentBin, agentArgs := sidecar.SplitAgentCmd(cfg.AgentCmd)
+	cmd := exec.CommandContext(ctx, agentBin, agentArgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 
@@ -336,7 +337,8 @@ func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
 // the whole episode, one ACP session, one Prompt call per question. Follow-up
 // turns are Resumed by construction — the session never ends between turns.
 func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile, ep *Episode, rt episodeRuntime) error {
-	cmd := exec.CommandContext(ctx, cfg.AgentCmd)
+	agentBin, agentArgs := sidecar.SplitAgentCmd(cfg.AgentCmd)
+	cmd := exec.CommandContext(ctx, agentBin, agentArgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Env = rt.Env
 
