@@ -152,7 +152,20 @@ modular, and reused across both.
    agentic defaults, so a main agent steers its sidecar without a human
    in the loop. SAF ergonomics are measured against the main agent's
    experience, not only the founder's.
-4. **Dogfooding is the ergonomics bar.** The founder uses ghx-with-sidecar
+4. **Always-on runtime and session mastery** (Goga, 2026-07-05). The
+   sidecar is a *runtime*, not a command — the docker-sidecar mental
+   model: a resident, reusable process shared by every entrypoint (CLI,
+   MCP, future A2A), with no cold starts. Sessions are the framework's
+   to master: ACP session resume is first-class **recovery**, not just
+   continuation — a turn that dies (turn caps, adapter crash, restart)
+   is resumed and asked to wrap up with what it has; explorations are
+   never lost to process boundaries. Full session control lives in the
+   framework and is exposed through ghx surfaces. The end state: the
+   sidecar routes each incoming question to the right active session
+   internally — the main agent never knows sessions exist; it just
+   talks to ghx. (Anticipation, M8, presupposes exactly this resident
+   runtime.)
+5. **Dogfooding is the ergonomics bar.** The founder uses ghx-with-sidecar
    for daily development instead of the bare CLI. Friction found while
    dogfooding outranks speculative features.
 
