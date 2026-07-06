@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/auth"
+	"github.com/gkoreli/ghx/v2/internal/sidecar/tier2"
 )
 
 // PreflightCheck is the result of a single diagnostic probe.
@@ -54,7 +55,7 @@ func RunPreflightForAgent(ctx context.Context, agentCmd string) PreflightResult 
 func runPreflight(ctx context.Context, agentCmd, runningVersion string) PreflightResult {
 	type fn func(context.Context) PreflightCheck
 	cfg := preflightAgentConfig(agentCmd)
-	checks := []fn{checkGHToken, checkAgentAuthEnv, checkNetwork, checkGhxBinary,
+	checks := []fn{checkGHToken, checkAgentAuthEnv, checkNetwork, checkGhxBinary, checkTier2Tools,
 		func(ctx context.Context) PreflightCheck {
 			return checkACPAgent(ctx, cfg)
 		},
@@ -357,4 +358,34 @@ func checkGhxBinary(ctx context.Context) PreflightCheck {
 		}
 	}
 	return PreflightCheck{Name: "ghx-binary", Passed: true, Message: "ghx found: " + strings.TrimSpace(string(out))}
+}
+
+// checkTier2Tools reports Tier-2 structural-tool availability: which local:*
+// backends resolve on this machine, and how to install the missing ones.
+// local:repomap is compiled into ghx and always available; codemap and
+// ast-grep are OPTIONAL external binaries (absorbed as subprocesses,
+// ADR-0024.1 "Absorb vs Steal") — when absent, `ask --local` degrades
+// honestly to remote Tier-1 evidence. The check therefore always passes; it
+// exists to surface the degradation at setup time instead of mid-ask (first
+// production escalation, honojs-hono 2026-07-06: `ghx tier2 codemap` exited
+// 3 on a machine without the codemap binary).
+func checkTier2Tools(_ context.Context) PreflightCheck {
+	var parts []string
+	var hints []string
+	for _, st := range tier2.BackendStatuses() {
+		switch {
+		case st.Kind == tier2.KindEmbedded:
+			parts = append(parts, st.Backend+" "+st.Detail)
+		case st.Available:
+			parts = append(parts, st.Backend+" found ("+st.Detail+")")
+		default:
+			parts = append(parts, st.Backend+" missing (optional)")
+			hints = append(hints, indentLines(st.InstallHint, "    "))
+		}
+	}
+	msg := strings.Join(parts, "; ")
+	if len(hints) > 0 {
+		msg += "\n" + strings.Join(hints, "\n")
+	}
+	return PreflightCheck{Name: "tier2-tools", Passed: true, Message: msg}
 }

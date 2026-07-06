@@ -26,7 +26,8 @@ const CodemapInstallHint = "codemap not found on PATH. Install it with:\n" +
 	"  brew tap JordanCoin/tap && brew install codemap\n" +
 	"or grab a release from https://github.com/JordanCoin/codemap\n" +
 	"(--deps and blast-radius additionally need the ast-grep binary).\n" +
-	"Until installed, Tier 2 structural analysis is unavailable and answers fall back to remote Tier-1 evidence."
+	"Until installed, backend local:codemap is unavailable and answers fall back to remote Tier-1 evidence\n" +
+	"(local:repomap is built into ghx and keeps working without it)."
 
 // ErrCodemapNotInstalled reports that the codemap binary is absent. Callers
 // treat it as a graceful tier fallback signal — the blocked backend is named
