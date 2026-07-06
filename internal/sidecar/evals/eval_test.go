@@ -199,7 +199,14 @@ func TestEpisodes(t *testing.T) {
 	if err := UpdateManifestIdentity(runDir, manifestIdentity); err != nil {
 		t.Fatalf("update run manifest identity: %v", err)
 	}
-	verdict := EvaluateGates(eps)
+	// Opt-in gate-reducer override (ADR-0025.2 residuals): unset
+	// GHX_EVAL_GATE_AT_LEAST yields GateOptions{}, which is exactly
+	// EvaluateGates — a run without the knob scores as before.
+	gateOpts, err := GateOptionsFromEnv()
+	if err != nil {
+		t.Fatalf("gate options: %v", err)
+	}
+	verdict := EvaluateGatesWithOptions(eps, gateOpts)
 	LabelBaselineReused(&verdict, reuse)
 	// ADR-0025 D1: record the sequential-stopping recommendation next to the
 	// verdict. The runner never auto-stops — a human ends the loop.

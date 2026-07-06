@@ -225,7 +225,7 @@ func repeatReadRatio(ep *Episode) float64 {
 // episodes and returns the verdict. It works on whatever episodes exist and
 // reports data-sufficiency caveats in Notes; the formal gate run requires
 // ≥ 6 tasks × 5 trials × 3 profiles. Every gate uses ReducerMean; call
-// EvaluateGatesWithOptions to opt G2 or G4 into ReducerAtLeastN
+// EvaluateGatesWithOptions to opt G1, G2, G3, or G4 into ReducerAtLeastN
 // (ADR-0025.2). Every gate also carries a deterministic Fragile annotation:
 // true iff flipping exactly one already-scored trial would change that
 // gate's Pass.
@@ -238,8 +238,9 @@ func EvaluateGates(episodes []*Episode) Verdict {
 // EvaluateGates exactly: every gate uses ReducerMean, so a caller that never
 // passes GateOptions — every caller in this repo today — sees no scoring
 // change. A GateOptions.AtLeastN key naming a gate that does not support
-// ReducerAtLeastN (anything but "G2"/"G4") is not silently ignored: it
-// produces a "GATE CONFIG" verdict note.
+// ReducerAtLeastN (anything but "G1"–"G4"), or a "G3" key missing its
+// pre-registered char ceiling, is not silently ignored: it produces a
+// "GATE CONFIG" verdict note and the gate keeps ReducerMean.
 func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	filtered, validityNotes, valid := validateEpisodesForVerdict(episodes)
 	agg := Aggregate(filtered)
@@ -267,15 +268,15 @@ func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	v.Preliminary = !v.DataSufficient
 	v.Notes = append(v.Notes, sufficiencyNotes...)
 	v.Notes = append(v.Notes, dataQualityNotes(filtered, agg)...)
-	v.Notes = append(v.Notes, unsupportedAtLeastNNotes(opts)...)
+	v.Notes = append(v.Notes, gateConfigNotes(opts)...)
 
 	scEps := profileEpisodes(filtered, ProfileSidecar)
 	gxEps := profileEpisodes(filtered, ProfileGhx)
 
-	g1 := buildG1(sc, gx, scEps, gxEps)
-	g2 := buildG2(sc, scEps, atLeastSpec(opts, "G2"))
-	g3 := buildG3(sc, gx, scEps, gxEps)
-	g4 := buildG4(sc, gx, scEps, atLeastSpec(opts, "G4"))
+	g1 := buildG1(sc, gx, scEps, gxEps, effectiveAtLeastSpec(opts, "G1"))
+	g2 := buildG2(sc, scEps, effectiveAtLeastSpec(opts, "G2"))
+	g3 := buildG3(sc, gx, scEps, gxEps, effectiveAtLeastSpec(opts, "G3"))
+	g4 := buildG4(sc, gx, scEps, effectiveAtLeastSpec(opts, "G4"))
 	g5 := buildG5(sc, scEps)
 
 	v.Gates = []GateResult{g1, g2, g3, g4, g5}
@@ -300,19 +301,46 @@ func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	return v
 }
 
-// buildG1 computes the G1 gate (ReducerMean only — see ADR-0025.2 D2 for why
-// G1's relative comparison is out of scope for ReducerAtLeastN) and its
-// single-trial extremization fragility check.
-func buildG1(sc, gx *ProfileAggregate, scEps, gxEps []*Episode) GateResult {
-	pass := g1Pass(sc.MeanCorrectness, gx.MeanCorrectness)
+// buildG1 computes the G1 gate. With no at_least(n) override, it reproduces
+// the ADR-0016.1 mean-vs-mean relative check exactly, with its single-trial
+// extremization fragility check. With an override (ADR-0025.2 residuals), it
+// evaluates the same g1Pass bound per paired task cell — the task-level
+// sidecar mean correctness against the same task's ghx mean — and requires
+// at least N paired cells to individually satisfy it. Pairing is by task,
+// not by trial: trial counts can differ per profile and nothing pairs one
+// sidecar episode to "its" ghx episode, but the same task under both
+// profiles is comparable by construction. Tasks present in only one profile
+// cannot be paired; they are excluded from the count and named in Detail.
+func buildG1(sc, gx *ProfileAggregate, scEps, gxEps []*Episode, atLeast *AtLeastNSpec) GateResult {
 	g := GateResult{
-		ID:      "G1",
-		Desc:    fmt.Sprintf("correctness: sidecar ≥ %.2f × ghx and ≥ %.2f absolute", g1RelFactor, g1AbsFloor),
-		Pass:    pass,
-		Reducer: ReducerMean,
-		Detail: fmt.Sprintf("sidecar %.3f vs ghx %.3f (rel floor %.3f, abs floor %.2f)",
-			sc.MeanCorrectness, gx.MeanCorrectness, g1RelFactor*gx.MeanCorrectness, g1AbsFloor),
+		ID:   "G1",
+		Desc: fmt.Sprintf("correctness: sidecar ≥ %.2f × ghx and ≥ %.2f absolute", g1RelFactor, g1AbsFloor),
 	}
+	if atLeast != nil {
+		pairs, unpaired := g1TaskPairs(scEps, gxEps)
+		k := 0
+		for _, p := range pairs {
+			if p.pass() {
+				k++
+			}
+		}
+		g.Reducer = ReducerAtLeastN
+		g.Pass = len(pairs) > 0 && k >= atLeast.N
+		g.Detail = fmt.Sprintf(
+			"at_least(%d): %d of %d paired task cells individually satisfy sidecar ≥ %.2f × ghx and ≥ %.2f (task-level means)",
+			atLeast.N, k, len(pairs), g1RelFactor, g1AbsFloor)
+		if len(unpaired) > 0 {
+			g.Detail += fmt.Sprintf("; %d task(s) present in only one profile excluded from pairing: %s",
+				len(unpaired), strings.Join(unpaired, ", "))
+		}
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, len(pairs), "paired task cells", g.Pass)
+		return g
+	}
+	pass := g1Pass(sc.MeanCorrectness, gx.MeanCorrectness)
+	g.Pass = pass
+	g.Reducer = ReducerMean
+	g.Detail = fmt.Sprintf("sidecar %.3f vs ghx %.3f (rel floor %.3f, abs floor %.2f)",
+		sc.MeanCorrectness, gx.MeanCorrectness, g1RelFactor*gx.MeanCorrectness, g1AbsFloor)
 	g.Fragile, g.FragileDetail = g1Fragile(correctnessValues(scEps), correctnessValues(gxEps), pass)
 	return g
 }
@@ -330,7 +358,7 @@ func buildG2(sc *ProfileAggregate, scEps []*Episode, atLeast *AtLeastNSpec) Gate
 		g.Pass = k >= atLeast.N
 		g.Detail = fmt.Sprintf("at_least(%d): %d of %d sidecar trials individually score evidence ≥ %.2f",
 			atLeast.N, k, len(vals), g2Floor)
-		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, len(vals), g.Pass)
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, len(vals), "trials", g.Pass)
 		return g
 	}
 	g.Reducer = ReducerMean
@@ -340,20 +368,39 @@ func buildG2(sc *ProfileAggregate, scEps []*Episode, atLeast *AtLeastNSpec) Gate
 	return g
 }
 
-// buildG3 computes the G3 gate (ReducerMean only — G3's unbounded ratio
-// metric has no natural per-trial predicate, ADR-0025.2 D2) and its
-// leave-one-out fragility check.
-func buildG3(sc, gx *ProfileAggregate, scEps, gxEps []*Episode) GateResult {
-	pass := g3Pass(sc.MeanMainAgentChars, gx.MeanMainAgentChars)
+// buildG3 computes the G3 gate. With no at_least(n) override, it reproduces
+// the ADR-0016.1 mean-ratio check exactly, with its leave-one-out fragility
+// check (chars are unbounded, so extremization does not apply). With an
+// override (ADR-0025.2 residuals), it counts how many sidecar trials
+// individually stay at or under the spec's pre-registered absolute
+// CharCeiling and requires at least N of them. The at_least form measures
+// an absolute per-episode budget, NOT the relative ≤ g3Factor × ghx ratio —
+// the ceiling is what makes an unbounded metric individually judgeable, and
+// the run-level means are still printed in Detail so a reader can compare
+// both framings. The caller (effectiveAtLeastSpec) guarantees atLeast, when
+// non-nil, carries a positive CharCeiling.
+func buildG3(sc, gx *ProfileAggregate, scEps, gxEps []*Episode, atLeast *AtLeastNSpec) GateResult {
 	g := GateResult{
-		ID:      "G3",
-		Desc:    fmt.Sprintf("compression: sidecar main-agent chars ≤ %.2f × ghx", g3Factor),
-		Pass:    pass,
-		Reducer: ReducerMean,
-		Detail: fmt.Sprintf("sidecar %.0f vs ghx %.0f chars (threshold %.0f)",
-			sc.MeanMainAgentChars, gx.MeanMainAgentChars, g3Factor*gx.MeanMainAgentChars),
+		ID:   "G3",
+		Desc: fmt.Sprintf("compression: sidecar main-agent chars ≤ %.2f × ghx", g3Factor),
 	}
-	g.Fragile, g.FragileDetail = g3Fragile(mainCharsValues(scEps), mainCharsValues(gxEps), pass)
+	scVals := mainCharsValues(scEps)
+	if atLeast != nil {
+		k := countAtMost(scVals, float64(atLeast.CharCeiling))
+		g.Reducer = ReducerAtLeastN
+		g.Pass = len(scVals) > 0 && k >= atLeast.N
+		g.Detail = fmt.Sprintf(
+			"at_least(%d): %d of %d sidecar trials individually ≤ %d main-agent chars (pre-registered absolute ceiling; the relative ≤ %.2f × ghx bound is not evaluated under this reducer — means for reference: sidecar %.0f vs ghx %.0f)",
+			atLeast.N, k, len(scVals), atLeast.CharCeiling, g3Factor, sc.MeanMainAgentChars, gx.MeanMainAgentChars)
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, len(scVals), "trials", g.Pass)
+		return g
+	}
+	pass := g3Pass(sc.MeanMainAgentChars, gx.MeanMainAgentChars)
+	g.Pass = pass
+	g.Reducer = ReducerMean
+	g.Detail = fmt.Sprintf("sidecar %.0f vs ghx %.0f chars (threshold %.0f)",
+		sc.MeanMainAgentChars, gx.MeanMainAgentChars, g3Factor*gx.MeanMainAgentChars)
+	g.Fragile, g.FragileDetail = g3Fragile(scVals, mainCharsValues(gxEps), pass)
 	return g
 }
 
@@ -379,7 +426,7 @@ func buildG4(sc, gx *ProfileAggregate, scEps []*Episode, atLeast *AtLeastNSpec) 
 		g.Pass = sc.MultiTurnEpisodes > 0 && k >= atLeast.N && repeatOK
 		g.Detail = fmt.Sprintf("at_least(%d): %d of %d sidecar multi-turn trials resumed; repeat-read sidecar %.3f vs ghx %.3f",
 			atLeast.N, k, n, sc.RepeatReadRatio, gx.RepeatReadRatio)
-		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, n, g.Pass)
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, n, "trials", g.Pass)
 		return g
 	}
 	g.Reducer = ReducerMean

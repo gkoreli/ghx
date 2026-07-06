@@ -24,7 +24,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "load episodes: %v\n", err)
 		os.Exit(1)
 	}
-	verdict := evals.EvaluateGates(episodes)
+	// Opt-in gate-reducer override (ADR-0025.2 residuals): unset
+	// GHX_EVAL_GATE_AT_LEAST yields GateOptions{}, which is exactly
+	// EvaluateGates — default reports are byte-identical to before.
+	gateOpts, err := evals.GateOptionsFromEnv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gate options: %v\n", err)
+		os.Exit(1)
+	}
+	verdict := evals.EvaluateGatesWithOptions(episodes, gateOpts)
 
 	expected := "unknown"
 	if manifest != nil && manifest.ExpectedEpisodes > 0 {
