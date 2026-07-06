@@ -155,6 +155,17 @@ assertion. Binding rules:
 - **Truthfulness over optics.** Verdicts self-label their limitations
   (PRELIMINARY, caveats, futility stops); negative results are committed and
   kept (`docs/evals/gate-run-2026-07/`), never buried or rerun-until-green.
+- **Read the M4 verdict as a conservative floor, and never quote the floor as
+  a ceiling** (Goga, 2026-07-05). THESIS SUPPORTED was earned by a first-cut
+  sidecar persona, scored only by deterministic fact-recall gates. Both
+  remaining levers are expected to widen the sidecar's advantage over plain
+  and direct-ghx: (1) sidecar ergonomics/proficiency work (M5 onward — the
+  ADR-0016.7 reliability fixes alone moved correctness 0.580 → 0.908), and
+  (2) scoring fidelity (the judge scorer and richer metrics, which can see
+  trajectory/reasoning quality that substring gates cannot). That expectation
+  steers the roadmap — keep improving the agent, keep improving the
+  measurement — but expectations are never citable results: any "even better"
+  claim waits for the re-measured run that shows it.
 
 ## Open Source Leverage (core tenet)
 
