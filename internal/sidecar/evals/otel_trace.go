@@ -10,10 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gkoreli/ghx/v2/internal/sidecar/telemetry"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -21,15 +19,21 @@ import (
 const (
 	otelSemconvVersion = "1.41.0"
 	tracerName         = "github.com/gkoreli/ghx/v2/internal/sidecar/evals"
+	// traceFileName mirrors the shared telemetry artifact name so the eval
+	// report reader (TraceFileStats) keeps referencing it locally.
+	traceFileName = telemetry.TraceFileName
 )
 
 // EmitEpisodeTraces appends an OTLP JSON File representation of one completed
-// episode to <run-dir>/traces.jsonl.
+// episode to <run-dir>/traces.jsonl. The generic OTLP machinery (tracer
+// provider, file exporter, log/metric writers) now lives in the shared
+// telemetry package (ADR-0022 D1); this function keeps only the eval-specific
+// span/attribute shaping so eval artifact output stays byte-identical.
 func EmitEpisodeTraces(ctx context.Context, runDir string, ep *Episode) error {
 	if ep == nil {
 		return nil
 	}
-	tp, err := episodeTracerProvider(ctx, runDir, ep)
+	tp, err := telemetry.NewTracerProvider(ctx, runDir, resourceAttributes(runDir, ep))
 	if err != nil {
 		return err
 	}
@@ -44,31 +48,10 @@ func EmitEpisodeTraces(ctx context.Context, runDir string, ep *Episode) error {
 	if err := tp.ForceFlush(ctx); err != nil {
 		return fmt.Errorf("flush episode traces: %w", err)
 	}
-	if err := writeOTLPJSONLogs(runDir, ep, logs); err != nil {
+	if err := telemetry.WriteLogs(filepath.Join(runDir, logFileName), resourceAttributes(runDir, ep), tracerName, otelSemconvVersion, logs); err != nil {
 		return err
 	}
 	return nil
-}
-
-func episodeTracerProvider(ctx context.Context, runDir string, ep *Episode) (*sdktrace.TracerProvider, error) {
-	res := resource.NewSchemaless(resourceAttributes(runDir, ep)...)
-	exporters := []sdktrace.SpanExporter{newOTLPJSONFileExporter(runDir)}
-	if strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")) != "" {
-		httpExporter, err := otlptracehttp.New(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("create OTLP HTTP trace exporter: %w", err)
-		}
-		exporters = append(exporters, httpExporter)
-	}
-
-	opts := []sdktrace.TracerProviderOption{
-		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-	}
-	for _, exporter := range exporters {
-		opts = append(opts, sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)))
-	}
-	return sdktrace.NewTracerProvider(opts...), nil
 }
 
 func resourceAttributes(runDir string, ep *Episode) []attribute.KeyValue {
@@ -86,8 +69,8 @@ func resourceAttributes(runDir string, ep *Episode) []attribute.KeyValue {
 	}
 }
 
-func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) []episodeLogRecord {
-	var logs []episodeLogRecord
+func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) []telemetry.LogRecord {
+	var logs []telemetry.LogRecord
 	start := nonZeroTime(ep.StartedAt, time.Now().UTC())
 	end := nonZeroTime(ep.EndedAt, start)
 	episodeCtx, episodeSpan := tracer.Start(ctx, "eval.episode",
@@ -117,7 +100,7 @@ func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) []e
 	return logs
 }
 
-func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn TurnRecord) []episodeLogRecord {
+func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn TurnRecord) []telemetry.LogRecord {
 	start := turnStart(ep, turn)
 	end := start.Add(time.Duration(turn.DurationMs) * time.Millisecond)
 	turnCtx, span := tracer.Start(parent, "eval.turn",

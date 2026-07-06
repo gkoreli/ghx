@@ -2,20 +2,16 @@ package evals
 
 import (
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/gkoreli/ghx/v2/internal/sidecar/telemetry"
 	"go.opentelemetry.io/otel/attribute"
-	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
-	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
-	metricFileName = "metrics.jsonl"
+	metricFileName = telemetry.MetricFileName
 
 	genAIClientOperationDurationMetric = "gen_ai.client.operation.duration"
 	genAIClientTokenUsageMetric        = "gen_ai.client.token.usage"
@@ -26,6 +22,11 @@ const (
 	ghxEvalReportSizeMetric = "ghx.eval.report.size"
 )
 
+// EmitEpisodeMetrics appends one OTLP MetricsData record for the episode to
+// <run-dir>/metrics.jsonl. The generic OTLP metric builders and file writer
+// live in the telemetry package (ADR-0022 D1); this keeps only the
+// eval-specific metric shaping (GenAI token/duration plus reward, anomaly, and
+// report-size metrics) so eval output stays byte-identical.
 func EmitEpisodeMetrics(runDir string, ep *Episode) error {
 	if ep == nil {
 		return nil
@@ -34,35 +35,7 @@ func EmitEpisodeMetrics(runDir string, ep *Episode) error {
 	if len(metrics) == 0 {
 		return nil
 	}
-	data := &metricspb.MetricsData{
-		ResourceMetrics: []*metricspb.ResourceMetrics{
-			{
-				Resource:     protoMetricResource(runDir, ep),
-				ScopeMetrics: []*metricspb.ScopeMetrics{{Scope: instrumentationScopeName(), Metrics: metrics}},
-			},
-		},
-	}
-	line, err := protojson.MarshalOptions{EmitUnpopulated: false}.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("marshal OTLP metrics json: %w", err)
-	}
-	line = append(line, '\n')
-
-	path := filepath.Join(runDir, metricFileName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(line)
-	return err
-}
-
-func protoMetricResource(runDir string, ep *Episode) *resourcepb.Resource {
-	return protoResource(sdkresource.NewSchemaless(resourceAttributes(runDir, ep)...))
+	return telemetry.WriteMetrics(filepath.Join(runDir, metricFileName), resourceAttributes(runDir, ep), tracerName, otelSemconvVersion, metrics)
 }
 
 func episodeMetrics(ep *Episode) []*metricspb.Metric {
@@ -78,27 +51,27 @@ func episodeMetrics(ep *Episode) []*metricspb.Metric {
 	var durationPoints []*metricspb.HistogramDataPoint
 	var tokenPoints []*metricspb.NumberDataPoint
 	for _, turn := range ep.Turns {
-		turnAttrs := appendAttrs(base,
+		turnAttrs := telemetry.AppendAttrs(base,
 			attribute.String("gen_ai.operation.name", "chat"),
 			attribute.Int("ghx.eval.turn", turn.Turn),
 		)
 		if turn.DurationMs > 0 {
-			durationPoints = append(durationPoints, histogramPoint(start, end, float64(turn.DurationMs)/1000, turnAttrs))
+			durationPoints = append(durationPoints, telemetry.HistogramPoint(start, end, float64(turn.DurationMs)/1000, turnAttrs))
 		}
 		tokenPoints = append(tokenPoints,
-			intPoint(start, end, int64(len(turn.Question)), appendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "input"))),
-			intPoint(start, end, int64(len(turn.Text)), appendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "output"))),
+			telemetry.IntPoint(start, end, int64(len(turn.Question)), telemetry.AppendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "input"))),
+			telemetry.IntPoint(start, end, int64(len(turn.Text)), telemetry.AppendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "output"))),
 		)
 		if turn.Thinking != "" {
 			tokenPoints = append(tokenPoints,
-				intPoint(start, end, int64(len(turn.Thinking)), appendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "reasoning"))),
+				telemetry.IntPoint(start, end, int64(len(turn.Thinking)), telemetry.AppendAttrs(turnAttrs, attribute.String(genAITokenTypeAttribute, "reasoning"))),
 			)
 		}
 	}
 
 	var metrics []*metricspb.Metric
 	if len(durationPoints) > 0 {
-		metrics = append(metrics, histogramMetric(
+		metrics = append(metrics, telemetry.HistogramMetric(
 			genAIClientOperationDurationMetric,
 			"Duration of GenAI client operations.",
 			"s",
@@ -106,7 +79,7 @@ func episodeMetrics(ep *Episode) []*metricspb.Metric {
 		))
 	}
 	if len(tokenPoints) > 0 {
-		metrics = append(metrics, sumMetric(
+		metrics = append(metrics, telemetry.SumMetric(
 			genAIClientTokenUsageMetric,
 			"Number of input, output, and reasoning tokens used by GenAI operations.",
 			"{token}",
@@ -141,13 +114,13 @@ func rewardMetric(ep *Episode, start, end time.Time, base []attribute.KeyValue) 
 	}
 	points := make([]*metricspb.HistogramDataPoint, 0, len(components))
 	for _, component := range components {
-		attrs := appendAttrs(base, attribute.String("ghx.eval.reward.component", component.name))
+		attrs := telemetry.AppendAttrs(base, attribute.String("ghx.eval.reward.component", component.name))
 		if component.name == "memory" {
-			attrs = appendAttrs(attrs, attribute.Bool("ghx.eval.reward.memory_applies", r.MemoryApplies))
+			attrs = telemetry.AppendAttrs(attrs, attribute.Bool("ghx.eval.reward.memory_applies", r.MemoryApplies))
 		}
-		points = append(points, histogramPoint(start, end, component.value, attrs))
+		points = append(points, telemetry.HistogramPoint(start, end, component.value, attrs))
 	}
-	return histogramMetric(ghxEvalRewardMetric, "ghx deterministic reward components by task and profile.", "1", points)
+	return telemetry.HistogramMetric(ghxEvalRewardMetric, "ghx deterministic reward components by task and profile.", "1", points)
 }
 
 func anomaliesMetric(ep *Episode, start, end time.Time, base []attribute.KeyValue) *metricspb.Metric {
@@ -162,12 +135,12 @@ func anomaliesMetric(ep *Episode, start, end time.Time, base []attribute.KeyValu
 	}
 	points := make([]*metricspb.NumberDataPoint, 0, len(counts))
 	for kind, count := range counts {
-		points = append(points, intPoint(start, end, count, appendAttrs(base,
+		points = append(points, telemetry.IntPoint(start, end, count, telemetry.AppendAttrs(base,
 			attribute.String("ghx.eval.anomaly.kind", kind),
 			attribute.String("ghx.eval.anomaly.severity", severity[kind]),
 		)))
 	}
-	return sumMetric(ghxEvalAnomalyCount, "ghx anomaly counts by declarative taxonomy kind.", "{anomaly}", points, true)
+	return telemetry.SumMetric(ghxEvalAnomalyCount, "ghx anomaly counts by declarative taxonomy kind.", "{anomaly}", points, true)
 }
 
 func reportSizeMetric(ep *Episode, start, end time.Time, base []attribute.KeyValue) *metricspb.Metric {
@@ -180,73 +153,16 @@ func reportSizeMetric(ep *Episode, start, end time.Time, base []attribute.KeyVal
 		if err != nil {
 			continue
 		}
-		points = append(points, histogramPoint(start, end, float64(len(data)), appendAttrs(base, attribute.Int("ghx.eval.turn", turn.Turn))))
+		points = append(points, telemetry.HistogramPoint(start, end, float64(len(data)), telemetry.AppendAttrs(base, attribute.Int("ghx.eval.turn", turn.Turn))))
 	}
 	if ep.Report != nil {
 		data, err := json.Marshal(ep.Report)
 		if err == nil {
-			points = append(points, histogramPoint(start, end, float64(len(data)), appendAttrs(base, attribute.String("ghx.eval.report.scope", "episode"))))
+			points = append(points, telemetry.HistogramPoint(start, end, float64(len(data)), telemetry.AppendAttrs(base, attribute.String("ghx.eval.report.scope", "episode"))))
 		}
 	}
 	if len(points) == 0 {
 		return nil
 	}
-	return histogramMetric(ghxEvalReportSizeMetric, "Serialized ghx sidecar report size distribution.", "By", points)
-}
-
-func histogramMetric(name, description, unit string, points []*metricspb.HistogramDataPoint) *metricspb.Metric {
-	return &metricspb.Metric{
-		Name:        name,
-		Description: description,
-		Unit:        unit,
-		Data: &metricspb.Metric_Histogram{Histogram: &metricspb.Histogram{
-			DataPoints:             points,
-			AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
-		}},
-	}
-}
-
-func histogramPoint(start, end time.Time, value float64, attrs []attribute.KeyValue) *metricspb.HistogramDataPoint {
-	return &metricspb.HistogramDataPoint{
-		Attributes:        keyValues(attrs),
-		StartTimeUnixNano: unixNano(start),
-		TimeUnixNano:      unixNano(end),
-		Count:             1,
-		Sum:               &value,
-		Min:               &value,
-		Max:               &value,
-	}
-}
-
-func sumMetric(name, description, unit string, points []*metricspb.NumberDataPoint, monotonic bool) *metricspb.Metric {
-	return &metricspb.Metric{
-		Name:        name,
-		Description: description,
-		Unit:        unit,
-		Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{
-			DataPoints:             points,
-			AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
-			IsMonotonic:            monotonic,
-		}},
-	}
-}
-
-func intPoint(start, end time.Time, value int64, attrs []attribute.KeyValue) *metricspb.NumberDataPoint {
-	return &metricspb.NumberDataPoint{
-		Attributes:        keyValues(attrs),
-		StartTimeUnixNano: unixNano(start),
-		TimeUnixNano:      unixNano(end),
-		Value:             &metricspb.NumberDataPoint_AsInt{AsInt: value},
-	}
-}
-
-func appendAttrs(base []attribute.KeyValue, extra ...attribute.KeyValue) []attribute.KeyValue {
-	out := make([]attribute.KeyValue, 0, len(base)+len(extra))
-	out = append(out, base...)
-	out = append(out, extra...)
-	return out
-}
-
-func unixNano(t time.Time) uint64 {
-	return uint64(maxInt64(0, t.UnixNano()))
+	return telemetry.HistogramMetric(ghxEvalReportSizeMetric, "Serialized ghx sidecar report size distribution.", "By", points)
 }

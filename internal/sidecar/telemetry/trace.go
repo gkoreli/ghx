@@ -1,4 +1,18 @@
-package evals
+// Package telemetry is the shared visibility runtime for the agent sidecar
+// framework (ADR-0022). It owns everything generic about emitting spec-exact
+// OTLP JSONL artifacts — the protobuf-JSON file writers (hex ID handling and
+// all), tracer-provider construction, and the token/duration/size metric
+// builders — so both the eval path (SAFE) and the production `sidecar.Ask`
+// path (SAF) emit the same trace/log/metric artifacts from the same code.
+// Domain-specific attribute shaping (eval reward spans, production session
+// spans) is layered on top by the caller; this package stays neutral.
+//
+// The OTLP/JSON output follows the spec exactly, including its deviation from
+// the proto3 JSON mapping for ID fields (trace_id/span_id/parent_span_id are
+// lowercase hex, not base64) — see hexEncodeSpanIDs. This is a pure relocation
+// of the emission layer that previously lived in package evals; eval artifact
+// output is byte-identical after the move (ADR-0022 D1 extraction rule).
+package telemetry
 
 import (
 	"context"
@@ -23,7 +37,21 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const traceFileName = "traces.jsonl"
+// Artifact file names for a session/run directory. Both the eval path and the
+// production path write these same three files alongside a reports/ directory.
+const (
+	TraceFileName  = "traces.jsonl"
+	LogFileName    = "logs.jsonl"
+	MetricFileName = "metrics.jsonl"
+)
+
+const traceFileName = TraceFileName
+
+// NewTraceExporter returns an OTLP JSON File span exporter that appends one
+// TracesData JSON object per export batch to <dir>/traces.jsonl.
+func NewTraceExporter(dir string) sdktrace.SpanExporter {
+	return newOTLPJSONFileExporter(dir)
+}
 
 // otlpJSONFileExporter writes OTLP JSON File records: one TracesData JSON
 // object per line, appended for each SDK export batch.
