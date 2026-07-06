@@ -59,6 +59,10 @@ type TurnResult struct {
 	// prompt (ADR-0027 D1). Recorded on the eval turn record and counted as the
 	// soft anomaly turn_cap_wrapup so evals can see how often the net fires.
 	WrapUpRecovered bool
+	// Artifacts points at the session's persisted audit trail for the ask this
+	// turn belongs to (session dir + root trace ID). Populated by Ask after
+	// artifact emission; zero for a bare RunTurnWithOptions result.
+	Artifacts ArtifactsRef
 }
 
 // ImplementationInfo records the ACP adapter identity returned by initialize.

@@ -176,7 +176,7 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	}
 
 	cfg := sidecar.LoadConfig()
-	report, _, err := askSidecar(ctx, cfg, sidecar.AskRequest{
+	report, turn, err := askSidecar(ctx, cfg, sidecar.AskRequest{
 		Session:  session,
 		Repo:     repo,
 		Question: question,
@@ -186,7 +186,15 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	data, _ := json.Marshal(report)
-	return mcp.NewToolResultText(string(data)), nil
+	text := string(data)
+	// Same artifacts pointer as the CLI footer: the parent agent gets the
+	// audit-trail location (session dir + root trace ID) with every answer.
+	if turn != nil {
+		if footer := turn.Artifacts.FooterLine(); footer != "" {
+			text += "\n" + footer
+		}
+	}
+	return mcp.NewToolResultText(text), nil
 }
 
 func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

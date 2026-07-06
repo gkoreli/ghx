@@ -77,6 +77,10 @@ command. The runtime and the eval harness emit the *same* artifacts from the
 *same* code, so a real question and a benchmark episode are inspected the same
 way (see [ADR-0022](docs/adr/0022-shared-visibility-runtime.md)).
 
+Every ask response — human output, `--json`, or the MCP recon tool — ends with
+an `artifacts:` pointer naming this session directory and the ask's root trace
+ID, so the calling agent never has to guess where the audit trail lives.
+
 ## How this differs from other delegation
 
 Delegation between agents is now common; auditable delegation is not. We surveyed
@@ -187,8 +191,11 @@ ghx sidecar ask --repo hono/hono "How does Hono implement middleware chaining, a
 - `--session <name>` is optional (defaults to a repo slug like `hono-hono`, or a
   question-derived slug for discovery asks — printed so you can resume it); use
   it to keep parallel investigation threads apart.
-- `--json` prints the full report struct; without it you get the answer plus
-  compact verified / relevant-files / uncertainty sections.
+- `--json` prints an envelope — `{"report": {...}, "artifacts": {"sessionDir":
+  "...", "traceId": "..."}}` — the validated report plus a pointer to the
+  session's audit trail. Without it you get the answer plus compact verified /
+  relevant-files / uncertainty sections, ending with the same pointer as a
+  footer line: `artifacts: <session dir> (trace <root trace id>)`.
 - `--depth cheap|normal|deep` sets the command budget for deeper repos.
 
 Ask by stating the goal, not the steps. Follow-ups on the same repo reuse the

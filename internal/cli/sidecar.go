@@ -50,7 +50,7 @@ var sidecarAskCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "session: %s\n", session)
 
 		cfg := sidecar.LoadConfig()
-		report, _, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
+		report, turn, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
 			Session:  session,
 			Repo:     repo,
 			Question: args[0],
@@ -60,14 +60,27 @@ var sidecarAskCmd = &cobra.Command{
 			return err
 		}
 
+		artifacts := turn.Artifacts
 		if jsonOut {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			return enc.Encode(report)
+			return enc.Encode(askEnvelope{Report: report, Artifacts: artifacts})
 		}
 		printHumanReport(report)
+		if footer := artifacts.FooterLine(); footer != "" {
+			fmt.Printf("\n%s\n", footer)
+		}
 		return nil
 	},
+}
+
+// askEnvelope is the `ghx sidecar ask --json` output shape: the validated
+// report unchanged under "report", plus the artifacts pointer (session dir +
+// root trace ID) as a sibling — the report schema (ADR-0021) itself stays
+// untouched, and the caller never has to guess where the audit trail lives.
+type askEnvelope struct {
+	Report    *sidecar.Report      `json:"report"`
+	Artifacts sidecar.ArtifactsRef `json:"artifacts"`
 }
 
 // sidecarReportSinkCmd is a hidden, internal command: it serves the

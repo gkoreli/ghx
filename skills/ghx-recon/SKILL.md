@@ -26,7 +26,7 @@ top candidates, and ranks them. Follow-ups reuse the same session
 automatically (repo-derived, or question-derived — the chosen name is
 printed), so ask them freely — they are faster and context-aware. Use
 --session <name> only to keep parallel investigation threads apart. Add
---json for the full structured report.
+--json for the full structured report wrapped as {report, artifacts}.
 
 ## Asking well
 
@@ -40,6 +40,9 @@ One investigation per question; follow up rather than bundling.
 - verified — claims backed by evidence the sidecar actually read
 - relevantFiles / evidence — where to look and what each source showed
 - uncertainty / nextReads — what it could not confirm and what to read next
+
+Every response ends with "artifacts: <session dir> (trace <id>)" — the
+on-disk audit trail (traces, logs, reports) backing the report.
 
 Trust verified claims; treat inferred/unverified ones as leads. A fresh
 question takes tens of seconds; session follow-ups are faster.

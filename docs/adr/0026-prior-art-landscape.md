@@ -112,6 +112,12 @@ artifact-level visibility. Steal: trace-handle-in-the-return-value (our
 report/MCP response should carry the session dir + trace id explicitly,
 not implicitly); structured-output schema as a per-delegation dial.
 
+*Stolen 2026-07-05:* every ask response now carries an `ArtifactsRef`
+(absolute session dir + root trace ID) — CLI footer line, `--json`
+`{report, artifacts}` envelope, and MCP recon text all include it. Ours
+is file-level (the whole differentiator): the pointer resolves with `ls`
+and `jq`, no storage stack required.
+
 ### CrewAI — session `crewaiinc-crewai` (INCOMPLETE — recon died at turn cap)
 
 Delegation-tool pattern known from public docs; not source-verified
