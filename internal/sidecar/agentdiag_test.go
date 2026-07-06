@@ -136,3 +136,33 @@ func TestWarnNoReportAnswer(t *testing.T) {
 		t.Errorf("trust warning not surfaced in the loud answer:\n%s", got)
 	}
 }
+
+// TestDiagnoseTurnErrorAuthHint pins the auth failure class from the founder's
+// work laptop (2026-07-06): the adapter's -32000 "Authentication required"
+// arrives in the PROMPT ERROR (stderr carries only SDK cleanup noise), so the
+// hint must fire from the error text alone, even with no stderr log at all.
+func TestDiagnoseTurnErrorAuthHint(t *testing.T) {
+	base := errors.New(`run turn: acp prompt: {"code":-32000,"message":"Authentication required"}`)
+	err := DiagnoseTurnError(base, "")
+	if !strings.Contains(err.Error(), "claude setup-token") {
+		t.Fatalf("auth hint missing from diagnosed error:\n%s", err.Error())
+	}
+	if !errors.Is(err, base) {
+		t.Fatal("diagnosed error lost the wrapped base error identity")
+	}
+}
+
+// TestMatchAgentHintsDedupAndOrder: one hint per class even when the marker
+// appears in both the error and stderr; registration order preserved.
+func TestMatchAgentHints(t *testing.T) {
+	hints := matchAgentHints("Authentication required", "Authentication required and has not been trusted")
+	if len(hints) != 2 {
+		t.Fatalf("got %d hints, want 2 (trust + auth, deduplicated)", len(hints))
+	}
+	if hints[0] != workspaceTrustHint || hints[1] != agentAuthHint {
+		t.Fatal("hint registration order not preserved")
+	}
+	if got := matchAgentHints("clean stderr", ""); got != nil {
+		t.Fatalf("no-marker case returned hints: %v", got)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cli/go-gh/v2/pkg/auth"
 )
 
 // PreflightCheck is the result of a single diagnostic probe.
@@ -128,17 +130,21 @@ func FormatPreflight(r PreflightResult) string {
 	return sb.String()
 }
 
+// checkGHToken resolves GitHub credentials exactly the way ghx's API client
+// does — go-gh's TokenForHost, which reads GH_TOKEN/GITHUB_TOKEN env vars AND
+// the gh CLI's stored login (hosts.yml / keychain). The old env-only sniff
+// reported a false ✗ on machines where `gh auth login` was done and every ghx
+// call worked fine (founder's work laptop, 2026-07-06).
 func checkGHToken(_ context.Context) PreflightCheck {
-	// os.Getenv handled inline to avoid an os import just for two lookups.
-	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
-		if v := os.Getenv(key); v != "" {
-			return PreflightCheck{Name: "gh-token", Passed: true, Message: key + " is present"}
-		}
+	token, source := auth.TokenForHost("github.com")
+	if token != "" {
+		return PreflightCheck{Name: "gh-token", Passed: true, Message: "GitHub token resolved (source: " + source + ")"}
 	}
 	return PreflightCheck{
-		Name:    "gh-token",
-		Passed:  false,
-		Message: "neither GH_TOKEN nor GITHUB_TOKEN is set — ghx calls will fail",
+		Name:        "gh-token",
+		Passed:      false,
+		Message:     "no GitHub credentials found — ghx calls will fail",
+		Remediation: "Run `gh auth login`, or set GH_TOKEN/GITHUB_TOKEN in the environment.",
 	}
 }
 

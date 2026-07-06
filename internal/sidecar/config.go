@@ -100,9 +100,15 @@ type RouteSettings struct {
 	RoutingWindowHours int `json:"routingWindowHours,omitempty"`
 }
 
+// defaultConfig is what a machine with no config file gets: the pinned Claude
+// ACP adapter, NOT the bare `claude` CLI. Bare claude cannot speak ACP, so the
+// old default meant every fresh install failed its first ask until the user
+// discovered `config init --claude-acp` (founder's work-laptop friction,
+// ADR-0033 follow-up). Zero-config first runs must work out of the box
+// wherever Node/npx and a Claude login exist.
 func defaultConfig(root string) Config {
 	return Config{
-		AgentCmd:    "claude",
+		AgentCmd:    ClaudeACPAgentCmd,
 		SessionsDir: filepath.Join(root, "sessions"),
 	}
 }

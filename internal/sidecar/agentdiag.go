@@ -107,6 +107,48 @@ const workspaceTrustHint = "The spawned agent reported an untrusted workspace an
 	"trust that workspace once by running the agent interactively there and accepting the trust\n" +
 	"dialog, or set projects[\"<dir>\"].hasTrustDialogAccepted: true in ~/.claude.json."
 
+// agentAuthMarker is the stable substring of the adapter's -32000 prompt-time
+// failure when the spawned Claude Agent SDK has no usable credentials. Auth
+// resolves lazily at prompt time, so ACP initialize (and thus the plain
+// acp-handshake preflight) passes on machines that then fail every real turn —
+// the founder's work-laptop failure shape (2026-07-06, post-ADR-0033
+// diagnostics made it visible).
+const agentAuthMarker = "Authentication required"
+
+// agentAuthHint tells the operator how to give the spawned agent credentials.
+// Like the trust hint it never auto-applies anything: logins and cloud env are
+// the human's own config.
+const agentAuthHint = "The spawned Claude agent has no usable credentials (auth resolves at prompt time, so\n" +
+	"handshake checks pass). Log in once on this machine: run `claude` interactively, or\n" +
+	"`claude setup-token` for a durable token. If this machine authenticates through\n" +
+	"Bedrock/Vertex or a gateway, export those env vars in the shell that runs ghx, then\n" +
+	"restart the daemon (ghx sidecar daemon --stop) so it inherits them;\n" +
+	"`ghx sidecar sessions show <session>` lists which auth env names the agent actually saw."
+
+// agentHints maps stable failure markers — observed in the turn error text or
+// the adapter stderr tail — to operator guidance. One entry per diagnosed
+// failure class (ADR-0033 D3); extend it as new classes earn a specific,
+// non-destructive remedy.
+var agentHints = []struct{ marker, hint string }{
+	{workspaceTrustMarker, workspaceTrustHint},
+	{agentAuthMarker, agentAuthHint},
+}
+
+// matchAgentHints returns the guidance for every failure marker present in any
+// of the given texts, deduplicated, in registration order.
+func matchAgentHints(texts ...string) []string {
+	var hints []string
+	for _, h := range agentHints {
+		for _, t := range texts {
+			if t != "" && strings.Contains(t, h.marker) {
+				hints = append(hints, h.hint)
+				break
+			}
+		}
+	}
+	return hints
+}
+
 // openAgentStderr returns the writer a spawned adapter's stderr is teed to: the
 // per-session agent-stderr.log (truncated fresh for this process) plus the
 // parent process stderr, so foreground `ghx sidecar daemon` still streams live
@@ -171,13 +213,20 @@ func DiagnoseTurnError(baseErr error, stderrLogPath string) error {
 		return nil
 	}
 	tail := AgentStderrTail(stderrLogPath)
-	if tail == "" {
+	// Hints match against the error text too, not just stderr: the adapter's
+	// -32000 "Authentication required" arrives as the prompt error while stderr
+	// carries only SDK cleanup noise (founder's laptop, 2026-07-06).
+	hints := matchAgentHints(baseErr.Error(), tail)
+	if tail == "" && len(hints) == 0 {
 		return baseErr
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\nAgent stderr (tail of %s):\n%s", baseErr.Error(), stderrLogPath, tail)
-	if IsWorkspaceTrustWarning(tail) {
-		fmt.Fprintf(&b, "\n\nHint: %s", workspaceTrustHint)
+	b.WriteString(baseErr.Error())
+	if tail != "" {
+		fmt.Fprintf(&b, "\n\nAgent stderr (tail of %s):\n%s", stderrLogPath, tail)
+	}
+	for _, h := range hints {
+		fmt.Fprintf(&b, "\n\nHint: %s", h)
 	}
 	return &diagnosedError{base: baseErr, msg: b.String()}
 }
@@ -209,8 +258,8 @@ func warnNoReportAnswer(stderrLogPath string) string {
 		return warnNoReportBase + "\nThe agent also produced no stderr; see " + stderrLogPath + " for adapter diagnostics."
 	}
 	msg := warnNoReportBase + "\nAdapter stderr (tail of " + stderrLogPath + "):\n" + tail
-	if IsWorkspaceTrustWarning(tail) {
-		msg += "\n\nHint: " + workspaceTrustHint
+	for _, h := range matchAgentHints(tail) {
+		msg += "\n\nHint: " + h
 	}
 	return msg
 }
