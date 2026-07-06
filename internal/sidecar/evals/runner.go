@@ -48,6 +48,48 @@ func startEpisodeLiveness(task Task, profile Profile) (stop func()) {
 	return func() { close(done) }
 }
 
+// ProbeAgentIdentity starts the configured ACP adapter, performs initialize,
+// and returns the same run identity fields recorded on episodes. Baseline reuse
+// needs this before deciding whether direct profiles may be skipped
+// (ADR-0025.1 D1).
+func ProbeAgentIdentity(ctx context.Context, cfg RunConfig) (AgentIdentity, error) {
+	cmd := exec.CommandContext(ctx, cfg.AgentCmd)
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return AgentIdentity{}, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return AgentIdentity{}, fmt.Errorf("stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return AgentIdentity{}, fmt.Errorf("start %q: %w", cfg.AgentCmd, err)
+	}
+	defer sidecar.ShutdownAgent(cmd, stdin)
+
+	client := &evalClient{}
+	conn := acp.NewClientSideConnection(client, stdin, stdout)
+	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
+		},
+	})
+	if err != nil {
+		return AgentIdentity{}, fmt.Errorf("acp initialize: %w", err)
+	}
+	id := agentIdentity(cfg, nil)
+	if initResp.AgentInfo != nil {
+		id.AdapterName = initResp.AgentInfo.Name
+		id.AdapterVersion = initResp.AgentInfo.Version
+		id.AdapterSubjectModel = modelFromMeta(initResp.AgentInfo.Meta)
+	}
+	return id, nil
+}
+
 // RunEpisode executes one task under one profile and returns the scored
 // episode. A mid-episode turn failure ends the episode early; the partial
 // episode (with the turn error recorded) is returned alongside the error so

@@ -25,6 +25,12 @@ func AllProfiles() []Profile {
 // profiles. The sidecar profile does not use this — its persona comes from
 // sidecar.BuildPrompt so the eval measures the production prompt.
 func directPreamble(p Profile, repo string) string {
+	return directPreambleBuilder(p, repo)
+}
+
+var directPreambleBuilder = defaultDirectPreamble
+
+func defaultDirectPreamble(p Profile, repo string) string {
 	common := fmt.Sprintf(`You are investigating the GitHub repository %s.
 Work remotely — do NOT clone the repository and do NOT write any files.
 Answer the question below with the specific implementation files (exact paths),

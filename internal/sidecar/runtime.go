@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -378,7 +379,10 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		fmt.Fprintf(os.Stderr, "warning: failed to record turn: %v\n", err)
 	}
 
-	if _, saveErr := SaveTurnReport(sessionsDir, req.Session, turn, report); saveErr != nil {
+	if _, saveErr := SaveTurnReportArtifact(sessionsDir, req.Session, turn, ReportArtifact{
+		Report:              report,
+		ActualCommandLedger: actualCommandLedger(turnResult.ToolCalls),
+	}); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save report: %v\n", saveErr)
 	}
 
@@ -403,4 +407,15 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	})
 
 	return report, &turnResult, nil
+}
+
+func actualCommandLedger(toolCalls []string) []string {
+	var out []string
+	for _, call := range toolCalls {
+		call = strings.TrimSpace(call)
+		if call != "" {
+			out = append(out, call)
+		}
+	}
+	return out
 }

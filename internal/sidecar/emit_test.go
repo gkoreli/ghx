@@ -26,8 +26,9 @@ func TestAskEmitsSessionArtifacts(t *testing.T) {
 	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
 		now := time.Now().UTC()
 		return TurnResult{
-			FullText: `Here is what I found. <ghx-report>{"answer":"routes live in router.go","verified":[],"relevantFiles":[{"path":"router.go","reason":"defines routes"}]}</ghx-report>`,
-			Thinking: "inspect the router files",
+			FullText:  `Here is what I found. <ghx-report>{"answer":"routes live in router.go","verified":[],"relevantFiles":[{"path":"router.go","reason":"defines routes"}],"commandsRun":["agent-listed command"]}</ghx-report>`,
+			Thinking:  "inspect the router files",
+			ToolCalls: []string{"execute: ghx read o/r router.go (completed)"},
 			ToolTraces: []ToolCallTrace{{
 				ID:            "call-1",
 				Kind:          "read",
@@ -111,6 +112,23 @@ func TestAskEmitsSessionArtifacts(t *testing.T) {
 	}
 	if reportFile == "" {
 		t.Fatalf("no reports/1-*.json persisted; got %v", entries)
+	}
+	reportData, err := os.ReadFile(filepath.Join(reportsDir, reportFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact ReportArtifact
+	if err := json.Unmarshal(reportData, &artifact); err != nil {
+		t.Fatalf("report artifact is not JSON: %v\n%s", err, reportData)
+	}
+	if artifact.Report == nil || artifact.Report.Answer != "routes live in router.go" {
+		t.Fatalf("artifact report = %+v", artifact.Report)
+	}
+	if strings.Join(artifact.Report.CommandsRun, "\n") != "agent-listed command" {
+		t.Fatalf("agent commandsRun mutated: %+v", artifact.Report.CommandsRun)
+	}
+	if strings.Join(artifact.ActualCommandLedger, "\n") != "execute: ghx read o/r router.go (completed)" {
+		t.Fatalf("actual command ledger = %+v", artifact.ActualCommandLedger)
 	}
 
 	// logs.jsonl: GenAI content record present (capture-content default on).

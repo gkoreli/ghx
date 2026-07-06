@@ -87,9 +87,44 @@ type RunManifest struct {
 	ExpectedEpisodes int `json:"expectedEpisodes,omitempty"`
 	// ExpectedEpisodesOverride records the GHX_EVAL_EXPECTED_EPISODES manual
 	// escape hatch when it was used for this run.
-	ExpectedEpisodesOverride int           `json:"expectedEpisodesOverride,omitempty"`
-	Identity                 AgentIdentity `json:"identity,omitempty"`
-	CreatedAt                time.Time     `json:"createdAt"`
+	ExpectedEpisodesOverride int            `json:"expectedEpisodesOverride,omitempty"`
+	Identity                 AgentIdentity  `json:"identity,omitempty"`
+	CreatedAt                time.Time      `json:"createdAt"`
+	BaselineReuse            *BaselineReuse `json:"baselineReuse,omitempty"`
+}
+
+// BaselineReuse records the provenance for a run that copied plain/ghx
+// baseline episodes from a prior committed run (ADR-0025.1 D2). Hashes name the
+// exact identity inputs that admitted the prior run; Episodes names every
+// copied JSON artifact and its raw-byte digest.
+type BaselineReuse struct {
+	ReusedFromRunID  string                        `json:"reusedFromRunId,omitempty"`
+	ReusedFromRunDir string                        `json:"reusedFromRunDir,omitempty"`
+	ReusedAt         time.Time                     `json:"reusedAt,omitempty"`
+	MaxAgeDays       int                           `json:"maxAgeDays"`
+	VerdictLabel     string                        `json:"verdictLabel,omitempty"`
+	Hashes           []BaselineReuseHashRecord     `json:"hashes,omitempty"`
+	Episodes         []BaselineReusedEpisodeRecord `json:"episodes,omitempty"`
+}
+
+// BaselineReuseHashRecord is one sha256 input in the baseline-reuse identity
+// inventory. SourceKind is one of file, value, or generated.
+type BaselineReuseHashRecord struct {
+	Name       string `json:"name"`
+	Algorithm  string `json:"algorithm"`
+	Value      string `json:"value"`
+	Source     string `json:"source"`
+	SourceKind string `json:"sourceKind"`
+}
+
+// BaselineReusedEpisodeRecord records one byte-for-byte copied baseline
+// episode JSON file.
+type BaselineReusedEpisodeRecord struct {
+	Profile    Profile `json:"profile"`
+	TaskID     string  `json:"taskId"`
+	SourceFile string  `json:"sourceFile"`
+	TargetFile string  `json:"targetFile"`
+	SHA256     string  `json:"sha256"`
 }
 
 func SaveRunManifest(runDir string, m RunManifest) error {

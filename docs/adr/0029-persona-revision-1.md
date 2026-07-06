@@ -388,3 +388,27 @@ report and live prompt.go, 2026-07-06; reviewed and status-accepted by Fable
 the same day. Binding sequence: build lands on a branch and merges only when
 no gate run is in flight; the persona golden hash updates in the same commit;
 the next full-rigor run measures the effect (pre-registered, never mid-run).
+
+## Implementation Notes
+
+Implemented 2026-07-06 on branch `codex-0025-1-and-0029`.
+
+- Updated `internal/sidecar/prompt.go` with the registered persona replacements:
+  canonical repo-scoped `ghx search` syntax, eval help-detour ban, read ladder,
+  search accountability, compact `answer` wording, `/tmp` evidence prohibition,
+  and initial-tool-list `submit_report` wording/fallback.
+- Updated the repo-scoped persona golden SHA in
+  `internal/sidecar/prompt_test.go` to
+  `01634547c0984f5a03d6ba0b8e7b672c49289494f289ba8e73ee32394fcaa016`.
+- Extended strict `submit_report` validation in `reportsink.go` for non-BLOCKED
+  reports: Markdown headings in `answer` are rejected, answers over 700
+  characters are rejected, and `/tmp` or local scratch-file citations in
+  claim evidence or evidence sources are rejected. The validator does not
+  truncate or rewrite reports.
+- Preserved agent-written `commandsRun` and added a separate runtime
+  `actualCommandLedger` in persisted turn report artifacts via
+  `SaveTurnReportArtifact`; the ledger is derived from observed tool calls and
+  is audit metadata, not a scorer.
+- `submit_report` was already exposed in the initial session metadata through
+  `SubmitReportToolID` in `BuildSessionMeta`; tests now also assert the persona
+  tells the agent not to tool-search for it.

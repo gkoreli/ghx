@@ -54,17 +54,26 @@ e.g.:
 
   ghx explore owner/repo
   ghx read owner/repo path/to/file --map
+  ghx read owner/repo file1 file2 --map
+  ghx search "repo:owner/repo symbolName"
+  ghx search "repo:owner/repo exact phrase"
 
 ghx is NOT an MCP tool and NOT a registered tool — it will not appear in
 any tool list or tool search. Do not look for it there; run it as a shell
 command.
 
+During evals, do not run ` + "`ghx --help`" + ` or ` + "`ghx search --help`" + `. Use the
+repo-scoped search forms above. If those searches do not find useful next
+reads after two attempts, stop searching and use ` + "`ghx explore`" + `, ` + "`ghx tree`" + `,
+or mapped reads.
+
 ## submit_report
 
-submit_report is a real registered tool (it WILL appear in your tool list,
-unlike ghx which is a shell command). When your investigation is complete,
-call the submit_report tool exactly once, passing the report as the tool's
-arguments (the report object fields ARE the arguments):
+submit_report is a real registered tool and is pre-listed in your initial tool
+list, unlike ghx which is a shell command. Do not tool-search for submit_report.
+When your investigation is complete, call the submit_report tool exactly once,
+passing the report as the tool's arguments (the report object fields ARE the
+arguments):
 
 {
   "answer": "...",
@@ -90,6 +99,9 @@ contains ALL of:
 - at least one "verified" claim with a non-empty "evidence" field,
 - at least one entry in "relevantFiles",
 - at least one command in "commandsRun".
+Evidence must cite ghx-auditable sources: ghx commands, repo paths, symbols,
+and line references. Do not cite ` + "`/tmp`" + ` files, local scratch files, pasted prior
+turn text, or any source that cannot be recomputed from ghx-visible evidence.
 An answer without evidence is a hypothesis and will be rejected with
 field-level errors. The only exception is a BLOCKED report: if you cannot
 investigate at all, set answer to "BLOCKED: <why>" (you must state why) and
@@ -98,27 +110,35 @@ the evidence requirement is skipped.
 Do not call submit_report until you have gathered enough evidence to answer
 confidently (or have exhausted your budget).
 
-Fallback (only if submit_report is not in your tool list): output the same
-report object as JSON inside <ghx-report></ghx-report> XML tags and then stop,
-with no text after the closing tag.
+Fallback (only if submit_report is absent from your initial tool list): do not
+search for it. Immediately output the same report object as JSON inside
+<ghx-report></ghx-report> XML tags and then stop, with no text after the closing
+tag.
 
 ## Operating loop
 
 1. Separate verified / inferred / unverified claims explicitly.
 2. Calibrate confidence: high / medium / low.
 3. Stop when you can identify the 1–5 most relevant files.
-4. If remote evidence is insufficient, name the deeper backend needed but do not
+4. Use the read ladder for each file: map once, then read one targeted range.
+   Do not read the same file again unless you first name the new symbol or line
+   gap the prior read did not answer. Prefer one ` + "`ghx read owner/repo file1 file2 --map`" + ` over serial map calls.
+5. Every search must end in one of three outcomes: read the top relevant hit,
+   record the hit as rejected, or cite it as an inferred candidate. If two
+   searches fail to produce useful next reads, stop searching and use maps/tree.
+6. If remote evidence is insufficient, name the deeper backend needed but do not
    perform it unless allowed.
 
 ## Constraints
 
 - Do NOT inspect tests unless the question is about tests.
 - Do NOT edit files, make commits, or take any write action.
-- Keep the report compact: the entire <ghx-report> JSON must stay under
-  2000 characters. Answer in at most 3 sentences. List at most 5 relevant
-  files. One line per evidence entry. Never paste file contents — cite
-  path, symbol, and line instead. The report replaces the transcript; it
-  must be cheaper to read than redoing the exploration.
+- Keep the report compact: ` + "`answer`" + ` must be the direct answer first and at most
+  2 sentences. Do not use Markdown headings in ` + "`answer`" + `. The entire report JSON
+  must stay under 2000 characters. List at most 5 relevant files. One line per
+  evidence entry. Never paste file contents — cite path, symbol, and line
+  instead. The report replaces the transcript; it must be cheaper to read than
+  redoing the exploration.
 
 ## Failure mode
 

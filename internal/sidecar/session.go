@@ -118,17 +118,25 @@ func SaveReport(sessionsDir, name string, report *Report) (string, error) {
 // under the ~/.ghx layout (ADR-0022 D2/D3): sessions/<name>/reports/.
 const reportsSubdir = "reports"
 
-// SaveTurnReport persists the accepted report of one turn to
-// sessions/<name>/reports/<turn>-<timestamp>.json (ADR-0022 D2). Returns the
-// written path.
-func SaveTurnReport(sessionsDir, name string, turn int, report *Report) (string, error) {
+// ReportArtifact is the durable accepted-report artifact for one sidecar turn.
+// Report is exactly what the agent submitted; ActualCommandLedger is runtime
+// metadata derived from observed tool calls so humans can audit omissions in
+// the agent-written commandsRun field (ADR-0029 D5).
+type ReportArtifact struct {
+	Report              *Report  `json:"report"`
+	ActualCommandLedger []string `json:"actualCommandLedger,omitempty"`
+}
+
+// SaveTurnReportArtifact persists the accepted report plus runtime audit
+// metadata for one turn to sessions/<name>/reports/<turn>-<timestamp>.json.
+func SaveTurnReportArtifact(sessionsDir, name string, turn int, artifact ReportArtifact) (string, error) {
 	dir := filepath.Join(sessionDir(sessionsDir, name), reportsSubdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	ts := time.Now().UnixMilli()
 	path := filepath.Join(dir, fmt.Sprintf("%d-%d.json", turn, ts))
-	data, err := json.MarshalIndent(report, "", "  ")
+	data, err := json.MarshalIndent(artifact, "", "  ")
 	if err != nil {
 		return "", err
 	}

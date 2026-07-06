@@ -16,7 +16,12 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 	for _, want := range []string{
 		"ghx-sidecar",
 		"<ghx-report>",
-		"under\n  2000 characters", // report compactness bound (ADR-0016.1)
+		"must stay under 2000 characters", // report compactness bound (ADR-0029)
+		"ghx search \"repo:owner/repo symbolName\"",
+		"Do not tool-search for submit_report.",
+		"Use the read ladder for each file",
+		"Do not cite `/tmp` files",
+		"`answer` must be the direct answer first and at most\n  2 sentences",
 		// CLI-invocation contract (ADR-0016.7): the agent must know ghx is
 		// a shell command, not a registered tool, and must verify before
 		// ever reporting BLOCKED.
@@ -45,11 +50,11 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
 // accidental drift is caught: discovery mode must not perturb the persona used
 // when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
-// the golden hash in the same commit as their ADR (current bytes: ADR-0027 D4
-// evidence-requirement wording).
+// the golden hash in the same commit as their ADR (current bytes: ADR-0029
+// persona revision 1 wording).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "326bb25c80a465f959323048c6fc09f0c4868f127280a870ffd7b06fe32a8077"
+	const wantSHA = "01634547c0984f5a03d6ba0b8e7b672c49289494f289ba8e73ee32394fcaa016"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}

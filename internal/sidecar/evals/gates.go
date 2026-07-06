@@ -66,6 +66,7 @@ type GateResult struct {
 type Verdict struct {
 	Aggregates map[Profile]*ProfileAggregate `json:"aggregates"`
 	Gates      []GateResult                  `json:"gates"`
+	Labels     []string                      `json:"labels,omitempty"`
 	Anomalies  []AnomalyCount                `json:"anomalies,omitempty"`
 	// ThesisSupported is true only when the run is valid, the thesis gates
 	// (G1, G2, G3, G5) pass, AND the sample meets the pre-registered
@@ -92,6 +93,23 @@ type Verdict struct {
 	// ExpectedEpisodes is known; FormatVerdict renders it as the
 	// "## Sequential stopping" section. Nil leaves the verdict unchanged.
 	Stopping *StoppingBounds `json:"stopping,omitempty"`
+}
+
+// LabelBaselineReused annotates a verdict generated from a run whose plain and
+// ghx episodes were copied under ADR-0025.1. It is descriptive provenance, not
+// a scoring or threshold change.
+func LabelBaselineReused(v *Verdict, reuse *BaselineReuse) {
+	if v == nil || reuse == nil || reuse.VerdictLabel != BaselineReuseLabel {
+		return
+	}
+	if !containsString(v.Labels, BaselineReuseLabel) {
+		v.Labels = append(v.Labels, BaselineReuseLabel)
+	}
+	note := fmt.Sprintf("%s: plain and ghx episodes copied from %s; manifest.json records hash inventory and copied episode provenance.",
+		BaselineReuseLabel, reuse.ReusedFromRunID)
+	if !containsString(v.Notes, note) {
+		v.Notes = append(v.Notes, note)
+	}
 }
 
 // Aggregate computes per-profile means over episodes.
@@ -585,8 +603,14 @@ func FormatVerdict(v Verdict) string {
 
 	sb.WriteString("\n## Verdict\n\n")
 	prefix := ""
+	for _, label := range v.Labels {
+		if strings.TrimSpace(label) == "" {
+			continue
+		}
+		prefix += fmt.Sprintf("**%s** ", label)
+	}
 	if v.Preliminary {
-		prefix = "**PRELIMINARY (below pre-registered gate-run sample — not the project verdict)** "
+		prefix += "**PRELIMINARY (below pre-registered gate-run sample — not the project verdict)** "
 	}
 	if !v.Valid {
 		prefix += "**INVALID (compliance/identity checks failed)** "
