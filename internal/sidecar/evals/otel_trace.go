@@ -170,6 +170,9 @@ func episodeAttributes(ep *Episode) []attribute.KeyValue {
 	if ep.Identity.AdapterSubjectModel != "" {
 		attrs = append(attrs, attribute.String("ghx.eval.adapter_subject_model", ep.Identity.AdapterSubjectModel))
 	}
+	if ep.Parallel {
+		attrs = append(attrs, attribute.Bool(ghxEvalParallelAttr, true))
+	}
 	if len(ep.ExclusionReasons) > 0 {
 		attrs = append(attrs, attribute.StringSlice("ghx.eval.exclusion_reasons", ep.ExclusionReasons))
 	}

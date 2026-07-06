@@ -77,6 +77,11 @@ type Verdict struct {
 	// Notes carries verdict-rule context (e.g. G4 blocking ADR-0017),
 	// data-sufficiency caveats, and data-quality warnings.
 	Notes []string `json:"notes"`
+	// Stopping is the optional sequential-stopping analysis (ADR-0025 D1).
+	// The runner attaches it after gate evaluation when the run manifest's
+	// ExpectedEpisodes is known; FormatVerdict renders it as the
+	// "## Sequential stopping" section. Nil leaves the verdict unchanged.
+	Stopping *StoppingBounds `json:"stopping,omitempty"`
 }
 
 // Aggregate computes per-profile means over episodes.
@@ -528,6 +533,9 @@ func FormatVerdict(v Verdict) string {
 	}
 	for _, n := range v.Notes {
 		fmt.Fprintf(&sb, "\n- %s\n", n)
+	}
+	if v.Stopping != nil {
+		sb.WriteString(formatStoppingSection(v.Stopping))
 	}
 	sb.WriteString("\nCaveats (ADR-0016.2): `overall` is not comparable across profiles " +
 		"(compression is 0 by construction for direct profiles). G3 is meaningful " +

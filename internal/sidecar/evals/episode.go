@@ -222,4 +222,9 @@ type Episode struct {
 	Rewards    RewardBreakdown   `json:"rewards"`
 	StartedAt  time.Time         `json:"startedAt"`
 	EndedAt    time.Time         `json:"endedAt"`
+	// Parallel marks an episode that ran concurrently with other episodes
+	// under GHX_EVAL_PARALLEL > 1 (ADR-0025 D3). Its wall-clock duration is
+	// contended and must be excluded from latency claims; the same marker is
+	// mirrored onto duration metrics as ghx.eval.parallel=true.
+	Parallel bool `json:"parallel,omitempty"`
 }
