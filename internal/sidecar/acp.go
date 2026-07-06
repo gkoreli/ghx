@@ -648,6 +648,13 @@ type RunTurnOptions struct {
 	// means "resolve from GHX_SIDECAR_LIVENESS_TIMEOUT (default 10m)";
 	// negative disables the watchdog explicitly.
 	LivenessTimeout time.Duration
+	// AgentStderrPath, when non-empty, is the per-session file the spawned
+	// adapter's stderr is teed to, in addition to the parent process stderr
+	// (ADR-0033 D2). It makes a failed turn's adapter diagnostics recoverable
+	// from committed artifacts instead of lost to the daemon's own log; the
+	// runtime reads its tail into turn-failure errors and the loud-WARN answer.
+	// Empty means stderr goes only to os.Stderr.
+	AgentStderrPath string
 }
 
 // ResolveReportSinkExe returns the ghx executable that will serve the
@@ -735,7 +742,12 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	if opts.Env != nil {
 		cmd.Env = opts.Env
 	}
-	cmd.Stderr = os.Stderr
+	// Tee the adapter's stderr to the per-session log (ADR-0033 D2) so a failed
+	// turn's diagnostics survive as a committed artifact, not only in whatever
+	// stderr the daemon happens to own.
+	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath)
+	defer stderrCloser.Close()
+	cmd.Stderr = stderrW
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -780,6 +792,11 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		}()
 	}
 
+	// cwd is the ACP session workspace. The authoritative neutral-workspace
+	// policy (the ghx-owned session directory) lives one layer up in the runtime
+	// that knows the session identity (ADR-0033 D1); os.Getwd() is only a
+	// last-resort default for bare callers (the RunTurn helper, probes) that do
+	// not set it.
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()

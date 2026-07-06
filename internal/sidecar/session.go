@@ -28,6 +28,31 @@ type SessionMeta struct {
 	// (question-derived discovery slug, R5). Empty on sessions created before
 	// routing shipped; sessionOrigin then infers it from the name shape.
 	NamedBy string `json:"namedBy,omitempty"`
+	// Cwd is the resolved ACP session working directory used for this session's
+	// turns (ADR-0033 D1). Default is the neutral, ghx-owned session directory
+	// (SessionWorkspace) — outside any git repo, with no host `.claude` settings
+	// — so turns are deterministic regardless of where `ghx` was invoked. An
+	// explicit Config.Cwd override (evals) is recorded here verbatim. Persisted
+	// on the first turn and reused on resume; empty on sessions created before
+	// ADR-0033, which fall back to the session dir and get it written next turn.
+	Cwd string `json:"cwd,omitempty"`
+	// AgentCmd is the exact ACP agent command line that served this session's
+	// turns (ADR-0033 D5). Provenance for diagnosing "which adapter/binary ran
+	// this session", especially under the always-on daemon whose warm worker is
+	// spawned by whichever caller created the session.
+	AgentCmd string `json:"agentCmd,omitempty"`
+	// SpawnCwd is os.Getwd() of the process that created this session
+	// (ADR-0033 D5). Under the auto-spawn daemon this is the FIRST caller's
+	// directory — the environment the resident agent inherited — which is often
+	// the difference behind "works from shell A, fails from shell B".
+	SpawnCwd string `json:"spawnCwd,omitempty"`
+	// AgentEnv lists the NAMES (never values) of agent-relevant environment
+	// variables present when this session was created (ADR-0033 D5): auth
+	// (ANTHROPIC_*, CLAUDE_CODE_USE_BEDROCK/_USE_VERTEX, AWS/Vertex), transport
+	// (*_PROXY, NODE_EXTRA_CA_CERTS), and ghx (GH_TOKEN/GITHUB_TOKEN), plus
+	// PATH/HOME presence. Names only — no secret ever touches this file — so an
+	// environment-specific failure is diagnosable from committed artifacts.
+	AgentEnv []string `json:"agentEnv,omitempty"`
 	// CreatedAt is the ISO-8601 timestamp of session initialization.
 	CreatedAt string `json:"createdAt"`
 	// UpdatedAt is the ISO-8601 timestamp of the most recent turn.
@@ -36,6 +61,27 @@ type SessionMeta struct {
 
 // sessionDir returns the directory for a named session.
 func sessionDir(sessionsDir, name string) string { return filepath.Join(sessionsDir, name) }
+
+// SessionWorkspace returns the neutral ACP session working directory for a
+// named session: the session's own ghx-owned directory (ADR-0033 D1). It is
+// deterministic, outside any git repository, and contains no host `.claude`
+// settings, so the spawned agent adopts no foreign workspace, settings, or
+// (untrusted) trust state — making turns reproducible regardless of the
+// caller's shell. The runtime uses this as the default cwd; an explicit
+// Config.Cwd override (evals pinning a checkout) takes precedence.
+func SessionWorkspace(sessionsDir, name string) string { return sessionDir(sessionsDir, name) }
+
+// AgentStderrLogName is the per-session file that captures the spawned ACP
+// adapter's stderr (ADR-0033 D2). It lives beside reports/ and traces.jsonl so
+// a failed turn's adapter diagnostics are always recoverable from committed
+// artifacts, not lost to the daemon's own log.
+const AgentStderrLogName = "agent-stderr.log"
+
+// AgentStderrLogPath returns the per-session adapter stderr log path
+// (ADR-0033 D2).
+func AgentStderrLogPath(sessionsDir, name string) string {
+	return filepath.Join(sessionDir(sessionsDir, name), AgentStderrLogName)
+}
 
 // IsInitialized reports whether a named session has been initialized on disk.
 func IsInitialized(sessionsDir, name string) bool {

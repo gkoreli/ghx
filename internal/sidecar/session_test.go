@@ -1,8 +1,71 @@
 package sidecar
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
+
+// ADR-0033 D1/D5: the new agent-provenance fields (cwd, agentCmd, spawnCwd,
+// agentEnv) survive a SaveMeta/ReadMeta round-trip, and SessionWorkspace /
+// AgentStderrLogPath resolve to the ghx-owned session directory.
+func TestSessionMetaProvenanceRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitSession(dir, "s", "o/r", "scope", SessionNamedExplicit); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Cwd = SessionWorkspace(dir, "s")
+	meta.AgentCmd = "npx -y @agentclientprotocol/claude-agent-acp@0.55.0"
+	meta.SpawnCwd = "/home/dev/project"
+	meta.AgentEnv = []string{"ANTHROPIC_API_KEY", "PATH", "HOME"}
+	if err := SaveMeta(dir, *meta); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cwd != filepath.Join(dir, "s") {
+		t.Errorf("cwd = %q, want the session dir %q", got.Cwd, filepath.Join(dir, "s"))
+	}
+	if got.AgentCmd != meta.AgentCmd {
+		t.Errorf("agentCmd = %q, want %q", got.AgentCmd, meta.AgentCmd)
+	}
+	if got.SpawnCwd != "/home/dev/project" {
+		t.Errorf("spawnCwd = %q, want /home/dev/project", got.SpawnCwd)
+	}
+	if !reflect.DeepEqual(got.AgentEnv, []string{"ANTHROPIC_API_KEY", "PATH", "HOME"}) {
+		t.Errorf("agentEnv = %v, want the persisted names", got.AgentEnv)
+	}
+	if want := filepath.Join(dir, "s", AgentStderrLogName); AgentStderrLogPath(dir, "s") != want {
+		t.Errorf("AgentStderrLogPath = %q, want %q", AgentStderrLogPath(dir, "s"), want)
+	}
+}
+
+// Legacy sessions (created before ADR-0033) have empty provenance fields, and
+// omitempty keeps them out of the JSON entirely until a turn backfills them.
+func TestSessionMetaProvenanceOmitEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := InitSession(dir, "legacy", "o/r", "scope", SessionNamedExplicit); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "legacy", "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"cwd"`, `"agentCmd"`, `"spawnCwd"`, `"agentEnv"`} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("fresh meta.json should omit %s until backfilled:\n%s", key, data)
+		}
+	}
+}
 
 func TestSessionLifecycle(t *testing.T) {
 	dir := t.TempDir()
