@@ -40,6 +40,73 @@ func TestPresentAgentEnvNamesOnly(t *testing.T) {
 	}
 }
 
+// ADR-0033.1: CaptureAgentAuthEnv forwards only allowlisted, non-empty
+// NAME=VALUE entries — no PATH/HOME/GH_TOKEN, no unrelated shell vars.
+func TestCaptureAgentAuthEnv(t *testing.T) {
+	environ := []string{
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"AWS_REGION=us-west-2",
+		"AWS_SECRET_ACCESS_KEY=super-secret",
+		"ANTHROPIC_API_KEY=",   // empty value: not forwarded
+		"PATH=/usr/bin",        // process context: never forwarded
+		"HOME=/home/x",         // process context: never forwarded
+		"GH_TOKEN=ghp_example", // ghx's own access: never forwarded
+		"UNRELATED_VAR=whatever",
+	}
+	got := CaptureAgentAuthEnv(environ)
+	want := []string{
+		"CLAUDE_CODE_USE_BEDROCK=1",
+		"AWS_REGION=us-west-2",
+		"AWS_SECRET_ACCESS_KEY=super-secret",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("captured = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("captured[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// ADR-0033.1: MergeAgentEnv overlay wins per name; base order preserved; new
+// names appended; empty overlay keeps exec's inherit-everything nil.
+func TestMergeAgentEnv(t *testing.T) {
+	if got := MergeAgentEnv([]string{"A=1"}, nil); got != nil {
+		t.Fatalf("empty overlay should return nil (inherit), got %v", got)
+	}
+	base := []string{"PATH=/usr/bin", "AWS_REGION=eu-west-1", "TERM=xterm"}
+	overlay := []string{"AWS_REGION=us-west-2", "CLAUDE_CODE_USE_BEDROCK=1"}
+	got := MergeAgentEnv(base, overlay)
+	want := []string{"PATH=/usr/bin", "AWS_REGION=us-west-2", "TERM=xterm", "CLAUDE_CODE_USE_BEDROCK=1"}
+	if len(got) != len(want) {
+		t.Fatalf("merged = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("merged[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// ADR-0033.1: the warm-worker respawn trigger — equal envs share a digest,
+// any change (or a switch to/from inherit) changes it.
+func TestAgentEnvDigest(t *testing.T) {
+	if AgentEnvDigest(nil) != "" {
+		t.Fatal("nil env (inherit) must digest to empty")
+	}
+	a := AgentEnvDigest([]string{"A=1", "B=2"})
+	if a == "" || a != AgentEnvDigest([]string{"A=1", "B=2"}) {
+		t.Fatal("equal envs must share a non-empty digest")
+	}
+	if a == AgentEnvDigest([]string{"A=1", "B=3"}) {
+		t.Fatal("changed value must change the digest")
+	}
+	if strings.Contains(a, "A=1") {
+		t.Fatal("digest must not contain env content")
+	}
+}
+
 func TestIsWorkspaceTrustWarning(t *testing.T) {
 	trust := "Ignoring 40 permissions.allow entries from .claude/settings.local.json: this workspace has not been trusted."
 	if !IsWorkspaceTrustWarning(trust) {

@@ -47,7 +47,9 @@ type SessionMeta struct {
 	// the difference behind "works from shell A, fails from shell B".
 	SpawnCwd string `json:"spawnCwd,omitempty"`
 	// AgentEnv lists the NAMES (never values) of agent-relevant environment
-	// variables present when this session was created (ADR-0033 D5): auth
+	// variables in the agent's resolved spawn environment, refreshed on any
+	// ask where the set changes (ADR-0033 D5; client passthrough
+	// ADR-0033.1): auth
 	// (ANTHROPIC_*, CLAUDE_CODE_USE_BEDROCK/_USE_VERTEX, AWS/Vertex), transport
 	// (*_PROXY, NODE_EXTRA_CA_CERTS), and ghx (GH_TOKEN/GITHUB_TOKEN), plus
 	// PATH/HOME presence. Names only — no secret ever touches this file — so an

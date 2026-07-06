@@ -209,3 +209,77 @@ func TestVersionMismatchRestartsDaemon(t *testing.T) {
 	}
 	_ = sidecar.ShutdownDaemon(context.Background(), "dev", cfg)
 }
+
+// TestDaemonAskForwardsClientAuthEnvAndRespawnsOnChange pins ADR-0033.1
+// end-to-end over a real daemon socket: the asking client's AgentAuthEnv
+// entries reach the spawned adapter's process environment, a warm worker
+// respawns when the auth env changes instead of serving turns on stale
+// credentials, and session metadata records env NAMES only — no value ever
+// touches disk.
+func TestDaemonAskForwardsClientAuthEnvAndRespawnsOnChange(t *testing.T) {
+	home := shortGHXHome(t)
+	agent, _, starts := buildDaemonMockAgent(t, []map[string]any{
+		{"text": daemonReport("first")},
+		{"text": daemonReport("second")},
+	})
+	dir, err := os.MkdirTemp("/tmp", "ghx-envlog-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	envLog := filepath.Join(dir, "env.log")
+	wrapper := filepath.Join(dir, "env-wrapper.sh")
+	body := fmt.Sprintf("#!/bin/sh\nprintf 'BEDROCK=%%s REGION=%%s\\n' \"$CLAUDE_CODE_USE_BEDROCK\" \"$AWS_REGION\" >> %q\nexec %q\n", envLog, agent)
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := sidecar.Config{AgentCmd: wrapper, SessionsDir: filepath.Join(home, "sessions")}
+	startTestDaemon(t, "dev", cfg)
+	client := sidecar.DaemonClient{Version: "dev"}
+
+	// Turn 1: no client auth env (adapter-login machine shape).
+	if _, err := client.Ask(context.Background(), cfg, sidecar.AskRequest{
+		Session: "authenv", Repo: "owner/repo", Question: "first?",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Turn 2: the asking shell now carries Bedrock auth — must respawn and forward.
+	if _, err := client.Ask(context.Background(), cfg, sidecar.AskRequest{
+		Session: "authenv", Repo: "owner/repo", Question: "second?",
+		AgentAuthEnv: []string{"CLAUDE_CODE_USE_BEDROCK=1", "AWS_REGION=us-west-2"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if data, err := os.ReadFile(starts); err != nil || strings.TrimSpace(string(data)) != "2" {
+		t.Fatalf("agent starts = %q, %v; want 2 (respawn on auth env change)", data, err)
+	}
+	lines := strings.Split(strings.TrimSpace(readFileString(t, envLog)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("env log lines = %v, want 2", lines)
+	}
+	if lines[1] != "BEDROCK=1 REGION=us-west-2" {
+		t.Fatalf("second spawn env = %q; client auth env did not reach the agent", lines[1])
+	}
+
+	meta, err := sidecar.ReadMeta(cfg.SessionsDir, "authenv")
+	if err != nil || meta == nil {
+		t.Fatalf("read meta: %v", err)
+	}
+	joined := strings.Join(meta.AgentEnv, ",")
+	if !strings.Contains(joined, "CLAUDE_CODE_USE_BEDROCK") || !strings.Contains(joined, "AWS_REGION") {
+		t.Fatalf("agentEnv names not refreshed with forwarded auth: %v", meta.AgentEnv)
+	}
+	if strings.Contains(joined, "us-west-2") {
+		t.Fatal("env VALUE persisted into session metadata")
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}

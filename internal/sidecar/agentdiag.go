@@ -1,6 +1,8 @@
 package sidecar
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +30,7 @@ var agentEnvVarNames = []string{
 	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_AUTH_TOKEN",
 	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_CUSTOM_HEADERS",
 	"ANTHROPIC_MODEL",
 	"ANTHROPIC_SMALL_FAST_MODEL",
 	"CLAUDE_CODE_OAUTH_TOKEN",
@@ -37,6 +40,7 @@ var agentEnvVarNames = []string{
 	"AWS_PROFILE",
 	"AWS_BEARER_TOKEN_BEDROCK",
 	"AWS_ACCESS_KEY_ID",
+	"AWS_SECRET_ACCESS_KEY",
 	"AWS_SESSION_TOKEN",
 	// Provider selection + cloud auth (Google Vertex).
 	"CLAUDE_CODE_USE_VERTEX",
@@ -57,6 +61,140 @@ var agentEnvVarNames = []string{
 	// Baseline process context the adapter forwards to the SDK subprocess.
 	"PATH",
 	"HOME",
+}
+
+// agentAuthEnvPassthrough is the subset of agentEnvVarNames whose VALUES the
+// ask client captures from its own shell and forwards per-turn to the daemon
+// (ADR-0033.1). The daemon is long-lived: its environment is frozen at
+// whatever context first auto-started it, so ambient inheritance silently
+// drops Bedrock/Vertex/gateway auth that IS present in the shell the human
+// actually types in (founder work laptop, 2026-07-06: daemon env had only
+// PATH+HOME; the adapter fell back to default Anthropic auth and died with
+// "Authentication required"). Passthrough makes the rule deterministic: the
+// agent authenticates as the shell that asked.
+//
+// Deliberately excluded: PATH and HOME (the daemon's own process context —
+// overriding them can break adapter/node resolution mid-flight), and
+// GH_TOKEN/GITHUB_TOKEN (ghx's own GitHub access, resolved by the ghx process
+// serving the tools, not by the spawned agent).
+//
+// Values ride only the runtime-dir unix socket (0700) and process memory —
+// they are never persisted or logged; session metadata records NAMES only.
+var agentAuthEnvPassthrough = []string{
+	// Anthropic direct auth / routing (incl. gateway: base URL + auth token +
+	// custom headers is exactly the adapter's `gateway` ACP auth surface).
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_BASE_URL",
+	"ANTHROPIC_CUSTOM_HEADERS",
+	"ANTHROPIC_MODEL",
+	"ANTHROPIC_SMALL_FAST_MODEL",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	// Provider selection + cloud auth (Amazon Bedrock).
+	"CLAUDE_CODE_USE_BEDROCK",
+	"AWS_REGION",
+	"AWS_PROFILE",
+	"AWS_BEARER_TOKEN_BEDROCK",
+	"AWS_ACCESS_KEY_ID",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_SESSION_TOKEN",
+	// Provider selection + cloud auth (Google Vertex).
+	"CLAUDE_CODE_USE_VERTEX",
+	"ANTHROPIC_VERTEX_PROJECT_ID",
+	"CLOUD_ML_REGION",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+	// Adapter / CLI resolution.
+	"CLAUDE_CODE_EXECUTABLE",
+	"CLAUDE_CONFIG_DIR",
+	// Transport (corporate proxies / custom CAs).
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"NO_PROXY",
+	"NODE_EXTRA_CA_CERTS",
+}
+
+// CaptureAgentAuthEnv returns the "NAME=VALUE" entries from environ whose
+// names are on the passthrough allowlist and whose values are non-empty
+// (ADR-0033.1). environ nil means the current process environment. The result
+// preserves allowlist order. Callers must treat the result as secret-bearing:
+// send it over the local daemon socket, never persist or log it.
+func CaptureAgentAuthEnv(environ []string) []string {
+	if environ == nil {
+		environ = os.Environ()
+	}
+	values := make(map[string]string, len(environ))
+	for _, kv := range environ {
+		if i := strings.IndexByte(kv, '='); i > 0 && i < len(kv)-1 {
+			values[kv[:i]] = kv[i+1:]
+		}
+	}
+	var captured []string
+	for _, name := range agentAuthEnvPassthrough {
+		if v, ok := values[name]; ok && v != "" {
+			captured = append(captured, name+"="+v)
+		}
+	}
+	return captured
+}
+
+// MergeAgentEnv overlays "NAME=VALUE" entries onto a base environment,
+// last-write-wins per name with base order preserved (ADR-0033.1). base nil
+// means the current process environment. A nil/empty overlay returns nil so
+// callers keep exec's default inherit-everything semantics instead of pinning
+// a snapshot.
+func MergeAgentEnv(base, overlay []string) []string {
+	if len(overlay) == 0 {
+		return nil
+	}
+	if base == nil {
+		base = os.Environ()
+	}
+	overridden := make(map[string]string, len(overlay))
+	for _, kv := range overlay {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			overridden[kv[:i]] = kv
+		}
+	}
+	merged := make([]string, 0, len(base)+len(overlay))
+	seen := make(map[string]struct{}, len(base))
+	for _, kv := range base {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			name = kv[:i]
+		}
+		if repl, ok := overridden[name]; ok {
+			merged = append(merged, repl)
+			seen[name] = struct{}{}
+			continue
+		}
+		merged = append(merged, kv)
+		seen[name] = struct{}{}
+	}
+	for _, kv := range overlay {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			if _, ok := seen[kv[:i]]; !ok {
+				merged = append(merged, kv)
+			}
+		}
+	}
+	return merged
+}
+
+// AgentEnvDigest fingerprints a spawn environment so a warm worker can detect
+// that the asking shell's auth env changed and respawn its adapter instead of
+// serving turns with stale credentials (ADR-0033.1). Only the hash ever
+// leaves this function — values stay in memory. Empty env (inherit) digests
+// to "".
+func AgentEnvDigest(env []string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	h := sha256.New()
+	for _, kv := range env {
+		h.Write([]byte(kv))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // PresentAgentEnv returns the names (never values) from agentEnvVarNames that
@@ -130,7 +268,8 @@ const agentAuthHint = "The spawned Claude agent has no usable credentials (auth 
 	"Log the agent itself in once:\n" +
 	"  npx -y @agentclientprotocol/claude-agent-acp --cli auth login --claudeai\n" +
 	"If this machine authenticates through Bedrock/Vertex or a gateway instead, export those\n" +
-	"env vars in the shell that runs ghx and restart the daemon (ghx sidecar daemon --stop);\n" +
+	"env vars in the shell where you run ghx — every ask forwards them to the agent\n" +
+	"automatically (ADR-0033.1), so no daemon restart is needed;\n" +
 	"`ghx sidecar sessions show <session>` lists which auth env names the agent actually saw."
 
 // agentHints maps stable failure markers — observed in the turn error text or

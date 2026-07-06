@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -125,8 +126,12 @@ func resolveSessionWorkspace(cfg Config, sessionsDir, session string, meta *Sess
 // next turn. Non-fatal — provenance is diagnostic, never load-bearing for the
 // turn. spawnCwd is captured once, when the fields are first written, so it
 // records the environment that actually created the (possibly warm, daemon-
-// owned) session rather than every later caller's directory.
-func recordAgentProvenance(sessionsDir string, meta *SessionMeta, workspace, agentCmd string) {
+// owned) session rather than every later caller's directory. spawnEnv is the
+// resolved agent spawn environment (nil means this process's env); only the
+// allowlisted NAMES from it are ever persisted, and they refresh on every
+// turn where the fingerprint changes — with client auth passthrough
+// (ADR-0033.1) the last ask's view is the diagnostic truth.
+func recordAgentProvenance(sessionsDir string, meta *SessionMeta, workspace, agentCmd string, spawnEnv []string) {
 	if meta == nil {
 		return
 	}
@@ -145,11 +150,9 @@ func recordAgentProvenance(sessionsDir string, meta *SessionMeta, workspace, age
 			changed = true
 		}
 	}
-	if meta.AgentEnv == nil {
-		if present := PresentAgentEnv(nil); present != nil {
-			meta.AgentEnv = present
-			changed = true
-		}
+	if present := PresentAgentEnv(spawnEnv); !slices.Equal(meta.AgentEnv, present) {
+		meta.AgentEnv = present
+		changed = true
 	}
 	if !changed {
 		return
@@ -228,6 +231,15 @@ type AskRequest struct {
 	// Scope is a short label written into the session metadata.
 	// Ignored on follow-up turns (metadata already exists).
 	Scope string
+	// AgentAuthEnv carries "NAME=VALUE" auth/transport env entries captured
+	// from the ASKING process's shell (CaptureAgentAuthEnv allowlist) and
+	// overlaid onto the agent spawn environment (ADR-0033.1). The daemon's
+	// own env is frozen at first auto-start, so without this a Bedrock/
+	// gateway shell silently loses its credentials on the daemon path.
+	// SECRET-BEARING: rides only the local daemon socket; never persist or
+	// log it — session metadata records env NAMES only. Ignored when
+	// Config.Env is set (eval profiles pin the whole environment).
+	AgentAuthEnv []string
 }
 
 // Ask executes one sidecar investigation turn and returns the evidence report
@@ -316,7 +328,18 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	// (session just initialized above) and backfills legacy sessions on write.
 	workspace := resolveSessionWorkspace(cfg, sessionsDir, req.Session, meta)
 	stderrLog := AgentStderrLogPath(sessionsDir, req.Session)
-	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd)
+
+	// Resolve the agent spawn environment (ADR-0033.1). Precedence: an
+	// explicit Config.Env (eval profiles pin the whole environment) > the
+	// asking client's auth env overlaid on this process's environment > nil
+	// (exec inherits this process's env). This makes the auth rule
+	// deterministic on the daemon path: the agent authenticates as the shell
+	// that asked, not as whatever context first auto-started the daemon.
+	spawnEnv := cfg.Env
+	if spawnEnv == nil {
+		spawnEnv = MergeAgentEnv(nil, req.AgentAuthEnv)
+	}
+	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd, spawnEnv)
 
 	ledger, err := LoadLedger(sessionsDir, req.Session)
 	if err != nil {
@@ -376,7 +399,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		ACPSessionID:    acpSessionID,
 		Prompt:          prompt,
 		Cwd:             workspace,
-		Env:             cfg.Env,
+		Env:             spawnEnv,
 		SessionMeta:     sessionMeta,
 		ReportSinkPath:  sinkPath,
 		AgentStderrPath: stderrLog,
@@ -403,7 +426,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 				ACPSessionID: resumeID,
 				Prompt:       turnCapWrapUpPrompt,
 				Cwd:          workspace,
-				Env:          cfg.Env,
+				Env:          spawnEnv,
 				// SessionMeta rides along so the resumed wrap-up runs under
 				// the same persona/allowlist/budgets/model pin as the turn it
 				// recovers, plus the eval raw-SDK audit channel (ADR-0020.2).
@@ -505,7 +528,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			ACPSessionID: retrySessionID,
 			Prompt:       reportRetryPromptWithError(reason),
 			Cwd:          workspace,
-			Env:          cfg.Env,
+			Env:          spawnEnv,
 			// SessionMeta rides along so the resumed retry stays fully
 			// steered and keeps the eval raw-SDK audit channel (ADR-0020.2).
 			SessionMeta:     sessionMeta,

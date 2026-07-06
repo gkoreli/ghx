@@ -54,7 +54,7 @@ func RunPreflightForAgent(ctx context.Context, agentCmd string) PreflightResult 
 func runPreflight(ctx context.Context, agentCmd, runningVersion string) PreflightResult {
 	type fn func(context.Context) PreflightCheck
 	cfg := preflightAgentConfig(agentCmd)
-	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary,
+	checks := []fn{checkGHToken, checkAgentAuthEnv, checkNetwork, checkGhxBinary,
 		func(ctx context.Context) PreflightCheck {
 			return checkACPAgent(ctx, cfg)
 		},
@@ -146,6 +146,27 @@ func checkGHToken(_ context.Context) PreflightCheck {
 		Message:     "no GitHub credentials found — ghx calls will fail",
 		Remediation: "Run `gh auth login`, or set GH_TOKEN/GITHUB_TOKEN in the environment.",
 	}
+}
+
+// checkAgentAuthEnv reports which auth/transport env NAMES this shell would
+// forward to the spawned agent on every ask (ADR-0033.1). Always-pass and
+// names-only: an empty set is normal on adapter-login machines (the SDK's own
+// credential store), so this line exists to make Bedrock/Vertex/gateway
+// setups verifiable at a glance — the exact blind spot behind the founder's
+// work-laptop "Authentication required" failure.
+func checkAgentAuthEnv(_ context.Context) PreflightCheck {
+	var names []string
+	for _, kv := range CaptureAgentAuthEnv(nil) {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			names = append(names, kv[:i])
+		}
+	}
+	if len(names) == 0 {
+		return PreflightCheck{Name: "agent-auth-env", Passed: true,
+			Message: "no auth env vars in this shell — the agent will use its own login (adapter credential store)"}
+	}
+	return PreflightCheck{Name: "agent-auth-env", Passed: true,
+		Message: "forwarding to the agent on each ask: " + strings.Join(names, ", ")}
 }
 
 func checkNetwork(ctx context.Context) PreflightCheck {

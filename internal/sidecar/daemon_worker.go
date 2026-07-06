@@ -100,6 +100,22 @@ type AgentWorker struct {
 	agentInfo     *ImplementationInfo
 	lastActivity  atomic.Int64
 	idleTimer     *time.Timer
+	// spawnEnvDigest fingerprints the environment the warm adapter was
+	// spawned with (ADR-0033.1). When a later turn arrives from a shell with
+	// a different auth env, the worker respawns instead of serving turns on
+	// stale credentials. Hash only — values are never retained here.
+	spawnEnvDigest string
+}
+
+// spawnEnvFor resolves the environment a worker's adapter process would be
+// spawned with for this turn: a per-turn opts.Env (daemon path: the asking
+// client's auth overlay, ADR-0033.1) wins over the worker Config's pinned env;
+// nil means inherit the daemon process environment.
+func spawnEnvFor(cfg Config, opts RunTurnOptions) []string {
+	if opts.Env != nil {
+		return opts.Env
+	}
+	return cfg.Env
 }
 
 // RunTurn executes one prompt on the worker's warm ACP connection. Before each
@@ -114,6 +130,13 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 	defer w.mu.Unlock()
 	w.stopIdleTimerLocked()
 	defer w.markIdleLocked()
+
+	// A warm adapter spawned under a different environment must not serve
+	// this turn: auth is process env, so a changed asking-shell overlay
+	// (ADR-0033.1) means respawn, never silently-stale credentials.
+	if w.conn != nil && w.spawnEnvDigest != AgentEnvDigest(spawnEnvFor(w.cfg, opts)) {
+		w.shutdownLocked()
+	}
 
 	if err := w.ensureStarted(ctx, opts); err != nil {
 		w.shutdownLocked()
@@ -160,12 +183,11 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	if w.cfg.Env != nil {
-		cmd.Env = w.cfg.Env
+	spawnEnv := spawnEnvFor(w.cfg, opts)
+	if spawnEnv != nil {
+		cmd.Env = spawnEnv
 	}
-	if opts.Env != nil {
-		cmd.Env = opts.Env
-	}
+	w.spawnEnvDigest = AgentEnvDigest(spawnEnv)
 	// Tee the warm adapter's stderr to the session's agent-stderr.log
 	// (ADR-0033 D2). The warm worker owns one long-lived adapter process per
 	// session, so the log path is stable for the worker's life and bound once

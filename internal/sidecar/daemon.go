@@ -325,6 +325,13 @@ type ioWriter interface {
 // AskViaDaemon asks through the warm daemon, auto-spawning once and falling
 // back to daemonless Ask if the daemon path is unavailable.
 func AskViaDaemon(ctx context.Context, version string, cfg Config, req AskRequest) (*Report, *TurnResult, bool, error) {
+	// Capture the asking shell's auth/transport env for the agent spawn
+	// (ADR-0033.1): the daemon's own environment is frozen at first
+	// auto-start, so Bedrock/Vertex/gateway credentials must travel with the
+	// ask. Values ride only this local socket call; nothing persists them.
+	if req.AgentAuthEnv == nil {
+		req.AgentAuthEnv = CaptureAgentAuthEnv(nil)
+	}
 	c := DaemonClient{Version: version, Stdout: os.Stdout, Stderr: os.Stderr}
 	resp, err := c.ask(ctx, cfg, req)
 	if err == nil {
