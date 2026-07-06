@@ -26,6 +26,7 @@ func WriteMetrics(path string, resourceAttrs []attribute.KeyValue, scopeName, sc
 			},
 		},
 	}
+	sanitizeProtoStrings(data)
 	line, err := protojson.MarshalOptions{EmitUnpopulated: false}.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal OTLP metrics json: %w", err)
@@ -41,9 +42,9 @@ func WriteMetrics(path string, resourceAttrs []attribute.KeyValue, scopeName, sc
 // into a named OTLP metric.
 func HistogramMetric(name, description, unit string, points []*metricspb.HistogramDataPoint) *metricspb.Metric {
 	return &metricspb.Metric{
-		Name:        name,
-		Description: description,
-		Unit:        unit,
+		Name:        validUTF8(name),
+		Description: validUTF8(description),
+		Unit:        validUTF8(unit),
 		Data: &metricspb.Metric_Histogram{Histogram: &metricspb.Histogram{
 			DataPoints:             points,
 			AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
@@ -68,9 +69,9 @@ func HistogramPoint(start, end time.Time, value float64, attrs []attribute.KeyVa
 // SumMetric wraps delta-temporality number data points into a named OTLP sum.
 func SumMetric(name, description, unit string, points []*metricspb.NumberDataPoint, monotonic bool) *metricspb.Metric {
 	return &metricspb.Metric{
-		Name:        name,
-		Description: description,
-		Unit:        unit,
+		Name:        validUTF8(name),
+		Description: validUTF8(description),
+		Unit:        validUTF8(unit),
 		Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{
 			DataPoints:             points,
 			AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
