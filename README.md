@@ -307,6 +307,10 @@ ghx tier2 codemap <owner/repo> --context    # Agent-ready JSON context envelope 
 ghx tier2 codemap <owner/repo> --importers <file>  # Who imports a file (fan-in; needs ast-grep)
 ghx tier2 codemap <owner/repo> --deps       # Dependency flow / import chains (needs ast-grep)
 ghx tier2 codemap <owner/repo> --ref v1.2.3 --sparse src  # Pin a ref, materialize only candidate paths
+ghx tier2 astgrep <owner/repo> --pattern 'compose($$$A)' --lang ts  # Structural AST pattern search (JSON matches)
+ghx tier2 astgrep <owner/repo> --pattern 'errors.Is($E, $T)' --lang go src  # Scope the search to paths
+ghx tier2 repomap <owner/repo>              # Rank the files that matter (graph centrality, token budget)
+ghx tier2 repomap <owner/repo> --query route --budget 512  # Bias ranking to the question, cap output tokens
 ```
 
 `read` documents one range spelling, `--lines START-END`, but accepts hidden
@@ -325,11 +329,19 @@ resolved to a commit SHA and materialized as a shallow, blobless, read-only
 snapshot cached by SHA under `~/.ghx/cache/tier2` (`$GHX_HOME` respected;
 5 GiB budget, 30-day LRU/TTL eviction). Snapshot provenance — repo, ref,
 resolved SHA, clone strategy, cache hit — prints to stderr before any tool
-output, and structural tools run as absorbed subprocesses under canonical
-backend IDs (`local:codemap` first, via
-[codemap](https://github.com/JordanCoin/codemap), MIT). If the tool binary is
-missing, ghx prints the install hint and answers fall back to remote Tier-1
-evidence — never a silent or faked Tier-2 result.
+output, and structural tools run as absorbed backends under canonical IDs:
+`local:codemap` (subprocess, via
+[codemap](https://github.com/JordanCoin/codemap), MIT), `local:ast-grep`
+(subprocess, via [ast-grep](https://github.com/ast-grep/ast-grep), MIT — also
+the binary codemap needs for `--importers`/`--deps`), and `local:repomap`
+(built in: the budgeted definition/reference/import-graph PageRank ranking
+stolen with attribution from
+[aider's repo map](https://github.com/Aider-AI/aider), Apache-2.0 — an
+algorithm, not a dependency; deterministic given the same snapshot and
+query). If a tool binary is missing, ghx prints the install hint and exits
+before any clone; answers fall back to remote Tier-1 evidence — never a
+silent or faked Tier-2 result. `astgrep` follows grep parity: exit `1` with
+`[]` means the search ran and found nothing.
 
 ### Codemode
 
@@ -465,10 +477,15 @@ existing serves the need or the vision.**
 
 Where we do build new — ghx and the Agent Sidecar Framework — it is because the
 thing did not exist, and it is inspired loudly by what does. Tools like
-[codemap](https://github.com/JordanCoin/codemap) shape the sidecar's internal
-toolbox: `ghx tier2 codemap` absorbs it as an internal subprocess backend
-(`local:codemap`, ADR-0024.1) rather than competing on CLI surface (see
-[ADR-0026](docs/adr/0026-prior-art-landscape.md)). MIT in, MIT out.
+[codemap](https://github.com/JordanCoin/codemap) and
+[ast-grep](https://github.com/ast-grep/ast-grep) shape the sidecar's internal
+toolbox: `ghx tier2 codemap` and `ghx tier2 astgrep` absorb them as internal
+subprocess backends (`local:codemap`, `local:ast-grep`, ADR-0024.1) rather
+than competing on CLI surface (see
+[ADR-0026](docs/adr/0026-prior-art-landscape.md)), and `ghx tier2 repomap`
+steals the budgeted graph-ranking algorithm behind
+[aider's repo map](https://github.com/Aider-AI/aider) without the dependency.
+MIT in, MIT out.
 
 ## How it was built
 
