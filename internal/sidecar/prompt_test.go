@@ -26,6 +26,15 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 		"ghx inspect owner/repo \"concern phrase\"",
 		"PREFER one\n   `ghx inspect owner/repo \"concern\"` as your first command",
 		"Do not cite `/tmp` files",
+		// Tier-2 escalation doctrine (ADR-0029.2 D1): tier2 tools exist for
+		// cross-file structure questions AFTER remote evidence falls short,
+		// with canonical local:* backend IDs and tierUsed in the report.
+		"Escalate to Tier 2 for cross-file STRUCTURE questions",
+		"only AFTER remote evidence (inspect/search/maps) falls short",
+		"ghx tier2 codemap owner/repo --importers src/file.ts    (backend local:codemap)",
+		"ghx tier2 astgrep owner/repo --pattern 'compose($$$ARGS)' --lang ts    (backend local:ast-grep)",
+		"ghx tier2 repomap owner/repo --query concern    (backend local:repomap)",
+		"list the local:* backend in backendsUsed, and set tierUsed to \"tier2\"",
 		"`answer` must be the direct answer first and at most\n  2 sentences",
 		// CLI-invocation contract (ADR-0016.7): the agent must know ghx is
 		// a shell command, not a registered tool, and must verify before
@@ -55,11 +64,11 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
 // accidental drift is caught: discovery mode must not perturb the persona used
 // when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
-// the golden hash in the same commit as their ADR (current bytes: ADR-0029.1
-// persona revision 2, inspect-first exploration).
+// the golden hash in the same commit as their ADR (current bytes: ADR-0029.2
+// persona revision 3, tier-2 doctrine + discovery citation discipline).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "b07834ae0504f4056dfcb2ba3f51c823d7cec6f688985ee47e2a80a1b764eccb"
+	const wantSHA = "400ecd3da93343475f3148321b710e50c5b8b2ca9c842158e5f5381d2240287b"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}
@@ -80,11 +89,17 @@ func TestDiscoveryPersonaExtendsBase(t *testing.T) {
 		"## Discovery mode",
 		"several distinct query formulations", // broad sweep, multiple queries
 		"real usage in code",                  // triangulation signals
-		"seen only in search results",         // search-only repos are inferred…
-		"never a verified one",                // …never verified
-		"ranked comparison",                   // ranked candidate output
-		"unverified tail",                     // honesty about the unswept rest
-		"owner/repo",                          // repo-level citation form (D3)
+		"ranked comparison", // ranked candidate output
+		"unverified tail",   // honesty about the unswept rest
+		// Discovery citation discipline (ADR-0029.2 D2): read-then-cite with
+		// the owner/repo:path form mandatory on every verified claim; a repo
+		// seen only in search results is INFERRED, never verified.
+		"read, then cite",
+		"cites that\n   exact file in owner/repo:path form",
+		"is INFERRED — never claim it as\n   verified",
+		"Worked example — after running: ghx read acme/rate-limiter README.md",
+		"acme/rate-limiter:README.md",
+		"a bare owner/repo name in evidence\nnever earns verified credit",
 	} {
 		if !strings.Contains(disc, want) {
 			t.Errorf("discovery persona missing %q", want)
