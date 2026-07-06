@@ -38,7 +38,7 @@ func init() {
 	RootCmd.SilenceErrors = true
 	RootCmd.SilenceUsage = true
 	RootCmd.SetFlagErrorFunc(teachingFlagError)
-	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, grepCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
+	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, grepCmd, inspectCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
 }
 
 var reposCmd = &cobra.Command{
@@ -358,6 +358,48 @@ func init() {
 	grepCmd.Flags().String("path", "", "Limit matches to paths containing this value")
 	grepCmd.Flags().IntP("limit", "l", 30, "Number of results")
 	grepCmd.Flags().Int("budget", 12000, "Approximate output budget in characters")
+}
+
+var inspectCmd = &cobra.Command{
+	Use:   "inspect <owner/repo> <query>",
+	Short: "Rank files, maps, snippets, and next reads for a concern",
+	Example: `  ghx inspect gkoreli/ghx "flag error suggestions"
+  ghx inspect gin-gonic/gin "routing middleware" --lang go
+  ghx inspect openai/openai-node "streaming responses" --glob "src/**/*.ts"`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		budget, _ := cmd.Flags().GetInt("budget")
+		limit, _ := cmd.Flags().GetInt("limit")
+		lang, _ := cmd.Flags().GetString("lang")
+		glob, _ := cmd.Flags().GetString("glob")
+		path, _ := cmd.Flags().GetString("path")
+		result, err := ghxlib.Inspect(args[0], args[1], ghxlib.InspectOptions{
+			Budget: budget,
+			Limit:  limit,
+			Lang:   lang,
+			Glob:   glob,
+			Path:   path,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "invalid repo format") || strings.Contains(err.Error(), "query must not be empty") {
+				return WithExitCode(ExitBadInvocation, err)
+			}
+			return WithExitCode(ExitUpstreamFailure, err)
+		}
+		fmt.Print(ghxlib.FormatInspectText(result))
+		if len(result.Files) == 0 {
+			return WithExitCode(ExitNoResults, fmt.Errorf("no inspect results for %q in %s", args[1], args[0]))
+		}
+		return nil
+	},
+}
+
+func init() {
+	inspectCmd.Flags().Int("budget", 12000, "Approximate total output budget in characters")
+	inspectCmd.Flags().IntP("limit", "l", 30, "Candidate search limit before ranking (max 100)")
+	inspectCmd.Flags().String("lang", "", "Limit search candidates by language")
+	inspectCmd.Flags().String("glob", "", "Limit candidates by path glob")
+	inspectCmd.Flags().String("path", "", "Prefer or constrain candidates to a subtree")
 }
 
 var treeCmd = &cobra.Command{

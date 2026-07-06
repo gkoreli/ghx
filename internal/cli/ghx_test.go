@@ -92,6 +92,40 @@ func TestGrepFlags(t *testing.T) {
 	}
 }
 
+func TestInspectCommandShape(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"inspect"})
+	if err != nil {
+		t.Fatalf("Find inspect: %v", err)
+	}
+	if cmd != inspectCmd {
+		t.Fatalf("RootCmd inspect command = %v, want inspectCmd", cmd)
+	}
+	if inspectCmd.Use != "inspect <owner/repo> <query>" {
+		t.Fatalf("Use = %q", inspectCmd.Use)
+	}
+	if !strings.Contains(inspectCmd.Example, "ghx inspect gin-gonic/gin") {
+		t.Fatalf("inspect examples missing gin smoke: %q", inspectCmd.Example)
+	}
+	for _, name := range []string{"budget", "limit", "lang", "glob", "path"} {
+		if inspectCmd.Flag(name) == nil {
+			t.Fatalf("inspect flag %q not registered", name)
+		}
+	}
+	if inspectCmd.Flag("json") != nil {
+		t.Fatal("inspect --json registered before shared JSON contract exists")
+	}
+}
+
+func TestInspectBadInvocationExitCode(t *testing.T) {
+	err := inspectCmd.Args(inspectCmd, []string{"owner/repo"})
+	if err == nil {
+		t.Fatal("inspect Args returned nil for missing query")
+	}
+	if got := CodeForError(WithExitCode(ExitBadInvocation, err)); got != ExitBadInvocation {
+		t.Fatalf("exit code = %d, want %d", got, ExitBadInvocation)
+	}
+}
+
 func TestSemanticExitCodes(t *testing.T) {
 	if got := CodeForError(nil); got != ExitOK {
 		t.Fatalf("nil code = %d, want %d", got, ExitOK)
