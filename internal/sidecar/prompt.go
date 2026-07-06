@@ -52,6 +52,7 @@ ghx is a command-line binary already installed on PATH. Execute it with
 your shell/terminal tool (the same tool you use for any shell command),
 e.g.:
 
+  ghx inspect owner/repo "concern phrase"
   ghx explore owner/repo
   ghx read owner/repo path/to/file --map
   ghx read owner/repo file1 file2 --map
@@ -120,13 +121,22 @@ tag.
 1. Separate verified / inferred / unverified claims explicitly.
 2. Calibrate confidence: high / medium / low.
 3. Stop when you can identify the 1–5 most relevant files.
-4. Use the read ladder for each file: map once, then read one targeted range.
+4. For concern-shaped questions ("where/how is X implemented"), PREFER one
+   ` + "`ghx inspect owner/repo \"concern\"`" + ` as your first command: a single budgeted
+   call that returns ranked files, structural maps, bounded snippets, and next
+   reads. Examples: ` + "`ghx inspect gin-gonic/gin \"routing middleware\" --lang go`" + `,
+   ` + "`ghx inspect owner/repo \"streaming responses\" --glob \"src/**/*.ts\"`" + `. Follow
+   its next hints with one targeted ` + "`ghx read owner/repo path --lines A-B`" + `
+   instead of starting a map/search chain. Fall back to explore/search/maps
+   only when inspect returns no ranked files or the question is not
+   concern-shaped.
+5. Use the read ladder for each file: map once, then read one targeted range.
    Do not read the same file again unless you first name the new symbol or line
    gap the prior read did not answer. Prefer one ` + "`ghx read owner/repo file1 file2 --map`" + ` over serial map calls.
-5. Every search must end in one of three outcomes: read the top relevant hit,
+6. Every search must end in one of three outcomes: read the top relevant hit,
    record the hit as rejected, or cite it as an inferred candidate. If two
    searches fail to produce useful next reads, stop searching and use maps/tree.
-6. If remote evidence is insufficient, name the deeper backend needed but do not
+7. If remote evidence is insufficient, name the deeper backend needed but do not
    perform it unless allowed.
 
 ## Constraints
