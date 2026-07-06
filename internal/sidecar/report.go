@@ -91,8 +91,10 @@ var stringListFields = map[string]bool{
 
 // coerceReportJSON normalizes near-conformant report JSON into the Report
 // schema: bare values where arrays are expected are wrapped, and bare
-// strings in claim arrays become {"summary": ...} objects. Anything beyond
-// these shapes is left untouched and will fail the typed unmarshal.
+// strings in claim arrays become {"summary": ...} objects. Field-specific
+// list item drift is also normalized where report agents commonly swap
+// string/object forms. Anything beyond these shapes is left untouched and
+// will fail the typed unmarshal.
 func coerceReportJSON(body []byte) ([]byte, error) {
 	var doc map[string]any
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -102,8 +104,10 @@ func coerceReportJSON(body []byte) ([]byte, error) {
 		switch {
 		case claimFields[key]:
 			doc[key] = coerceClaimList(val)
-		case objectListFields[key], stringListFields[key]:
-			doc[key] = coerceList(val)
+		case objectListFields[key]:
+			doc[key] = coerceObjectList(key, val)
+		case stringListFields[key]:
+			doc[key] = coerceStringList(val)
 		}
 	}
 	return json.Marshal(doc)
@@ -131,4 +135,77 @@ func coerceClaimList(val any) any {
 		}
 	}
 	return list
+}
+
+// coerceStringList wraps single values and converts common object/scalar drift
+// into strings for fields whose schema is []string.
+func coerceStringList(val any) any {
+	list, ok := coerceList(val).([]any)
+	if !ok {
+		return val
+	}
+	for i, item := range list {
+		switch v := item.(type) {
+		case string:
+			continue
+		case map[string]any:
+			list[i] = stringifyReportObject(v)
+		case float64, bool, nil:
+			list[i] = compactJSON(v)
+		}
+	}
+	return list
+}
+
+// coerceObjectList wraps single values and converts bare string items into the
+// object shape expected by relevantFiles and evidence.
+func coerceObjectList(key string, val any) any {
+	list, ok := coerceList(val).([]any)
+	if !ok {
+		return val
+	}
+	for i, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "relevantFiles":
+			list[i] = map[string]any{"path": s}
+		case "evidence":
+			list[i] = map[string]any{"summary": s}
+		}
+	}
+	return list
+}
+
+func stringifyReportObject(obj map[string]any) string {
+	for _, key := range []string{"path", "source", "summary", "value"} {
+		if val, ok := obj[key]; ok {
+			s := stringifyReportValue(val)
+			if reason, ok := obj["reason"]; ok {
+				rs := stringifyReportValue(reason)
+				if rs != "" {
+					s += " — " + rs
+				}
+			}
+			return s
+		}
+	}
+	return compactJSON(obj)
+}
+
+func stringifyReportValue(val any) string {
+	if s, ok := val.(string); ok {
+		return s
+	}
+	return compactJSON(val)
+}
+
+func compactJSON(val any) string {
+	b, err := json.Marshal(val)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
