@@ -89,6 +89,13 @@ func defaultConfig(root string) Config {
 // NewDefaultConfig returns the default config rooted at ~/.ghx (or $GHX_HOME).
 func NewDefaultConfig() Config { return defaultConfig(rootDir()) }
 
+// RootDir returns the active ghx home directory: $GHX_HOME when set, otherwise
+// ~/.ghx. Daemon runtime files and sidecar artifacts share this root.
+func RootDir() string { return rootDir() }
+
+// RuntimeDir returns the daemon lifecycle directory under the active ghx home.
+func RuntimeDir() string { return filepath.Join(rootDir(), "runtime") }
+
 // configFilePath returns the path to the JSON config file under root.
 func configFilePath(root string) string { return filepath.Join(root, "config.json") }
 

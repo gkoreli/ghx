@@ -2,13 +2,9 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
-	"unicode"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/spf13/cobra"
@@ -56,7 +52,7 @@ var sidecarAskCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "session: %s\n", session)
 
 		cfg := sidecar.LoadConfig()
-		report, turn, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
+		report, turn, _, err := sidecar.AskViaDaemon(context.Background(), VERSION, cfg, sidecar.AskRequest{
 			Session:  session,
 			Repo:     repo,
 			Question: args[0],
@@ -77,6 +73,22 @@ var sidecarAskCmd = &cobra.Command{
 			fmt.Printf("\n%s\n", footer)
 		}
 		return nil
+	},
+}
+
+// sidecarDaemonCmd runs or controls the per-user sidecar daemon.
+var sidecarDaemonCmd = &cobra.Command{
+	Use:   "daemon",
+	Short: "Run the warm sidecar daemon",
+	Example: `  ghx sidecar daemon
+  ghx sidecar daemon --stop`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		stop, _ := cmd.Flags().GetBool("stop")
+		if stop {
+			return sidecar.ShutdownDaemon(context.Background(), VERSION, sidecar.LoadConfig())
+		}
+		cfg := sidecar.LoadConfig()
+		return sidecar.RunDaemon(context.Background(), VERSION, cfg)
 	},
 }
 
@@ -338,13 +350,16 @@ func init() {
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 
 	sidecarReportSinkCmd.Flags().String("out", "", "Path to write the accepted report JSON (required)")
+	sidecarDaemonCmd.Flags().Bool("background", false, "Internal: daemon was auto-spawned in the background")
+	_ = sidecarDaemonCmd.Flags().MarkHidden("background")
+	sidecarDaemonCmd.Flags().Bool("stop", false, "Ask the running daemon to stop")
 
 	sidecarConfigInitCmd.Flags().Bool("claude-acp", false, "Write the pinned Claude ACP adapter command (npx @agentclientprotocol/claude-agent-acp) instead of auto-detecting")
 	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp; a diff is shown first)")
 
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
-	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarSessionsCmd, sidecarConfigCmd)
+	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarSessionsCmd, sidecarConfigCmd)
 }
 
 // questionSession derives a stable session slug from the question when the ask
@@ -352,47 +367,17 @@ func init() {
 // kebab-cased leading words truncated to ~40 chars, plus a short content hash
 // of the full question so distinct questions never collide.
 func questionSession(question string) string {
-	slug := kebabSlug(question)
-	if runes := []rune(slug); len(runes) > 40 {
-		slug = string(runes[:40])
-		// Prefer whole leading words: drop a trailing partial word when the
-		// cut landed mid-word (keep single over-long words as-is).
-		if i := strings.LastIndex(slug, "-"); i > 0 {
-			slug = slug[:i]
-		}
-	}
-	if slug == "" {
-		slug = "discovery"
-	}
-	sum := sha256.Sum256([]byte(question))
-	return slug + "-" + hex.EncodeToString(sum[:4])
+	return sidecar.QuestionSlug(question)
 }
 
 func defaultReconSession(repo string) string {
-	s := kebabSlug(repo)
-	if s == "" {
-		return "repo"
-	}
-	return s
+	return sidecar.Slug(repo, "repo")
 }
 
 // kebabSlug lowercases s and collapses every non-alphanumeric run into a
 // single dash, trimming leading/trailing dashes.
 func kebabSlug(s string) string {
-	var b strings.Builder
-	lastDash := false
-	for _, r := range strings.ToLower(s) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
+	return sidecar.Slug(s, "")
 }
 
 func printHumanReport(report *sidecar.Report) {
