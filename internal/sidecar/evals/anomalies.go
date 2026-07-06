@@ -3,6 +3,8 @@ package evals
 import (
 	"fmt"
 	"strings"
+
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 )
 
 // AnomalySeverity classifies how an anomaly relates to the run.
@@ -65,6 +67,16 @@ const (
 	// Applies to every profile equally — it protected the baseline in the
 	// 2026-07-05 audit; next time it could inflate the sidecar.
 	AnomalyAnswerDocContamination = "answer_doc_contamination"
+	// AnomalyTurnCapWrapUp: the adapter's max-turns safety net fired and the
+	// runtime recovered the exploration with the one-shot wrap-up resume
+	// (ADR-0027 D1). Soft: the episode recovered, but the count shows how
+	// often the net fires — a rising count means budgets are mis-sized.
+	AnomalyTurnCapWrapUp = "turn_cap_wrapup"
+	// AnomalyEpisodeHangTimeout: a turn was cancelled by the sidecar liveness
+	// watchdog after producing no ACP session update for the whole liveness
+	// window (ADR-0027 D2). Breaking: the episode's turn died without a
+	// usable report; detected from the persisted turn error string.
+	AnomalyEpisodeHangTimeout = "episode_hang_timeout"
 )
 
 // Anomaly is one declaratively-detected failure pattern on an episode.
@@ -87,8 +99,24 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 		return nil
 	}
 	var out []Anomaly
+	// Liveness watchdog cancellations (ADR-0027 D2) are profile-independent:
+	// any turn whose persisted error carries the watchdog marker hung.
+	for _, turn := range ep.Turns {
+		if strings.Contains(turn.Error, sidecar.LivenessTimeoutMarker) {
+			out = append(out, Anomaly{
+				Kind: AnomalyEpisodeHangTimeout, Severity: SeverityBreaking, Turn: turn.Turn,
+				Detail: fmt.Sprintf("turn cancelled by the liveness watchdog: %s", boundedString(turn.Error, 256)),
+			})
+		}
+	}
 	if ep.Profile == ProfileSidecar {
 		for _, turn := range ep.Turns {
+			if turn.WrapUpRecovered {
+				out = append(out, Anomaly{
+					Kind: AnomalyTurnCapWrapUp, Severity: SeveritySoft, Turn: turn.Turn,
+					Detail: "max-turns safety net fired; exploration recovered via the one-shot wrap-up resume (ADR-0027 D1)",
+				})
+			}
 			if turn.ReportRetried {
 				out = append(out, Anomaly{
 					Kind: AnomalySidecarReportRetried, Severity: SeveritySoft, Turn: turn.Turn,
@@ -181,9 +209,11 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 	}{
 		{AnomalySidecarBlocked, SeverityBreaking},
 		{AnomalySidecarReportMissing, SeverityBreaking},
+		{AnomalyEpisodeHangTimeout, SeverityBreaking},
 		{AnomalySidecarReportUnparsed, SeveritySoft},
 		{AnomalySidecarReportRetried, SeveritySoft},
 		{AnomalySidecarReportCoerced, SeveritySoft},
+		{AnomalyTurnCapWrapUp, SeveritySoft},
 		{AnomalyDirectGhxNoncompliance, SeveritySoft},
 		{AnomalyParallelRateLimited, SeveritySoft},
 		{AnomalyAnswerDocContamination, SeveritySoft},

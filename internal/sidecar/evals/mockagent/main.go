@@ -8,23 +8,40 @@
 //
 // Configuration via environment:
 //
-//	MOCKAGENT_SCRIPT — path to a JSON file:
-//	                   [{"toolCalls": [...], "replayOnLoad": [...], "text": "..."}]
-//	MOCKAGENT_STATE  — path to a counter file persisted across process spawns,
-//	                   so per-turn agent processes (the sidecar production
-//	                   pattern) advance through the script.
+//	MOCKAGENT_SCRIPT     — path to a JSON file:
+//	                       [{"toolCalls": [...], "replayOnLoad": [...], "text": "..."}]
+//	MOCKAGENT_STATE      — path to a counter file persisted across process spawns,
+//	                       so per-turn agent processes (the sidecar production
+//	                       pattern) advance through the script.
+//	MOCKAGENT_PROMPT_LOG — optional path; every LoadSession and Prompt is
+//	                       appended as "LOAD <sessionId>" / "PROMPT <text>"
+//	                       lines so tests can assert what the runtime sent
+//	                       (ADR-0027 D1 wrap-up assertions).
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
+
+// promptText flattens the prompt request's text blocks for the audit log.
+func promptText(params acp.PromptRequest) string {
+	var sb strings.Builder
+	for _, block := range params.Prompt {
+		if block.Text != nil {
+			sb.WriteString(block.Text.Text)
+		}
+	}
+	return sb.String()
+}
 
 // reply is one scripted prompt response.
 type reply struct {
@@ -36,6 +53,35 @@ type reply struct {
 	// calling the submit_report MCP tool with an accepted report, exercising the
 	// runtime's sink-preference gate through the real production path.
 	SubmitReport json.RawMessage `json:"submitReport,omitempty"`
+	// PromptError, when set, fails the prompt request with a JSON-RPC error
+	// carrying this message — e.g. the adapter's hard
+	// "Reached maximum number of turns (24)" (ADR-0027 D1 test hook).
+	PromptError string `json:"promptError,omitempty"`
+	// HangMs, when > 0, sleeps this long inside Prompt while emitting nothing:
+	// a scripted zombie for liveness-watchdog tests (ADR-0027 D2).
+	HangMs int `json:"hangMs,omitempty"`
+	// UpdateCount/UpdateIntervalMs emit that many message chunks paced at the
+	// interval before the reply completes, proving that steady activity keeps
+	// the watchdog quiet (ADR-0027 D2).
+	UpdateCount      int `json:"updateCount,omitempty"`
+	UpdateIntervalMs int `json:"updateIntervalMs,omitempty"`
+	// ExitBeforeResponse, when true, kills the agent process mid-prompt: the
+	// dead-peer case (ADR-0027 D2).
+	ExitBeforeResponse bool `json:"exitBeforeResponse,omitempty"`
+}
+
+// logEvent appends one line to MOCKAGENT_PROMPT_LOG when configured.
+func logEvent(kind, detail string) {
+	path := os.Getenv("MOCKAGENT_PROMPT_LOG")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", kind, strings.ReplaceAll(detail, "\n", "\\n"))
 }
 
 // mockAgent implements acp.Agent and acp.AgentLoader with scripted behavior.
@@ -107,6 +153,7 @@ func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) 
 // the follow-up prompt request is sent.
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	m.captureSink(params.McpServers)
+	logEvent("LOAD", string(params.SessionId))
 	idx := m.currentIndex()
 	if idx >= len(m.replies) {
 		idx = len(m.replies) - 1
@@ -137,6 +184,31 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 		idx = len(m.replies) - 1
 	}
 	r := m.replies[idx]
+	logEvent("PROMPT", promptText(params))
+
+	// Scripted failure modes (ADR-0027 test hooks) run before any output.
+	if r.HangMs > 0 {
+		time.Sleep(time.Duration(r.HangMs) * time.Millisecond)
+	}
+	for i := 0; i < r.UpdateCount; i++ {
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: params.SessionId,
+			Update: acp.SessionUpdate{
+				AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+					Content: acp.TextBlock(fmt.Sprintf("tick %d ", i)),
+				},
+			},
+		}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		time.Sleep(time.Duration(r.UpdateIntervalMs) * time.Millisecond)
+	}
+	if r.ExitBeforeResponse {
+		os.Exit(1)
+	}
+	if r.PromptError != "" {
+		return acp.PromptResponse{}, errors.New(r.PromptError)
+	}
 
 	if err := m.emitToolCalls(ctx, params.SessionId, idx, "tc", r.ToolCalls); err != nil {
 		return acp.PromptResponse{}, err

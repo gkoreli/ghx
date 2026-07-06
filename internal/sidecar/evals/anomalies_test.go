@@ -87,6 +87,64 @@ func TestDetectAnomaliesReportCoerced(t *testing.T) {
 	}
 }
 
+// TestDetectAnomaliesTurnCapWrapUp pins ADR-0027 D1: a turn recovered via the
+// wrap-up resume counts as the soft turn_cap_wrapup anomaly — recovered, but
+// the safety net's firing rate stays visible.
+func TestDetectAnomaliesTurnCapWrapUp(t *testing.T) {
+	ep := &Episode{
+		Profile: ProfileSidecar,
+		Turns: []TurnRecord{
+			{
+				Turn:            0,
+				WrapUpRecovered: true,
+				Report:          &sidecar.Report{Answer: "Recovered by wrap-up."},
+			},
+		},
+	}
+	a, ok := anomalyByKind(DetectAnomalies(ep), AnomalyTurnCapWrapUp)
+	if !ok {
+		t.Fatalf("missing %s anomaly", AnomalyTurnCapWrapUp)
+	}
+	if a.Severity != SeveritySoft {
+		t.Fatalf("severity = %s, want soft", a.Severity)
+	}
+	counts := CountAnomalies([]*Episode{ep})
+	if c := mustAnomalyCount(t, counts, AnomalyTurnCapWrapUp); c.Count != 1 || c.Episodes != 1 {
+		t.Fatalf("aggregate = %+v, want count 1 across 1 episode", c)
+	}
+}
+
+// TestDetectAnomaliesEpisodeHangTimeout pins ADR-0027 D2: a turn whose error
+// carries the liveness watchdog marker is the breaking episode_hang_timeout
+// anomaly, on any profile — hang detection is profile-independent.
+func TestDetectAnomaliesEpisodeHangTimeout(t *testing.T) {
+	for _, profile := range []Profile{ProfileSidecar, ProfileGhx, ProfilePlain} {
+		t.Run(string(profile), func(t *testing.T) {
+			ep := &Episode{
+				Profile: profile,
+				Turns: []TurnRecord{
+					{
+						Turn:  0,
+						Error: "sidecar turn 0: run turn: acp prompt: sidecar " + sidecar.LivenessTimeoutMarker + ": no ACP session update for 10m0s",
+					},
+				},
+			}
+			a, ok := anomalyByKind(DetectAnomalies(ep), AnomalyEpisodeHangTimeout)
+			if !ok {
+				t.Fatalf("missing %s anomaly", AnomalyEpisodeHangTimeout)
+			}
+			if a.Severity != SeverityBreaking {
+				t.Fatalf("severity = %s, want breaking", a.Severity)
+			}
+		})
+	}
+	// A turn that failed for another reason must not be classified as a hang.
+	ep := &Episode{Profile: ProfileSidecar, Turns: []TurnRecord{{Turn: 0, Error: "acp prompt: peer connection closed"}}}
+	if _, ok := anomalyByKind(DetectAnomalies(ep), AnomalyEpisodeHangTimeout); ok {
+		t.Fatal("non-watchdog failure misclassified as episode_hang_timeout")
+	}
+}
+
 func TestDetectAnomaliesDirectGhxNoncompliance(t *testing.T) {
 	ep := &Episode{
 		Profile: ProfileGhx,

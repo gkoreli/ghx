@@ -38,6 +38,23 @@ your instructions exactly: all list fields must be JSON arrays and "answer" must
 be a non-empty string. Do not run any more commands. No text before or after.`, reason)
 }
 
+// turnCapWrapUpPrompt is the exact one-shot recovery prompt sent on a resumed
+// ACP session after the adapter's max-turns safety net fires (ADR-0027 D1). A
+// fresh query gets a fresh turn budget; the session's context (ledger, prior
+// tool results) survives, so the exploration is salvaged instead of destroyed.
+const turnCapWrapUpPrompt = "wrap up: call submit_report now with what you have; mark unverified items unverified"
+
+// mergeWrapUpTurn folds the wrap-up recovery turn's telemetry into the primary
+// turn result (ADR-0027 D1). Unlike mergeRetryTurn it does not mark the turn
+// as report-retried: the wrap-up is budget recovery, not a report correction.
+func mergeWrapUpTurn(dst *TurnResult, src TurnResult) {
+	dst.FullText += src.FullText
+	dst.Thinking += src.Thinking
+	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
+	dst.ToolTraces = append(dst.ToolTraces, src.ToolTraces...)
+	dst.ToolOutputChars += src.ToolOutputChars
+}
+
 // newReportSinkPath creates a runtime-owned sink path for one Ask invocation
 // (ADR-0021 D1). The returned cleanup removes the temp dir. On failure it
 // returns an empty path and a no-op cleanup; the runtime then simply falls back
@@ -48,6 +65,20 @@ func newReportSinkPath() (path string, cleanup func()) {
 		return "", func() {}
 	}
 	return filepath.Join(dir, "report.json"), func() { _ = os.RemoveAll(dir) }
+}
+
+// persistACPSessionID saves the ACP session ID for future resumption. It runs
+// on failure paths too (ADR-0027 D1/D3): a failed turn's session is exactly
+// the one a later wrap-up or follow-up ask needs to resume. Non-fatal — the
+// worst case is that the next turn starts a fresh ACP session.
+func persistACPSessionID(sessionsDir string, meta *SessionMeta, newSessionID string) {
+	if meta == nil || newSessionID == "" || meta.ACPSessionID == newSessionID {
+		return
+	}
+	meta.ACPSessionID = newSessionID
+	if saveErr := SaveMeta(sessionsDir, *meta); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save ACP session ID: %v\n", saveErr)
+	}
 }
 
 // resolveTurnReport determines the turn's report, preferring a strictly-validated
@@ -201,8 +232,81 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		SessionMeta:    sessionMeta,
 		ReportSinkPath: sinkPath,
 	})
+
+	// Resume-as-recovery (ADR-0027 D1): the adapter's max-turns error is a
+	// session-resume problem, not error handling. LoadSession-resume the same
+	// ACP session and send exactly one wrap-up prompt; a fresh query gets a
+	// fresh turn budget while the exploration's context survives. If the
+	// wrap-up also fails, the turn is BLOCKED — with artifacts (D3).
+	var blockedReport *Report
+	if err != nil && IsMaxTurnsError(err) {
+		turnCapErr := err
+		resumeID := newSessionID
+		if resumeID == "" {
+			resumeID = acpSessionID
+		}
+		var wrapUpErr error
+		if resumeID == "" {
+			wrapUpErr = fmt.Errorf("no ACP session id available to resume")
+		} else {
+			wrapResult, wrapSessionID, werr := runTurnWithOptions(ctx, RunTurnOptions{
+				AgentCmd:       cfg.AgentCmd,
+				ACPSessionID:   resumeID,
+				Prompt:         turnCapWrapUpPrompt,
+				Cwd:            cfg.Cwd,
+				Env:            cfg.Env,
+				ReportSinkPath: sinkPath,
+			})
+			// Fold the wrap-up's telemetry in on both outcomes: even a failed
+			// wrap-up attempt is part of this turn's auditable activity (D3).
+			mergeWrapUpTurn(&turnResult, wrapResult)
+			if werr != nil {
+				wrapUpErr = werr
+			} else {
+				turnResult.WrapUpRecovered = true
+				if wrapSessionID != "" {
+					newSessionID = wrapSessionID
+				}
+				err = nil
+			}
+		}
+		if wrapUpErr != nil {
+			blockedReport = &Report{
+				Answer: "BLOCKED: the exploration hit the adapter's max-turns safety net and the one-shot wrap-up attempt also failed; partial artifacts were kept in the session directory.",
+				Uncertainty: []string{
+					"turn-cap error: " + turnCapErr.Error(),
+					"wrap-up failure: " + wrapUpErr.Error(),
+				},
+			}
+			err = nil
+		}
+	}
+
 	if err != nil {
-		return nil, nil, fmt.Errorf("run turn: %w", err)
+		// Unrecovered turn failure (liveness watchdog, dead peer, transport
+		// error). Never leave zero artifacts (ADR-0027 D3): persist the ACP
+		// session ID for later resumption, flush the partial turn's
+		// traces/logs/metrics with the error recorded, and hand the partial
+		// TurnResult back so eval callers can audit the failed turn too.
+		persistACPSessionID(sessionsDir, meta, newSessionID)
+		turn := 1
+		if meta != nil {
+			turn = meta.TurnCount + 1
+		}
+		emitTurnArtifacts(ctx, turnTelemetry{
+			SessionsDir:    sessionsDir,
+			Session:        req.Session,
+			Repo:           req.Repo,
+			Model:          cfg.Model,
+			Turn:           turn,
+			Question:       req.Question,
+			Result:         turnResult,
+			Error:          err.Error(),
+			StartedAt:      startedAt,
+			EndedAt:        time.Now().UTC(),
+			CaptureContent: cfg.CaptureContent(),
+		})
+		return nil, &turnResult, fmt.Errorf("run turn: %w", err)
 	}
 
 	// Completion gate (ADR-0021 D2): prefer the strictly-validated sink report,
@@ -216,6 +320,12 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	// retry (the <ghx-report> regex takes the first block it finds).
 	latestText := turnResult.FullText
 	report, coerced, reason := resolveTurnReport(sinkPath, latestText)
+	// A failed wrap-up ships the BLOCKED report (ADR-0027 D1) unless the agent
+	// managed to submit a real report before dying; no corrective retries are
+	// spent on a session that already exhausted its budget twice.
+	if report == nil && blockedReport != nil {
+		report = blockedReport
+	}
 	for retries := 0; report == nil && retries < maxReportRetries; retries++ {
 		retrySessionID := newSessionID
 		if retrySessionID == "" {
@@ -252,13 +362,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 
 	// Persist the ACP session ID so the next turn can resume. Runs after
 	// the retry block, which may advance the session ID.
-	if meta != nil && newSessionID != "" && meta.ACPSessionID != newSessionID {
-		meta.ACPSessionID = newSessionID
-		if saveErr := SaveMeta(sessionsDir, *meta); saveErr != nil {
-			// Non-fatal: worst case is the next turn starts a fresh ACP session.
-			fmt.Fprintf(os.Stderr, "warning: failed to save ACP session ID: %v\n", saveErr)
-		}
-	}
+	persistACPSessionID(sessionsDir, meta, newSessionID)
 
 	turn := 1
 	if meta != nil {

@@ -95,6 +95,113 @@ func TestDecodeReportStrict_TrailingData(t *testing.T) {
 	}
 }
 
+// TestValidateReportEvidence_Matrix pins the ADR-0027 D4 evidence contract:
+// a non-BLOCKED report must carry ALL of a verified claim with evidence, a
+// relevant file, and a command run; rejections name exactly the missing
+// fields; BLOCKED reports state why and skip the requirement.
+func TestValidateReportEvidence_Matrix(t *testing.T) {
+	full := func() *Report {
+		return &Report{
+			Answer:        "the router lives in router.go",
+			Verified:      []Claim{{Summary: "router registered", Evidence: "router.go:42"}},
+			RelevantFiles: []RelevantFile{{Path: "router.go", Reason: "routes"}},
+			CommandsRun:   []string{"ghx read o/r router.go"},
+		}
+	}
+	cases := []struct {
+		name        string
+		mutate      func(*Report)
+		wantMissing []string // fields the error must name; empty = accepted
+		wantAbsent  []string // fields the error must NOT name
+	}{
+		{name: "full evidence accepted", mutate: func(r *Report) {}},
+		{
+			name: "answer-only rejected naming all three",
+			mutate: func(r *Report) {
+				r.Verified, r.RelevantFiles, r.CommandsRun = nil, nil, nil
+			},
+			wantMissing: []string{"verified", "relevantFiles", "commandsRun"},
+		},
+		{
+			name:        "verified claim without evidence rejected",
+			mutate:      func(r *Report) { r.Verified = []Claim{{Summary: "claim, no evidence"}} },
+			wantMissing: []string{"verified"},
+			wantAbsent:  []string{"relevantFiles", "commandsRun"},
+		},
+		{
+			name:        "missing relevant files rejected naming only that field",
+			mutate:      func(r *Report) { r.RelevantFiles = nil },
+			wantMissing: []string{"relevantFiles"},
+			wantAbsent:  []string{"verified:", "commandsRun"},
+		},
+		{
+			name:        "blank command entries rejected",
+			mutate:      func(r *Report) { r.CommandsRun = []string{"  "} },
+			wantMissing: []string{"commandsRun"},
+			wantAbsent:  []string{"verified:", "relevantFiles"},
+		},
+		{
+			name: "BLOCKED with reason passes with zero evidence",
+			mutate: func(r *Report) {
+				r.Answer = "BLOCKED: ghx is unavailable in this sidecar session."
+				r.Verified, r.RelevantFiles, r.CommandsRun = nil, nil, nil
+			},
+		},
+		{
+			name: "BLOCKED without a reason rejected",
+			mutate: func(r *Report) {
+				r.Answer = "BLOCKED:"
+				r.Verified, r.RelevantFiles, r.CommandsRun = nil, nil, nil
+			},
+			wantMissing: []string{"state why"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := full()
+			tc.mutate(r)
+			err := ValidateReportEvidence(r)
+			if len(tc.wantMissing) == 0 {
+				if err != nil {
+					t.Fatalf("want accepted, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("want rejection, got nil")
+			}
+			for _, want := range tc.wantMissing {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q must name %q", err, want)
+				}
+			}
+			for _, absent := range tc.wantAbsent {
+				if strings.Contains(err.Error(), absent) {
+					t.Fatalf("error %q must not name %q (field is present)", err, absent)
+				}
+			}
+		})
+	}
+}
+
+// TestDecodeReportStrict_EvidenceRequired proves the sink's strict decode path
+// enforces the D4 evidence contract end to end (answer-only in, exact
+// field-level errors out) and still accepts BLOCKED escape-hatch reports.
+func TestDecodeReportStrict_EvidenceRequired(t *testing.T) {
+	_, err := DecodeReportStrict([]byte(`{"answer":"an answer with no evidence at all"}`))
+	if err == nil {
+		t.Fatal("answer-only report must be rejected (ADR-0027 D4)")
+	}
+	for _, field := range []string{"verified", "relevantFiles", "commandsRun"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Fatalf("error %q must name %q", err, field)
+		}
+	}
+	if _, err := DecodeReportStrict([]byte(`{"answer":"BLOCKED: sandbox has no network","uncertainty":["curl: (6) could not resolve host"]}`)); err != nil {
+		t.Fatalf("BLOCKED report with a reason must pass: %v", err)
+	}
+}
+
 func TestReportInputSchema_DerivedFromType(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal(reportInputSchema(), &schema); err != nil {

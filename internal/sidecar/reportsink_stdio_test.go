@@ -63,10 +63,33 @@ func TestReportSinkStdioEndToEnd(t *testing.T) {
 		t.Fatalf("invalid tool error = %q, want it to name the empty answer", txt)
 	}
 
-	// Valid.
+	// Evidence-less (ADR-0027 D4): an answer-only report is a hypothesis and
+	// must be rejected in-band with field-level errors naming all three gaps.
+	var noEvReq mcp.CallToolRequest
+	noEvReq.Params.Name = sidecar.SubmitReportToolName
+	noEvReq.Params.Arguments = map[string]any{"answer": "answer without any evidence"}
+	noEvRes, err := c.CallTool(ctx, noEvReq)
+	if err != nil {
+		t.Fatalf("evidence-less call transport error: %v", err)
+	}
+	if !noEvRes.IsError {
+		t.Fatal("evidence-less non-BLOCKED submission should be a tool error (ADR-0027 D4)")
+	}
+	for _, field := range []string{"verified", "relevantFiles", "commandsRun"} {
+		if txt := textOf(noEvRes); !strings.Contains(txt, field) {
+			t.Fatalf("evidence error = %q, want it to name %q", txt, field)
+		}
+	}
+
+	// Valid: answer plus the required evidence trio.
 	var okReq mcp.CallToolRequest
 	okReq.Params.Name = sidecar.SubmitReportToolName
-	okReq.Params.Arguments = map[string]any{"answer": "stdio path works"}
+	okReq.Params.Arguments = map[string]any{
+		"answer":        "stdio path works",
+		"verified":      []any{map[string]any{"summary": "sink accepts evidence-carrying reports", "evidence": "this test's round-trip"}},
+		"relevantFiles": []any{map[string]any{"path": "internal/sidecar/reportsink.go", "reason": "sink server"}},
+		"commandsRun":   []any{"ghx version"},
+	}
 	okRes, err := c.CallTool(ctx, okReq)
 	if err != nil {
 		t.Fatalf("valid call: %v", err)
