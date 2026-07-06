@@ -95,11 +95,22 @@ load-bearing facts, each changing part of the original proposal:
    event needed. The future judge scorer emits the same event.
 3. **Reasoning**: no dedicated reasoning event exists; thinking is a
    `{"type": "reasoning"}` part inside output messages, plus
-   `gen_ai.usage.reasoning.output_tokens` on the span. ACP's
-   `agent_thought_chunk` streams full raw reasoning — but emission is
-   adapter-dependent (Gemini's adapter famously never emits it), so
-   whether `claude-agent-acp@0.55.0` emits thought chunks must be verified
-   empirically on one live turn before the capture work is scoped.
+   `gen_ai.usage.reasoning.output_tokens` on the span. **Adapter verdict
+   (source-level recon of the shipped `claude-agent-acp@0.55.0` tarball,
+   2026-07-05): it DOES emit `agent_thought_chunk`** — for non-empty
+   `thinking`/`thinking_delta` blocks (`dist/acp-agent.js:3880`), gated by
+   SDK-level thinking being enabled: `MAX_THINKING_TOKENS` env (`0` →
+   disabled, positive → budget; unset → SDK default) or
+   `_meta.claudeCode.options.thinking`. Subagent thinking is intentionally
+   filtered (`:1731`). The adapter also offers a raw-SDK firehose via
+   `_claude/sdkMessage` extension notifications (`emitRawSDKMessages`) —
+   adapter-specific, useful for eval telemetry but not portable ACP.
+   Upstream docs do not specify any of this (their issue tracker shows
+   extended-thinking enablement as an open question), which is why the
+   shipped source was the authority. Consequence for capture scope: our
+   `acp.go` must handle the `agent_thought_chunk` session-update kind
+   (today it is silently dropped), and the eval wrapper should set
+   `MAX_THINKING_TOKENS` so subject-agent reasoning is reliably present.
 4. **Content is off by default**:
    `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` gates it.
    Eval runs set it (our artifacts already store full text; traces should
