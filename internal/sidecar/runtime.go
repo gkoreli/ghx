@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 var runTurnWithOptions = RunTurnWithOptions
@@ -177,6 +178,11 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	sinkPath, cleanupSink := newReportSinkPath()
 	defer cleanupSink()
 
+	// Wall-clock window for the whole Ask (including any corrective retries),
+	// used for the production duration metric (ADR-0022 D2). This is coarser
+	// than the eval path's per-turn ACP timing — see emit.go / the ADR gap note.
+	startedAt := time.Now().UTC()
+
 	turnResult, newSessionID, err := runTurnWithOptions(ctx, RunTurnOptions{
 		AgentCmd:       cfg.AgentCmd,
 		ACPSessionID:   acpSessionID,
@@ -259,9 +265,27 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		fmt.Fprintf(os.Stderr, "warning: failed to record turn: %v\n", err)
 	}
 
-	if _, saveErr := SaveReport(sessionsDir, req.Session, report); saveErr != nil {
+	if _, saveErr := SaveTurnReport(sessionsDir, req.Session, turn, report); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save report: %v\n", saveErr)
 	}
+
+	// Production visibility: append this turn's traces/logs/metrics to the
+	// session artifact set via the shared telemetry runtime (ADR-0022 D2).
+	// No reward/evaluation events — that is the eval layer. Failures degrade to
+	// a stderr warning inside emitTurnArtifacts and never fail the ask.
+	emitTurnArtifacts(ctx, turnTelemetry{
+		SessionsDir:    sessionsDir,
+		Session:        req.Session,
+		Repo:           req.Repo,
+		Model:          cfg.Model,
+		Turn:           turn,
+		Question:       req.Question,
+		Result:         turnResult,
+		Report:         report,
+		StartedAt:      startedAt,
+		EndedAt:        time.Now().UTC(),
+		CaptureContent: cfg.CaptureContent(),
+	})
 
 	return report, &turnResult, nil
 }

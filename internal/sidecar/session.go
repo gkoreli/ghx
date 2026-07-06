@@ -114,6 +114,27 @@ func SaveReport(sessionsDir, name string, report *Report) (string, error) {
 	return path, os.WriteFile(path, data, 0o644)
 }
 
+// reportsSubdir is the per-session directory that holds accepted turn reports
+// under the ~/.ghx layout (ADR-0022 D2/D3): sessions/<name>/reports/.
+const reportsSubdir = "reports"
+
+// SaveTurnReport persists the accepted report of one turn to
+// sessions/<name>/reports/<turn>-<timestamp>.json (ADR-0022 D2). Returns the
+// written path.
+func SaveTurnReport(sessionsDir, name string, turn int, report *Report) (string, error) {
+	dir := filepath.Join(sessionDir(sessionsDir, name), reportsSubdir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	ts := time.Now().UnixMilli()
+	path := filepath.Join(dir, fmt.Sprintf("%d-%d.json", turn, ts))
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, data, 0o644)
+}
+
 // ListSessions returns all session metadata records, sorted newest first.
 func ListSessions(sessionsDir string) ([]SessionMeta, error) {
 	entries, err := os.ReadDir(sessionsDir)
@@ -138,17 +159,17 @@ func ListSessions(sessionsDir string) ([]SessionMeta, error) {
 	return metas, nil
 }
 
-// ListReports returns report file paths for a session, newest first.
+// ListReports returns report file paths for a session, newest first. It
+// includes both the legacy flat report-<ts>.json files in the session root and
+// the ~/.ghx-layout reports/<turn>-<ts>.json files (ADR-0022 D2/D3).
 func ListReports(sessionsDir, name string) ([]string, error) {
 	dir := sessionDir(sessionsDir, name)
+	var paths []string
+
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	var paths []string
 	for _, e := range entries {
 		if !e.IsDir() && len(e.Name()) > 7 &&
 			e.Name()[:7] == "report-" &&
@@ -156,8 +177,23 @@ func ListReports(sessionsDir, name string) ([]string, error) {
 			paths = append(paths, filepath.Join(dir, e.Name()))
 		}
 	}
-	// Reverse-sort by filename (timestamps are embedded, so lexicographic == chronological)
-	sort.Sort(sort.Reverse(sort.StringSlice(paths)))
+
+	reportsDir := filepath.Join(dir, reportsSubdir)
+	subEntries, err := os.ReadDir(reportsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, e := range subEntries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".json" {
+			paths = append(paths, filepath.Join(reportsDir, e.Name()))
+		}
+	}
+
+	// Reverse-sort by base filename (timestamps are embedded, so lexicographic
+	// == chronological within each naming scheme).
+	sort.Slice(paths, func(i, j int) bool {
+		return filepath.Base(paths[i]) > filepath.Base(paths[j])
+	})
 	return paths, nil
 }
 

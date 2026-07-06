@@ -6,24 +6,80 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
-// defaultConfigDir returns ~/.ghx-sidecar.
-func defaultConfigDir() string { return filepath.Join(os.Getenv("HOME"), ".ghx-sidecar") }
+// newRoot returns the root storage directory ghx writes to: $GHX_HOME when set,
+// otherwise ~/.ghx (ADR-0022 D3). This is the location SaveConfig and new
+// sessions always use; the legacy ~/.ghx-sidecar location is only ever read.
+func newRoot() string {
+	if h := strings.TrimSpace(os.Getenv("GHX_HOME")); h != "" {
+		return h
+	}
+	return filepath.Join(os.Getenv("HOME"), ".ghx")
+}
+
+// legacyRoot is the pre-ADR-0022 storage location, read as a migration
+// fallback but never written.
+func legacyRoot() string {
+	return filepath.Join(os.Getenv("HOME"), ".ghx-sidecar")
+}
+
+// activeRoot returns the root to READ from and whether it fell back to the
+// legacy ~/.ghx-sidecar location. GHX_HOME (explicit override) and an existing
+// ~/.ghx both win; only when neither exists and the legacy dir is present do we
+// fall back to it so a pre-migration user keeps seeing their sessions.
+func activeRoot() (dir string, legacy bool) {
+	root := newRoot()
+	if strings.TrimSpace(os.Getenv("GHX_HOME")) != "" {
+		return root, false
+	}
+	if _, err := os.Stat(root); err == nil {
+		return root, false
+	}
+	if _, err := os.Stat(legacyRoot()); err == nil {
+		return legacyRoot(), true
+	}
+	return root, false
+}
+
+var migrationNoticeOnce sync.Once
+
+// noteMigration prints a one-line migration notice to stderr, at most once per
+// process, when config is being read from the legacy location (ADR-0022 D3).
+func noteMigration(root string) {
+	migrationNoticeOnce.Do(func() {
+		fmt.Fprintf(os.Stderr,
+			"note: reading legacy config from %s — run `ghx sidecar config init` to migrate to %s\n",
+			root, newRoot())
+	})
+}
+
+// VisibilityConfig controls the shared visibility runtime (ADR-0022 D4).
+type VisibilityConfig struct {
+	// CaptureContent, when set, overrides the default for GenAI message-content
+	// log records in production. Nil means the default (on — local artifacts,
+	// not exported telemetry). The OTel env var
+	// OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false also disables it.
+	CaptureContent *bool `json:"captureContent,omitempty"`
+}
 
 // Config holds ghx-sidecar user configuration.
 type Config struct {
 	// AgentCmd is the ACP agent binary name or full command (e.g. "claude", "codex").
 	AgentCmd string `json:"agent"`
 	// SessionsDir is where named session artifacts are stored.
-	// Defaults to ~/.ghx-sidecar/sessions.
+	// Defaults to ~/.ghx/sessions.
 	SessionsDir string `json:"sessionsDir"`
 	// Model pins the subject model for every session (e.g. "claude-sonnet-4-5").
 	// Empty means the adapter's default. Set per-session via ACP _meta
 	// claudeCode.options.model. Takes precedence over GHX_EVAL_SUBJECT_MODEL
 	// for session creation but does NOT override the eval identity label.
 	Model string `json:"model,omitempty"`
+	// Visibility controls the shared telemetry/visibility runtime (ADR-0022).
+	Visibility VisibilityConfig `json:"visibility,omitempty"`
 	// Cwd overrides the ACP session cwd. Empty means current working directory.
 	Cwd string `json:"-"`
 	// Env overrides the spawned ACP adapter environment. Nil means inherit.
@@ -34,28 +90,58 @@ type Config struct {
 	EvalMode bool `json:"-"`
 }
 
-func defaultConfig() Config {
-	dir := defaultConfigDir()
+// CaptureContent reports whether GenAI message-content log records should be
+// written for production sessions (ADR-0022 D4). Default on; disabled by the
+// official OTel env var set to "false" or by visibility.captureContent=false.
+func (c Config) CaptureContent() bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT")), "false") {
+		return false
+	}
+	if c.Visibility.CaptureContent != nil {
+		return *c.Visibility.CaptureContent
+	}
+	return true
+}
+
+func defaultConfig(root string) Config {
 	return Config{
 		AgentCmd:    "claude",
-		SessionsDir: filepath.Join(dir, "sessions"),
+		SessionsDir: filepath.Join(root, "sessions"),
 	}
 }
 
-// configFilePath returns the path to the JSON config file.
-func configFilePath() string { return filepath.Join(defaultConfigDir(), "config.json") }
+// NewDefaultConfig returns the default config rooted at the new ~/.ghx (or
+// $GHX_HOME) root. `config init` uses this so migration always writes the new
+// location (ADR-0022 D3).
+func NewDefaultConfig() Config { return defaultConfig(newRoot()) }
+
+// configFilePath returns the path to the JSON config file under root.
+func configFilePath(root string) string { return filepath.Join(root, "config.json") }
+
+// ConfigFilePath returns the config file path currently in effect (the active
+// read root), for display.
+func ConfigFilePath() string {
+	root, _ := activeRoot()
+	return configFilePath(root)
+}
 
 // LoadConfig reads the config file, falling back to defaults on any error.
+// It reads from ~/.ghx (or $GHX_HOME), or the legacy ~/.ghx-sidecar location
+// when that is the only one present (printing a one-line migration notice).
 func LoadConfig() Config {
-	data, err := os.ReadFile(configFilePath())
+	root, legacy := activeRoot()
+	if legacy {
+		noteMigration(root)
+	}
+	def := defaultConfig(root)
+	data, err := os.ReadFile(configFilePath(root))
 	if err != nil {
-		return defaultConfig()
+		return def
 	}
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
-		return defaultConfig()
+		return def
 	}
-	def := defaultConfig()
 	if c.AgentCmd == "" {
 		c.AgentCmd = def.AgentCmd
 	}
@@ -65,17 +151,18 @@ func LoadConfig() Config {
 	return c
 }
 
-// SaveConfig writes cfg to disk, creating the config directory if needed.
+// SaveConfig writes cfg to the new root (~/.ghx or $GHX_HOME), creating the
+// directory if needed. It never writes the legacy location.
 func SaveConfig(cfg Config) error {
-	dir := defaultConfigDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	root := newRoot()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", root, err)
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(configFilePath(), append(data, '\n'), 0o644)
+	return os.WriteFile(configFilePath(root), append(data, '\n'), 0o644)
 }
 
 // knownAgents are ACP-compatible agents probed by DetectAgents.
@@ -117,5 +204,17 @@ func DetectAgents(ctx context.Context) []string {
 // FormatConfig returns a human-readable summary of the config.
 func FormatConfig(cfg Config) string {
 	return fmt.Sprintf("agent:       %s\nsessionsDir: %s\nconfigFile:  %s",
-		cfg.AgentCmd, cfg.SessionsDir, configFilePath())
+		cfg.AgentCmd, cfg.SessionsDir, ConfigFilePath())
+}
+
+// ArtifactsHint tells a human where per-session OTel artifacts live and how to
+// replay them (ADR-0022 D5). Every session directory is a spec-exact OTLP
+// bundle, so the ADR-0018 "Live validation" replay recipe works on it
+// unchanged — point at that recipe rather than duplicating the script.
+func ArtifactsHint(cfg Config) string {
+	return fmt.Sprintf(
+		"Session artifacts: %s/<session>/ (traces.jsonl, logs.jsonl, metrics.jsonl, reports/)\n"+
+			"Replay any session dir into an OTLP viewer (otel-desktop-viewer) using the recipe in\n"+
+			"docs/adr/0018-agentic-observability-genai-conventions.md (\"Live validation\").",
+		cfg.SessionsDir)
 }

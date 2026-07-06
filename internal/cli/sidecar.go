@@ -89,6 +89,8 @@ var sidecarDoctorCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result := sidecar.RunPreflight(context.Background())
 		fmt.Print(sidecar.FormatPreflight(result))
+		fmt.Println()
+		fmt.Println(sidecar.ArtifactsHint(sidecar.LoadConfig()))
 		if !result.Passed {
 			os.Exit(1)
 		}
@@ -217,7 +219,13 @@ var sidecarConfigInitCmd = &cobra.Command{
 		if len(found) == 0 {
 			return fmt.Errorf("no ACP-compatible agents found on PATH (tried: claude, codex, kiro)")
 		}
-		cfg := sidecar.LoadConfig()
+		// Always write the new ~/.ghx root (ADR-0022 D3): start from the fresh
+		// default rooted there and carry over any existing model/visibility, so
+		// init migrates a legacy config to the new location instead of pinning it.
+		existing := sidecar.LoadConfig()
+		cfg := sidecar.NewDefaultConfig()
+		cfg.Model = existing.Model
+		cfg.Visibility = existing.Visibility
 		cfg.AgentCmd = found[0]
 		if err := sidecar.SaveConfig(cfg); err != nil {
 			return err
