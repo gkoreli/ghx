@@ -288,7 +288,9 @@ func parseJudgeVerdict(raw string) (JudgeVerdict, error) {
 	if err := dec.Decode(&v); err != nil {
 		return JudgeVerdict{}, fmt.Errorf("invalid JSON: %w", err)
 	}
-	if dec.More() {
+	// dec.More() misses trailing top-level values and prose; only a clean EOF
+	// on the next token proves the reply was exactly one JSON object.
+	if _, err := dec.Token(); err != io.EOF {
 		return JudgeVerdict{}, fmt.Errorf("trailing content after the JSON object")
 	}
 	if err := validateVerdict(v); err != nil {

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -99,6 +100,11 @@ func parseJudgeConfig(data []byte, source string) (*JudgeConfig, error) {
 	var cfg JudgeConfig
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse judge config %s: %w", source, err)
+	}
+	// A clean EOF on the next token proves the file was exactly one object;
+	// dec.More() would miss trailing top-level values.
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("parse judge config %s: trailing content after the JSON object", source)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("judge config %s: %w", source, err)
