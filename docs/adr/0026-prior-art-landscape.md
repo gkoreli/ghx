@@ -112,11 +112,35 @@ the moat sentence, and it stays PRELIMINARY-honest: based on six repos on
 one evening; the landscape moves monthly; re-scan quarterly or on any
 funding-scale competitor signal.
 
+### Inspect AI deep-dive (turn 2, same session — resume dogfood PASSED)
+
+Follow-up answered from the resumed session (2 reports, one session dir;
+the ledger carried turn-1 context). The high-impact/low-effort findings:
+
+- **Epoch reducers are richer than our mean**: registered ScoreReducer
+  functions — mode, mean, median, `at_least(n)`, `pass_at(k)`, `pass_k`,
+  max — collapse per-trial Scores per sample before aggregation
+  (scorer/_reducer/reducer.py). `at_least(n-of-k)` semantics for gate
+  inputs would be *more robust to single-trial flakes* than mean-vs-
+  threshold (tonight's round-1 noise is the motivating exhibit). Route:
+  ADR-0025 statistics follow-up — reducer choice as a pre-registered
+  gate parameter.
+- **`inspect view` = one command, local server, artifact browser**
+  (_view/view.py → FastAPI over EvalLog). Direct prior art for
+  `ghx sidecar view` (absorption watchlist row 1) and later an episode/
+  verdict browser over `docs/evals/` artifacts.
+- **Interrupted-run recovery is built in** (log/_recover) — prior art
+  for our accumulation + the hang-watchdog/resume-as-recovery work
+  (NORTH_STAR §4); they treat eval runs as resumable state, same
+  instinct as our session mastery.
+
 ## Steal list (routed)
 
 | Idea | Source | Lands in |
 |---|---|---|
-| Epoch reducers / trial aggregation | Inspect AI | ADR-0025 statistics follow-up |
+| Epoch reducers / trial aggregation (`at_least(n)`, `pass_at(k)`) | Inspect AI | ADR-0025 statistics follow-up |
+| One-command local artifact viewer (`inspect view` pattern) | Inspect AI | `ghx sidecar view` (absorption watchlist) |
+| Interrupted-run recovery (log/_recover) | Inspect AI | hang watchdog + resume-as-recovery (NORTH_STAR §4) |
 | Recorder abstraction (one model, many sinks) | Inspect AI | telemetry package evolution (M6+) |
 | Committed judge-prompt config files | Phoenix | ADR-0023.1 D4 (already aligned; adopt the config-file shape) |
 | Team-member-as-tool ergonomics | smolagents | recon skill / serve --recon copy |
