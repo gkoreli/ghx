@@ -13,12 +13,15 @@ author: "Goga Koreli"
 Accepted as a landscape record (founder directive 2026-07-05: know the
 competition, steal what serves, cross-reference with rationales). Evidence
 has a property no earlier research ADR had: **the sidecar gathered it
-itself.** Nine real `ghx sidecar ask` investigations, one per subject
-repo; every claim below traces to a report + full OTel trail in
-`~/.ghx/sessions/<slug>/` (reports/, traces.jsonl with per-tool spans,
-ledger). Two of eleven questions died to the 24-turn cap (crewai; phoenix
-at normal depth — answered at `--depth deep`), logged as breaking friction
-in `docs/dogfood/FRICTION.md`. Second wave (same day, later):
+itself.** Nine real `ghx sidecar ask` investigations across nine subject
+repos (thirteen questions total); every claim below traces to a report +
+full OTel trail in `~/.ghx/sessions/<slug>/` (reports/, traces.jsonl with
+per-tool spans, ledger). Two questions died to the 24-turn cap on first
+attempt (crewai; phoenix at normal depth), logged as breaking friction in
+`docs/dogfood/FRICTION.md`; both were later answered at `--depth deep` —
+phoenix the same evening, crewai on the 2026-07-05 re-run after ADR-0027
+landed (two turns, resuming the original session; see the CrewAI section
+for the recovery evidence). Second wave (same day, later):
 openai-agents-python, letta, mastra — all three completed at
 `--depth deep`, no new breaking friction. This ADR is therefore both
 landscape and dogfood artifact.
@@ -112,10 +115,44 @@ artifact-level visibility. Steal: trace-handle-in-the-return-value (our
 report/MCP response should carry the session dir + trace id explicitly,
 not implicitly); structured-output schema as a per-delegation dial.
 
-### CrewAI — session `crewaiinc-crewai` (INCOMPLETE — recon died at turn cap)
+### CrewAI — session `crewaiinc-crewai` (re-run 2026-07-05 post ADR-0027; 2 turns, resumed)
 
-Delegation-tool pattern known from public docs; not source-verified
-tonight. Honest gap; re-run post max-turns fix.
+Delegation is two LLM tools (`DelegateWorkTool` "Delegate work to
+coworker", `AskQuestionTool` "Ask question to coworker");
+`BaseAgentTool._execute` wraps the request into a brand-new **ephemeral
+Task** and calls `coworker.execute_task()` directly, bypassing
+`Task._execute_core` — so the parent receives a **plain str** (the
+coworker's raw LLM answer): no TaskOutput, no guardrails/callbacks/
+output_file on the sub-task. What persists after delegation: only
+breadcrumbs on the *calling* task — a `delegations` counter and a
+`processed_by_agents` set (`task.increment_delegations`); the sub-task is
+discarded. Caller dials: `Agent(allow_delegation=...)` (off by default),
+`Process.hierarchical` + `manager_agent` (the manager gets the same two
+tools and the same plain str back — no richer payload), and the coworker
+set (all crew agents minus the task's own). Turn 2 (event-bus follow-up):
+delegation has **no dedicated event type** — it rides generic
+`ToolUsageStarted/Finished` events, which do carry the full
+`{task, context, coworker}` args and the coworker's raw output, and the
+official `TraceCollectionListener` ships that payload verbatim to their
+AMP tracing backend. So richer evidence of the exchange exists than the
+delegating agent ever receives — visibility flows to the dashboard, not
+to the agent in the loop. Through our lens, the sharpest foil found:
+inspect = a counter, steer = a boolean, receive = a string. Steal: the
+delegations/processed_by breadcrumb as prior art for cheap per-question
+provenance in our ledger; the event-bus-vs-return-value split as a
+marketing exhibit next to AutoGen's flag. Honest gaps: async path
+(`aexecute_task`) parity unverified; whether a coworker `response_format`
+BaseModel can flow through `_finalize_task_execution` unchecked; AMP
+server-side rendering out of repo.
+
+ADR-0027 live-test note: turn 1 took 29 tool calls — past the old
+24-turn normal cap that killed the first attempt — and completed inside
+deep's 48 budget; turn 2 (21 tool calls) ran on the ADR-0027 runtime and
+resumed the session cleanly (ledger context carried, `turnCount: 2`, two
+reports in one session dir). The D1 wrap-up net stayed armed but never
+fired (`wrapUpRecovered` absent from all records — checked by grep). The
+recovery that mattered here was resume-as-continuation plus the deep
+budget, not the net.
 
 ## Agent memory (persistence-adjacent)
 
@@ -181,14 +218,15 @@ versioned agent memory to external callers, but through a running
 server + DB, not artifacts; OpenAI's `custom_output_extractor` is the
 field visibly straining against the string return without shipping a
 contract to escape to. Earlier embryos stand (LangGraph checkpoints,
-AutoGen's last-message flag, Phoenix span scores). None combines the
-elements, and none measures signal-per-token. The *combination* —
-auditable, steerable, persistent, evidence-bearing delegation as a
-product — still has no found occupant; Mastra is the closest single
-competitor on the steer-and-trace axes and should be on the re-scan
-shortlist. PRELIMINARY-honest: nine repos across two sittings on one day;
-the landscape moves monthly; re-scan quarterly or on any funding-scale
-competitor signal.
+AutoGen's last-message flag, Phoenix span scores, CrewAI's event-bus
+trace payloads that reach the vendor dashboard but never the caller).
+None combines the elements, and none measures signal-per-token. The
+*combination* — auditable, steerable, persistent, evidence-bearing
+delegation as a product — still has no found occupant; Mastra is the
+closest single competitor on the steer-and-trace axes and should be on
+the re-scan shortlist. PRELIMINARY-honest: nine repos across two sittings
+on one day; the landscape moves monthly; re-scan quarterly or on any
+funding-scale competitor signal.
 
 ### Inspect AI deep-dive (turn 2, same session — resume dogfood PASSED)
 
@@ -229,6 +267,7 @@ the ledger carried turn-1 context). The high-impact/low-effort findings:
 | Trace handle in the return value (`traceId`/`spanId` on `WorkflowResult`) | Mastra | report/MCP response: carry session dir + trace id explicitly |
 | Structured-output schema as a per-delegation dial | Mastra | consumption-surface dials (serve --recon) |
 | Versioned memory blocks (`BlockHistory`) | Letta | session ledger evolution — audited ledger edits |
+| Event-bus-only delegation visibility (dashboard sees more than the caller) | CrewAI | marketing narrative: evidence must return to the caller; ledger provenance prior art (`delegations`/`processed_by_agents`) |
 
 ## Absorption watchlist (standing — the codemap pattern, generalized)
 
