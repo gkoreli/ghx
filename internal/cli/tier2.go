@@ -67,6 +67,13 @@ func tier2SnapshotFlags(cmd *cobra.Command) {
 var tier2CodemapCmd = &cobra.Command{
 	Use:   "codemap <owner/repo>",
 	Short: "Cross-file structure via the absorbed codemap tool (backend local:codemap)",
+	Long: `Run the absorbed codemap tool over a cached snapshot to see cross-file structure:
+an overview by default, the JSON context envelope with ` + "`--context`" + ` (add ` + "`--compact`" + `
+to minimize tokens), fan-in importers of a file with ` + "`--importers`" + `, or dependency
+hubs and import chains with ` + "`--deps`" + `. This is Tier-2 local analysis — snapshot
+provenance (repo, ref, resolved SHA, cache hit) prints to stderr before any tool
+output. ` + "`--importers`" + ` and ` + "`--deps`" + ` need ast-grep on PATH; exit code 3 with an
+install hint if a required binary is missing.`,
 	Example: `  ghx tier2 codemap honojs/hono
   ghx tier2 codemap gin-gonic/gin --importers gin.go
   ghx tier2 codemap openai/openai-node --ref next --context --compact

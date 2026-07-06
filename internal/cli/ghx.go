@@ -44,6 +44,11 @@ func init() {
 var reposCmd = &cobra.Command{
 	Use:   "repos <query> [--limit N]",
 	Short: "Search repos with README preview",
+	Long: `Discover GitHub repositories by topic, returning each hit's stars, language,
+and a README preview in one GraphQL call. Reach for this when you do not yet know
+which repo to explore — it answers "what libraries do X", not "where in this repo
+is Y" (that is ` + "`ghx search`/`ghx grep`" + `). Exit code 1 means the query
+matched no repos; broaden it.`,
 	Example: `  ghx repos "go web framework" --limit 5
   ghx repos "tree-sitter parser"`,
 	Args: cobra.ExactArgs(1),
@@ -74,6 +79,11 @@ func init() {
 var exploreCmd = &cobra.Command{
 	Use:   "explore <owner/repo> [path]",
 	Short: "Branch + tree + README in 1 API call",
+	Long: `Orient yourself in an unfamiliar repo: default branch, top-level file listing,
+and a README summary in a single API call. This is the first move when you do not
+know a repo's layout — pass a path to list a subdirectory instead of the root.
+Output is compacted to ` + "`--budget`" + ` chars by default; add ` + "`--full`" + ` for the
+complete tree and README.`,
 	Example: `  ghx explore gkoreli/ghx
   ghx explore gkoreli/ghx internal/cli
   ghx explore gkoreli/ghx --full`,
@@ -131,6 +141,12 @@ func init() {
 var readCmd = &cobra.Command{
 	Use:   "read <owner/repo> <path1> [path2...]",
 	Short: "Read 1-10 files in 1 API call",
+	Long: `Fetch up to 10 files (or a glob) in one batched API call. Prefer the narrowing
+flags over reading whole files: ` + "`--map`" + ` returns parser-backed signatures only,
+` + "`--grep PATTERN`" + ` shows just matching lines, and ` + "`--lines START-END`" + ` extracts a
+range. A directory path returns its listing instead of "not found". A full read
+over ` + "`--budget`" + ` chars (without --map/--lines/--grep) falls back to a structural
+map plus a narrowing hint rather than flooding output.`,
 	Example: `  ghx read gkoreli/ghx cmd/ghx/main.go --lines 1-40
   ghx read gkoreli/ghx "internal/**/*.go" --map --kind func
   ghx read gkoreli/ghx internal/cli/ghx.go --grep "RunE|Use:"`,
@@ -268,6 +284,11 @@ func init() {
 var searchCmd = &cobra.Command{
 	Use:   "search [<owner/repo>] <query> [--limit N] [--full]",
 	Short: "Code search (AND matching, matching context)",
+	Long: `Search inside file contents across GitHub, returning matching fragments with
+context. Every word is AND'd, so 1-2 terms match more than 5. Use the repo-first
+form ` + "`ghx search owner/repo \"query\"`" + ` when you know the repo; the raw-query form
+accepts GitHub qualifiers (` + "`repo:`, `language:`, `path:`" + `). To discover repos by
+topic use ` + "`ghx repos`" + ` instead. Exit code 1 means no code matched.`,
 	Example: `  ghx search gkoreli/ghx "func main" --lang go
   ghx search "repo:gkoreli/ghx cobra.Command" --limit 10
   ghx search gkoreli/ghx "SetFlagErrorFunc" --glob "internal/**/*.go"`,
@@ -321,6 +342,11 @@ func init() {
 var grepCmd = &cobra.Command{
 	Use:   "grep <owner/repo> <pattern>",
 	Short: "Search a repo with grep-like flag names",
+	Long: `Repo-scoped code search with grep-style ergonomics: ` + "`--path`, `--glob`, `--limit`" + `.
+Reach for this when your muscle memory is ` + "`grep`/`rg`" + ` — it is backed by GitHub
+code search (AND matching, indexing lag applies), not a local ripgrep over the
+tree, so ` + "`--glob`" + ` maps to a GitHub ` + "`path:`" + ` qualifier. Exit code 1 means the
+pattern matched nothing in the repo.`,
 	Example: `  ghx grep gkoreli/ghx "func main"
   ghx grep gkoreli/ghx "cobra.Command" --path internal/cli
   ghx grep gkoreli/ghx "RunE" --glob "internal/**/*.go" --limit 10`,
@@ -363,6 +389,11 @@ func init() {
 var inspectCmd = &cobra.Command{
 	Use:   "inspect <owner/repo> <query>",
 	Short: "Rank files, maps, snippets, and next reads for a concern",
+	Long: `Answer "where does this repo handle X" in one budgeted call: inspect searches for
+candidates, ranks the files that matter, and returns their structural maps,
+bounded snippets, and suggested next reads. Use it when you have a concern but not
+a filename — it collapses the explore → search → map → read loop into a single
+result. Exit code 1 means nothing ranked for the query.`,
 	Example: `  ghx inspect gkoreli/ghx "flag error suggestions"
   ghx inspect gin-gonic/gin "routing middleware" --lang go
   ghx inspect openai/openai-node "streaming responses" --glob "src/**/*.ts"`,
@@ -405,6 +436,10 @@ func init() {
 var treeCmd = &cobra.Command{
 	Use:   "tree <owner/repo> [path]",
 	Short: "Full recursive tree listing",
+	Long: `Print the full recursive file tree of a repo (or a subtree, given a path). Use it
+when you need the complete file layout rather than the compacted top-level view
+` + "`ghx explore`" + ` gives you. Cap the depth with ` + "`--depth N`" + ` (0, the default, means
+fully recursive); directories are shown with a trailing slash.`,
 	Example: `  ghx tree gkoreli/ghx
   ghx tree gkoreli/ghx internal --depth 2`,
 	Args: cobra.RangeArgs(1, 2),
@@ -435,6 +470,11 @@ func init() {
 var skillCmd = &cobra.Command{
 	Use:   "skill",
 	Short: "Output SKILL.md for agent context injection",
+	Long: `Print an embedded SKILL.md to stdout so a main agent can inject ghx usage into
+its own context. The default is the classic-CLI skill; ` + "`--mcp`" + ` prints the
+MCP-server skill and ` + "`--recon`" + ` prints the concise sidecar/recon skill (the one to
+give an agent that should delegate whole questions rather than drive the CLI).
+The flags are mutually exclusive.`,
 	Example: `  ghx skill
   ghx skill --mcp
   ghx skill --recon`,
@@ -457,6 +497,8 @@ var skillCmd = &cobra.Command{
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
+	Long: `Print the ghx build version. Equivalent to the root ` + "`ghx --version`" + ` flag; both
+exist so version can be queried as a subcommand or a flag.`,
 	Example: `  ghx version
   ghx --version`,
 	Run: func(cmd *cobra.Command, args []string) {

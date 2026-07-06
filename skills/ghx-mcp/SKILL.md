@@ -1,7 +1,7 @@
 ---
 name: ghx-mcp
 description: "Use when exploring GitHub repositories through the ghx MCP server: choose direct tools for simple lookups, or the code meta-tool for composed reconnaissance."
-version: 1.2.0
+version: 1.2.1
 author: ghx contributors
 license: MIT
 metadata:
@@ -16,7 +16,9 @@ metadata:
 > If you just want answers about a repo, connect to `ghx serve --recon`
 > instead: it exposes a single `recon(question, repo, session?)` tool that
 > returns an evidence report, and `ghx skill --recon` prints its concise
-> skill. You then need zero knowledge of the tools below.
+> skill. You then need zero knowledge of the tools below. (One-time setup for
+> the recon tool: `ghx sidecar config init --claude-acp` then
+> `ghx sidecar doctor`; artifacts land under `~/.ghx/sessions/`.)
 
 7 tools for GitHub exploration (served by `ghx serve`). 5 direct tools for simple queries. 1 `code` meta-tool for complex multi-step operations. 1 `search_tools` for discovery.
 

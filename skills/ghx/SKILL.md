@@ -1,7 +1,7 @@
 ---
 name: ghx
-description: "Use when exploring GitHub repositories from a shell with the ghx CLI: read files, search code, map symbols, inspect trees, discover repos, or compose multi-step reconnaissance with codemode."
-version: 1.2.0
+description: "Use when exploring GitHub repositories from a shell with the ghx CLI: read files, search code, map symbols, inspect trees, discover repos, compose multi-step reconnaissance with codemode, or delegate whole repo questions to the ghx sidecar."
+version: 1.3.0
 author: ghx contributors
 license: MIT
 metadata:
@@ -52,6 +52,53 @@ ghx --version                               # Version (also: ghx version)
 **Exit codes:** 0 = success, 1 = no results, 2 = usage error, 3 = upstream/API failure.
 
 **Budgeted output.** `explore`, `read`, and `search` share a `--budget CHARS` dial (default 12000). A full-file `read` over budget (without `--map`/`--lines`/`--grep`) returns the structural map plus a hint naming the narrowing flags instead of flooding output; every truncation names the flag that lifts it (`--full`).
+
+## The sidecar: delegate the whole question
+
+The commands above are the *tool layer* — you drive exploration yourself. The **sidecar** is the other half of ghx: a specialist agent you hand a plain-English repo question to, which explores GitHub itself and returns a compact, auditable evidence report. When you want an *answer* about a repo rather than to run the search-and-read loop by hand, ask the sidecar.
+
+### One-time setup
+
+```bash
+ghx sidecar config init --claude-acp   # write ~/.ghx/config.json (pinned Claude ACP adapter; needs Node/npx + a Claude login)
+ghx sidecar doctor                     # verify token, network, ghx binary, ACP handshake, report sink (exit 3 if any check fails)
+ghx sidecar ask --repo hono/hono "How is middleware chained, and which files define it?"
+```
+
+`config init` without `--claude-acp` auto-detects any ACP-capable agent already on PATH.
+
+### Ask
+
+```bash
+ghx sidecar ask --repo <owner/repo> "<question>"   # repo-scoped reconnaissance
+ghx sidecar ask "<question>"                        # no --repo → discovery: which repos/libraries do X
+ghx sidecar ask --depth deep "<question>"           # command budget: cheap|normal|deep (default normal)
+ghx sidecar ask --json "<question>"                 # {report, artifacts} envelope instead of the human summary
+ghx sidecar ask --session <name> "<question>"       # keep parallel investigation threads apart
+```
+
+State the goal, not the steps: *"How does hono implement middleware chaining, and which files define it?"* beats *"grep for middleware"*. The session name is derived automatically (repo slug, or a question-derived slug in discovery mode) and printed to stderr; follow-up asks reuse it, so they are faster and context-aware. Every answer ends with an artifacts footer — `artifacts: <session dir> (trace <id>)` — pointing at the on-disk trail.
+
+### Where artifacts land, and how to inspect
+
+Everything the sidecar does is durable under `~/.ghx/` (or `$GHX_HOME`): `sessions/<name>/` holds each turn's report JSON, the evidence ledger, and OTel `traces.jsonl`.
+
+```bash
+ghx sidecar sessions list              # all sessions with repo, turn count, last-updated
+ghx sidecar sessions show <session>    # metadata + saved report history
+ghx sidecar sessions ledger <session>  # accumulated evidence ledger (JSON) — the commands run and sources read
+ghx sidecar view [session]             # spawn a local OTel viewer over the session's traces (needs otel-desktop-viewer on PATH)
+ghx sidecar view --list                # sessions with turn/report counts
+```
+
+### For a main agent: the recon service
+
+If *you* are the main agent and want zero knowledge of the CLI grammar above, expose the sidecar as one MCP tool and delegate whole questions to it:
+
+```bash
+ghx serve --recon     # serves exactly one tool: recon(question, repo?, session?) → evidence report
+ghx skill --recon     # prints the concise recon skill (what it is, how to phrase questions, report fields)
+```
 
 ## Chain of Thought: Pick Your Entry Point
 
