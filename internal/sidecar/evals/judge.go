@@ -46,6 +46,10 @@ type JudgeClient interface {
 	ModelID() string
 }
 
+type judgeRuntimeVersionClient interface {
+	RuntimeVersion() string
+}
+
 // AggregatedDim is one dimension's self-consistency aggregate across k samples.
 // Explanation is the reasoning from the sample whose score is nearest the
 // median — a representative rationale carried into the emitted evaluation event
@@ -73,10 +77,11 @@ type JudgeResult struct {
 	Skipped    bool   `json:"skipped"`
 	SkipReason string `json:"skipReason,omitempty"`
 
-	JudgeModelID  string `json:"judgeModelId,omitempty"`
-	PromptVersion string `json:"promptVersion,omitempty"`
-	RubricVersion string `json:"rubricVersion,omitempty"`
-	Samples       int    `json:"samples,omitempty"`
+	JudgeModelID        string `json:"judgeModelId,omitempty"`
+	JudgeRuntimeVersion string `json:"judgeRuntimeVersion,omitempty"`
+	PromptVersion       string `json:"promptVersion,omitempty"`
+	RubricVersion       string `json:"rubricVersion,omitempty"`
+	Samples             int    `json:"samples,omitempty"`
 
 	Dimensions      []AggregatedDim `json:"dimensions,omitempty"`
 	Overall         float64         `json:"overall,omitempty"`
@@ -152,6 +157,9 @@ func (r *JudgeRunner) Score(ctx context.Context, task Task, ep *Episode) (*Judge
 	}
 
 	res.JudgeModelID = r.Client.ModelID()
+	if versioned, ok := r.Client.(judgeRuntimeVersionClient); ok {
+		res.JudgeRuntimeVersion = versioned.RuntimeVersion()
+	}
 	res.PromptVersion = judgePromptVersion
 	res.RubricVersion = rubricVersion
 	res.Samples = k

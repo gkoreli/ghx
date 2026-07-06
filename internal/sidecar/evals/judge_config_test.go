@@ -3,6 +3,7 @@ package evals
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,9 @@ func TestDefaultJudgeConfigValidates(t *testing.T) {
 	}
 	if cfg.SchemaVersion != judgeConfigSchemaVersion {
 		t.Errorf("schemaVersion = %q, want %q", cfg.SchemaVersion, judgeConfigSchemaVersion)
+	}
+	if cfg.Transport != judgeTransportCLI {
+		t.Errorf("transport = %q, want %q", cfg.Transport, judgeTransportCLI)
 	}
 	if cfg.PromptVersion != judgePromptVersion || cfg.RubricVersion != rubricVersion {
 		t.Errorf("versions = (%q, %q), want (%q, %q)",
@@ -49,7 +53,7 @@ func TestLoadJudgeConfigMatchesEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultJudgeConfig: %v", err)
 	}
-	if *disk != *embedded {
+	if !reflect.DeepEqual(disk, embedded) {
 		t.Errorf("disk config %+v != embedded config %+v", *disk, *embedded)
 	}
 }
@@ -70,6 +74,7 @@ func TestJudgeConfigValidationErrors(t *testing.T) {
 		wantSub string
 	}{
 		{"bad schema version", func(c *JudgeConfig) { c.SchemaVersion = "judge-config-v0" }, "schemaVersion"},
+		{"bad transport", func(c *JudgeConfig) { c.Transport = "socket" }, "transport"},
 		{"prompt version drift", func(c *JudgeConfig) { c.PromptVersion = "judge-prompt-v0" }, "judgePromptVersion"},
 		{"rubric version drift", func(c *JudgeConfig) { c.RubricVersion = "core-rubric-v0" }, "rubricVersion"},
 		{"zero samples", func(c *JudgeConfig) { c.Samples = 0 }, "samples"},
@@ -79,6 +84,12 @@ func TestJudgeConfigValidationErrors(t *testing.T) {
 		{"blank model", func(c *JudgeConfig) { c.Primary.Model = "  " }, "model is blank"},
 		{"zero output tokens", func(c *JudgeConfig) { c.Secondary.MaxOutputTokens = 0 }, "maxOutputTokens"},
 		{"temperature out of range", func(c *JudgeConfig) { c.Primary.Temperature = temp(2.5) }, "temperature"},
+		{"blank cli command", func(c *JudgeConfig) { c.Primary.CLI.Command = "  " }, "cli.command"},
+		{"empty cli version args", func(c *JudgeConfig) { c.Primary.CLI.VersionArgs = nil }, "versionArgs"},
+		{"output file placeholder missing", func(c *JudgeConfig) {
+			c.Primary.CLI.OutputLastMessage = true
+			c.Primary.CLI.Args = []string{"exec", "-"}
+		}, "{output_file}"},
 		{"poor threshold drift", func(c *JudgeConfig) { c.Thresholds.Poor = 3.0 }, "judgePoorThreshold"},
 		{"sample rate out of range", func(c *JudgeConfig) { c.Thresholds.SecondarySampleRate = 1.5 }, "secondarySampleRate"},
 	}
