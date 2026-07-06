@@ -280,7 +280,7 @@ frontier milestone is not starved by it.
 | M5 | Concise "reconnaissance service" skill + integration ergonomics: main agent needs zero ghx CLI knowledge; founder dogfoods the sidecar daily | P2 | **← frontier** — ADR-0019 D1-D4 implemented 2026-07-05; dogfood week active (FRICTION.md: 6 entries 2026-07-05, both breaking items governed by ADR-0027 resume/watchdog/artifacts, setup + discovery gaps governed by config-init work and ADR-0019.1 optional-repo discovery tier); exit = week logged + breaking items fixed or explicitly deferred |
 | M6 | Shared SAF/SAFE trace infrastructure: runtime sessions emit the same OTel traces/reports as evals; `~/.ghx` root storage; full visibility surface | P2 | **DONE 2026-07-05** — ADR-0018 (semantics) + ADR-0022 (shared `internal/sidecar/telemetry`, production `Ask` emission, `~/.ghx` root, doctor viewer guidance); live-proven: a real `ghx sidecar ask` leaves traces/logs/metrics/reports in its session dir, replayable per the ADR-0018 recipe |
 | M7 | Escalation tiers: codemap CLI + local clone as internal sidecar tools, sidecar-decided, fully visible | P3 | Future (ADR before build) |
-| M8 | Eager anticipation with configurable styles; sub-second answers to anticipated questions | P3 | Future (ADR before build) |
+| M8 | Eager anticipation with configurable styles; sub-second answers to anticipated questions | P3 | v1 decided (ADR-0031.1: off/warm/prefetch, zero-LLM-token tiers; D1 predictor measurement gates the build; eager tiers blocked on judge calibration) |
 | M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Unblocked by M4 (SUPPORTED); export design decided (ADR-0017.1: TRL JSONL, KTO-first); still gated on the calibrated judge (ADR-0023.1 D5) for trajectory-quality labels |
 | M10 | Trained `ghx-sidecar` model behind the same boundary; re-run the same suite | P4 | Blocked on M9 |
 
@@ -315,7 +315,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | B6 | Always-on runtime: warm daemon shared across entrypoints, no cold starts (§4) | Future |
 | B7 | Session routing: sidecar routes questions to the right active session; main agent never sees sessions (§4 end state) | v1 shipped 2026-07-06 (ADR-0030.1): deterministic R1–R5 cascade + `sessions reroute` recovery live in daemon and daemonless ask, route provenance on every answer; next: dogfood route-record audit toward D4 phase 2 |
 | B8 | Persona proficiency: mining-driven persona revisions, each pre-registered before the next gate run | Standing; first batch implemented 2026-07-06 (ADR-0029 persona revision 1) |
-| B9 | Escalation tiers sidecar-decided (= M7 brain half); eager anticipation (= M8) | Future (B6 prerequisite for M8) |
+| B9 | Escalation tiers sidecar-decided (= M7 brain half); eager anticipation (= M8) | M7 half shipped (ADR-0024.2); M8 v1 decided (ADR-0031.1) |
 
 **C. SAF Evals (SAFE)** — the proof machinery.
 
