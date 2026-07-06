@@ -1,6 +1,8 @@
 package sidecar
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -40,6 +42,44 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 	}
 }
 
+// TestRepoScopedPersonaByteStable pins the repo-scoped persona to its exact
+// pre-ADR-0019.1 bytes: discovery mode must not perturb the persona used when
+// a repo IS provided (ADR-0019.1 D4).
+func TestRepoScopedPersonaByteStable(t *testing.T) {
+	base := BuildPersonaSystemPrompt()
+	const wantSHA = "552924a2d49c5a57d1c0bdab8afa1e0e41f6a9f6b3ae9932e4b4cd1c1061ab77"
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
+		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
+	}
+	if strings.Contains(base, "Discovery mode") {
+		t.Error("repo-scoped persona must not contain the discovery doctrine")
+	}
+}
+
+// TestDiscoveryPersonaExtendsBase verifies the discovery persona is exactly
+// the repo-scoped persona plus the discovery doctrine (ADR-0019.1 D4).
+func TestDiscoveryPersonaExtendsBase(t *testing.T) {
+	base := BuildPersonaSystemPrompt()
+	disc := BuildDiscoveryPersonaSystemPrompt()
+	if !strings.HasPrefix(disc, base) {
+		t.Fatal("discovery persona must start with the exact repo-scoped persona")
+	}
+	for _, want := range []string{
+		"## Discovery mode",
+		"several distinct query formulations", // broad sweep, multiple queries
+		"real usage in code",                  // triangulation signals
+		"seen only in search results",         // search-only repos are inferred…
+		"never a verified one",                // …never verified
+		"ranked comparison",                   // ranked candidate output
+		"unverified tail",                     // honesty about the unswept rest
+		"owner/repo",                          // repo-level citation form (D3)
+	} {
+		if !strings.Contains(disc, want) {
+			t.Errorf("discovery persona missing %q", want)
+		}
+	}
+}
+
 // TestBuildPromptFirstTurn verifies the per-turn prompt carries the
 // question-specific context and NOT the stable persona (ADR-0020.1 D1).
 func TestBuildPromptFirstTurn(t *testing.T) {
@@ -53,7 +93,7 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"honojs/hono",
 		"hono-middleware",
 		"Where is middleware composition implemented?",
-		"normal",  // default depth
+		"normal",   // default depth
 		"- remote", // default backend
 	} {
 		if !strings.Contains(p, want) {
@@ -73,6 +113,32 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 	}
 	if strings.Contains(p, "Prior session context") {
 		t.Error("first-turn prompt must not contain prior session context")
+	}
+}
+
+// TestBuildPromptRepoScopedByteStable pins the exact first-turn prompt when a
+// repo is provided: discovery mode must not change repo-scoped prompts
+// (ADR-0019.1 D1).
+func TestBuildPromptRepoScopedByteStable(t *testing.T) {
+	p := BuildPrompt(Request{Session: "s", Repo: "o/r", Question: "q"}, nil)
+	want := "## Repo\n\no/r\n\n## Session\n\ns\n\n## Question\n\nq\n\n## Depth\n\nnormal\n\n## Allowed backends\n\n- remote\n"
+	if p != want {
+		t.Fatalf("repo-scoped first-turn prompt changed:\ngot  %q\nwant %q", p, want)
+	}
+}
+
+// TestBuildPromptDiscoveryScope verifies the per-turn prompt without a repo
+// declares the discovery scope instead of an empty Repo header (ADR-0019.1 D1).
+func TestBuildPromptDiscoveryScope(t *testing.T) {
+	p := BuildPrompt(Request{Session: "s", Question: "which repos do X"}, nil)
+	if strings.Contains(p, "## Repo") {
+		t.Error("discovery prompt must not render an empty Repo header")
+	}
+	if !strings.Contains(p, "## Scope\n\ndiscovery") {
+		t.Errorf("discovery prompt missing discovery scope header:\n%s", p)
+	}
+	if !strings.Contains(p, "which repos do X") {
+		t.Error("discovery prompt missing the question")
 	}
 }
 

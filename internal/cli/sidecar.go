@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,7 +28,7 @@ invocations so follow-up questions retain prior context.`,
 
 // sidecarAskCmd sends one investigation turn to the sidecar agent.
 var sidecarAskCmd = &cobra.Command{
-	Use:   "ask --repo <owner/repo> <question>",
+	Use:   "ask [--repo <owner/repo>] <question>",
 	Short: "Ask a repo question using the sidecar agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -35,12 +37,17 @@ var sidecarAskCmd = &cobra.Command{
 		depth, _ := cmd.Flags().GetString("depth")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		if repo == "" {
-			return fmt.Errorf("--repo is required")
-		}
+		// Session naming (ADR-0019.1 D2): --session wins; with --repo the
+		// repo slug stands; with neither, derive a stable slug from the
+		// question. The chosen name is printed so the caller can resume it.
 		if session == "" {
-			session = defaultReconSession(repo)
+			if repo != "" {
+				session = defaultReconSession(repo)
+			} else {
+				session = questionSession(args[0])
+			}
 		}
+		fmt.Fprintf(os.Stderr, "session: %s\n", session)
 
 		cfg := sidecar.LoadConfig()
 		report, _, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
@@ -238,8 +245,8 @@ var sidecarConfigInitCmd = &cobra.Command{
 }
 
 func init() {
-	sidecarAskCmd.Flags().String("session", "", "Named session (default: repo slug, e.g. owner-repo)")
-	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (required)")
+	sidecarAskCmd.Flags().String("session", "", "Named session (default: repo slug, or a question-derived slug without --repo)")
+	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (optional scope; omit for cross-GitHub discovery)")
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 
@@ -250,10 +257,41 @@ func init() {
 	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarSessionsCmd, sidecarConfigCmd)
 }
 
+// questionSession derives a stable session slug from the question when the ask
+// has neither --session nor --repo (discovery mode, ADR-0019.1 D2): the
+// kebab-cased leading words truncated to ~40 chars, plus a short content hash
+// of the full question so distinct questions never collide.
+func questionSession(question string) string {
+	slug := kebabSlug(question)
+	if runes := []rune(slug); len(runes) > 40 {
+		slug = string(runes[:40])
+		// Prefer whole leading words: drop a trailing partial word when the
+		// cut landed mid-word (keep single over-long words as-is).
+		if i := strings.LastIndex(slug, "-"); i > 0 {
+			slug = slug[:i]
+		}
+	}
+	if slug == "" {
+		slug = "discovery"
+	}
+	sum := sha256.Sum256([]byte(question))
+	return slug + "-" + hex.EncodeToString(sum[:4])
+}
+
 func defaultReconSession(repo string) string {
+	s := kebabSlug(repo)
+	if s == "" {
+		return "repo"
+	}
+	return s
+}
+
+// kebabSlug lowercases s and collapses every non-alphanumeric run into a
+// single dash, trimming leading/trailing dashes.
+func kebabSlug(s string) string {
 	var b strings.Builder
 	lastDash := false
-	for _, r := range strings.ToLower(repo) {
+	for _, r := range strings.ToLower(s) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 			lastDash = false
@@ -264,11 +302,7 @@ func defaultReconSession(repo string) string {
 			lastDash = true
 		}
 	}
-	s := strings.Trim(b.String(), "-")
-	if s == "" {
-		return "repo"
-	}
-	return s
+	return strings.Trim(b.String(), "-")
 }
 
 func printHumanReport(report *sidecar.Report) {

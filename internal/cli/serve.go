@@ -150,7 +150,7 @@ func registerReconTool(s *server.MCPServer) {
 	reconTool := mcp.NewTool("recon",
 		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration."),
 		mcp.WithString("question", mcp.Required(), mcp.Description("English question about the repo")),
-		mcp.WithString("repo", mcp.Required(), mcp.Description("owner/repo")),
+		mcp.WithString("repo", mcp.Description("owner/repo (optional scope; omit for cross-GitHub discovery questions like \"which repos do X\")")),
 		mcp.WithString("session", mcp.Description("optional named session for parallel investigation threads")),
 	)
 	s.AddTool(reconTool, handleRecon)
@@ -163,13 +163,16 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	repo, err := request.RequireString("repo")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
+	repo := request.GetString("repo", "")
+	// Session naming mirrors the CLI (ADR-0019.1 D2): explicit session wins,
+	// then the repo slug, then a question-derived slug in discovery mode.
 	session := request.GetString("session", "")
 	if session == "" {
-		session = defaultReconSession(repo)
+		if repo != "" {
+			session = defaultReconSession(repo)
+		} else {
+			session = questionSession(question)
+		}
 	}
 
 	cfg := sidecar.LoadConfig()

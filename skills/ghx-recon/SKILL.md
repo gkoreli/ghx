@@ -18,12 +18,15 @@ explore a remote repo step-by-step yourself — delegate the whole question.
 
 ## Ask
 
-    ghx sidecar ask --repo <owner/repo> "<question>"
+    ghx sidecar ask [--repo <owner/repo>] "<question>"
 
-Follow-ups reuse the same per-repo session automatically, so ask them
-freely — they are faster and context-aware. Use --session <name> only to
-keep parallel investigation threads apart. Add --json for the full
-structured report.
+Give --repo when you know the repo. Omit it for discovery questions —
+"which repos/libraries do X" — and the sidecar sweeps GitHub, verifies
+top candidates, and ranks them. Follow-ups reuse the same session
+automatically (repo-derived, or question-derived — the chosen name is
+printed), so ask them freely — they are faster and context-aware. Use
+--session <name> only to keep parallel investigation threads apart. Add
+--json for the full structured report.
 
 ## Asking well
 
