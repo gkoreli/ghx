@@ -533,3 +533,26 @@ func TestDecodeReportStrict_TierUsed(t *testing.T) {
 		t.Fatalf("non-canonical tierUsed must be rejected with a tierUsed error, got %v", err)
 	}
 }
+
+// TestDecodeReportStrict_NormalizesNextReads: the strict path applies the
+// lenient ADR-0031.2 nextReads normalizer AFTER validation — path-shaped
+// entries are cleaned, prose entries are kept, and no report fails over
+// nextReads shape.
+func TestDecodeReportStrict_NormalizesNextReads(t *testing.T) {
+	args := validReportArgs()
+	args["nextReads"] = []any{"`gin.go:364`", "tree.go lines 135-400 for insertion logic", "  ", "routergroup.go"}
+	data, _ := json.Marshal(args)
+	r, err := DecodeReportStrict(data)
+	if err != nil {
+		t.Fatalf("prose/blank nextReads must never reject a report: %v", err)
+	}
+	want := []string{"gin.go", "tree.go lines 135-400 for insertion logic", "routergroup.go"}
+	if len(r.NextReads) != len(want) {
+		t.Fatalf("NextReads = %q, want %q", r.NextReads, want)
+	}
+	for i := range want {
+		if r.NextReads[i] != want[i] {
+			t.Errorf("NextReads[%d] = %q, want %q", i, r.NextReads[i], want[i])
+		}
+	}
+}

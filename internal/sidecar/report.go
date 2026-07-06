@@ -127,7 +127,49 @@ func ExtractReportErr(text string) (report *Report, coerced bool, err error) {
 	if r.Answer == "" {
 		return nil, coerced, ErrEmptyAnswer
 	}
+	r.NormalizeNextReads()
 	return &r, coerced, nil
+}
+
+// nextReadLineSuffixRE matches trailing line references on a single path
+// token: ":135", ":135-400", "#L135", or "#L135-L400".
+var nextReadLineSuffixRE = regexp.MustCompile(`(?::[0-9]+(?:-[0-9]+)?|#L[0-9]+(?:-L[0-9]+)?)$`)
+
+// NormalizeNextReads applies the lenient ADR-0031.2 nextReads normalizer.
+// The report contract requires each nextReads entry to be one concrete
+// repo-relative file path ("path/to/file.go" or "owner/repo:path/to/file.go");
+// this normalizer steers stored entries toward that shape WITHOUT ever
+// rejecting a report — the contract steers, validation must not break
+// production asks. Rules:
+//
+//   - blank entries are dropped
+//   - entries wrapped in quotes/backticks are unwrapped
+//   - a single path token keeps its content but loses a trailing line
+//     reference (":135", ":135-400", "#L135-L400")
+//   - prose entries (anything containing whitespace) pass through trimmed
+//     but otherwise untouched, so drift stays visible in artifacts
+func (r *Report) NormalizeNextReads() {
+	if len(r.NextReads) == 0 {
+		return
+	}
+	normalized := r.NextReads[:0]
+	for _, entry := range r.NextReads {
+		if e := normalizeNextReadEntry(entry); e != "" {
+			normalized = append(normalized, e)
+		}
+	}
+	r.NextReads = normalized
+}
+
+func normalizeNextReadEntry(entry string) string {
+	trimmed := strings.TrimSpace(entry)
+	unwrapped := strings.TrimSpace(strings.Trim(trimmed, "`'\""))
+	if strings.ContainsAny(unwrapped, " \t\n") {
+		// Prose: keep it (lenient contract), the persona doctrine is what
+		// steers agents toward concrete paths.
+		return trimmed
+	}
+	return nextReadLineSuffixRE.ReplaceAllString(unwrapped, "")
 }
 
 // claimFields want []Claim; string items become Claim{Summary: s}.

@@ -56,6 +56,10 @@ const reportAcceptedMessage = "report accepted — end your turn now; do not rep
 //
 // The returned error is the exact validation failure, suitable for feeding
 // straight back to the producer as tool output.
+//
+// After validation passes, the lenient ADR-0031.2 nextReads normalizer runs
+// (Report.NormalizeNextReads): it cleans path-shaped nextReads entries and
+// keeps prose entries verbatim, and it can never fail a report.
 func DecodeReportStrict(data []byte) (*Report, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
@@ -76,6 +80,11 @@ func DecodeReportStrict(data []byte) (*Report, error) {
 	if err := ValidateReportEvidence(&r); err != nil {
 		return nil, err
 	}
+	// Lenient nextReads normalization (ADR-0031.2): steers stored entries
+	// toward the concrete-path contract without ever rejecting a report. This
+	// is deliberately NOT coercion in the ADR-0021 D1 sense — the shape the
+	// model submitted already passed strict validation above.
+	r.NormalizeNextReads()
 	return &r, nil
 }
 
@@ -253,7 +262,7 @@ var reportFieldDescriptions = map[string]string{
 	"backendsUsed":  "Evidence backends used — canonical IDs: \"remote\", \"local:codemap\", \"local:ast-grep\", \"local:repomap\".",
 	"commandsRun":   "ghx commands you ran.",
 	"uncertainty":   "What remains uncertain.",
-	"nextReads":     "Suggested next files or areas to read.",
+	"nextReads":     "Files the NEXT turn will most likely need read: concrete repo-relative paths (\"path/to/file.go\" or \"owner/repo:path/to/file.go\"), one path per entry, no prose or line ranges. Empty when nothing is anticipated.",
 }
 
 func applyFieldDescriptions(props map[string]any, desc map[string]string) {
