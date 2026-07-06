@@ -230,8 +230,8 @@ no bandaids (Goga, 2026-07-06). Binding rules:
   the refactor is in flight are fine; the end state must be the clean
   design with **no regressions** — verified by the test suite, not by
   keeping the old path alive. (Deliberate external-facing exceptions —
-  e.g. the `~/.ghx-sidecar` read-fallback — must be justified in an ADR,
-  not habitual.)
+  e.g. the since-removed `~/.ghx-sidecar` read-fallback — must be
+  justified in an ADR, not habitual.)
 - **Refactor cleanly or not at all.** A refactor that leaves both the old
   and new pattern in the tree is worse than no refactor: it doubles the
   surface every future agent must understand.

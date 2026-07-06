@@ -63,18 +63,25 @@ type turnTelemetry struct {
 // emitTurnArtifacts writes the session's traces/logs/metrics for one Ask turn.
 // Any failure is warned to stderr and swallowed so the ask still returns.
 // It runs on every Ask exit path, including failures (ADR-0027 D3).
-func emitTurnArtifacts(ctx context.Context, t turnTelemetry) {
+// It returns the ArtifactsRef for the session, carrying the root trace ID of
+// the emitted `sidecar.ask` span when trace emission succeeded.
+func emitTurnArtifacts(ctx context.Context, t turnTelemetry) ArtifactsRef {
 	// The flush must survive the very cancellation it documents: a
 	// watchdog-cancelled or deadline-exceeded context would otherwise abort
 	// emission exactly when the artifacts matter most (ADR-0027 D3).
 	ctx = context.WithoutCancel(ctx)
 	dir := sessionDir(t.SessionsDir, t.Session)
-	if err := t.emitTraces(ctx, dir); err != nil {
+	ref := newArtifactsRef(t.SessionsDir, t.Session)
+	traceID, err := t.emitTraces(ctx, dir)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to emit turn traces/logs: %v\n", err)
+	} else {
+		ref.TraceID = traceID
 	}
 	if err := t.emitMetrics(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to emit turn metrics: %v\n", err)
 	}
+	return ref
 }
 
 func (t turnTelemetry) window() (start, end time.Time) {
@@ -98,10 +105,13 @@ func (t turnTelemetry) resourceAttrs() []attribute.KeyValue {
 	}
 }
 
-func (t turnTelemetry) emitTraces(ctx context.Context, dir string) error {
+// emitTraces writes the turn's span tree and content/error logs, returning the
+// hex trace ID of the root `sidecar.ask` span so callers can hand it back to
+// the asking agent (ArtifactsRef).
+func (t turnTelemetry) emitTraces(ctx context.Context, dir string) (string, error) {
 	tp, err := telemetry.NewTracerProvider(ctx, dir, t.resourceAttrs())
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -117,13 +127,17 @@ func (t turnTelemetry) emitTraces(ctx context.Context, dir string) error {
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(t.askAttributes()...),
 	)
+	traceID := askSpan.SpanContext().TraceID().String()
 	logs := t.emitTurnSpan(askCtx, tracer, start, end)
 	askSpan.End(trace.WithTimestamp(end))
 
 	if err := tp.ForceFlush(ctx); err != nil {
-		return fmt.Errorf("flush turn traces: %w", err)
+		return "", fmt.Errorf("flush turn traces: %w", err)
 	}
-	return telemetry.WriteLogs(filepath.Join(dir, telemetry.LogFileName), t.resourceAttrs(), sidecarTracerName, sidecarSemconvVersion, logs)
+	if err := telemetry.WriteLogs(filepath.Join(dir, telemetry.LogFileName), t.resourceAttrs(), sidecarTracerName, sidecarSemconvVersion, logs); err != nil {
+		return "", err
+	}
+	return traceID, nil
 }
 
 func (t turnTelemetry) emitTurnSpan(parent context.Context, tracer trace.Tracer, start, end time.Time) []telemetry.LogRecord {

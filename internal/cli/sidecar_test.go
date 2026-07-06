@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -194,5 +195,78 @@ func TestHandleReconSessionDefaults(t *testing.T) {
 	}
 	if got.Session != "my-thread" {
 		t.Fatalf("explicit session = %q, want %q", got.Session, "my-thread")
+	}
+}
+
+// TestAskEnvelopeJSONShape pins the `ghx sidecar ask --json` contract: the
+// report unchanged under "report", the artifacts pointer as a sibling under
+// "artifacts" with sessionDir/traceId keys — the report schema itself stays
+// untouched.
+func TestAskEnvelopeJSONShape(t *testing.T) {
+	env := askEnvelope{
+		Report: &sidecar.Report{Answer: "routes live in router.go"},
+		Artifacts: sidecar.ArtifactsRef{
+			SessionDir: "/home/u/.ghx/sessions/gin-gonic-gin",
+			TraceID:    "4bf92f3577b34da6a3ce929d0e0e4736",
+		},
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Report struct {
+			Answer string `json:"answer"`
+		} `json:"report"`
+		Artifacts struct {
+			SessionDir string `json:"sessionDir"`
+			TraceID    string `json:"traceId"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Report.Answer != "routes live in router.go" {
+		t.Fatalf("report.answer = %q", decoded.Report.Answer)
+	}
+	if decoded.Artifacts.SessionDir != "/home/u/.ghx/sessions/gin-gonic-gin" {
+		t.Fatalf("artifacts.sessionDir = %q", decoded.Artifacts.SessionDir)
+	}
+	if decoded.Artifacts.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("artifacts.traceId = %q", decoded.Artifacts.TraceID)
+	}
+}
+
+// TestHandleReconAppendsArtifactsFooter pins the MCP recon surface: the tool
+// response text is the report JSON followed by the same artifacts line the
+// CLI prints, so a parent agent never guesses where the audit trail lives.
+func TestHandleReconAppendsArtifactsFooter(t *testing.T) {
+	orig := askSidecar
+	defer func() { askSidecar = orig }()
+	askSidecar = func(_ context.Context, _ sidecar.Config, _ sidecar.AskRequest) (*sidecar.Report, *sidecar.TurnResult, error) {
+		return &sidecar.Report{Answer: "ok"}, &sidecar.TurnResult{
+			Artifacts: sidecar.ArtifactsRef{
+				SessionDir: "/home/u/.ghx/sessions/ownerx-repoy",
+				TraceID:    "4bf92f3577b34da6a3ce929d0e0e4736",
+			},
+		}, nil
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"question": "q", "repo": "OwnerX/RepoY"}
+	res, err := handleRecon(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("content[0] is %T, want TextContent", res.Content[0])
+	}
+	want := "\nartifacts: /home/u/.ghx/sessions/ownerx-repoy (trace 4bf92f3577b34da6a3ce929d0e0e4736)"
+	if !strings.HasSuffix(text.Text, want) {
+		t.Fatalf("recon text does not end with the artifacts line:\n%s", text.Text)
+	}
+	if !strings.HasPrefix(text.Text, "{") {
+		t.Fatalf("recon text no longer starts with the report JSON:\n%s", text.Text)
 	}
 }

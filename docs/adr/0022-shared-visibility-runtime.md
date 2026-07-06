@@ -192,6 +192,15 @@ existing model/visibility, so it migrates rather than pinning the legacy path �
 read-fallback, not a file mover. All tests use temp dirs via injected
 `SessionsDir` or `GHX_HOME`; none touch the real home.
 
+**D3 update (2026-07-05) — legacy read-fallback removed.** The
+`~/.ghx-sidecar` fallback (`legacyRoot`/`activeRoot`/`noteMigration` in
+config.go) was deleted: the migration to `~/.ghx` already happened on the only
+existing install, we are the sole consumers, and the AGENTS.md engineering
+tenet ("no legacy maintenance, no compatibility junk") forbids keeping a shim
+past its purpose. `rootDir()` (`$GHX_HOME` or `~/.ghx`) is now the single
+read/write root — one path, no dual resolution, no migration notice. The
+`GHX_HOME` override is unchanged.
+
 **D4 — content capture.** `Config.CaptureContent()` returns true by default and
 false when `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false` or
 `visibility.captureContent=false`. The eval path's stricter env gating

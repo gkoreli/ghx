@@ -50,7 +50,7 @@ var sidecarAskCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "session: %s\n", session)
 
 		cfg := sidecar.LoadConfig()
-		report, _, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
+		report, turn, err := sidecar.Ask(context.Background(), cfg, sidecar.AskRequest{
 			Session:  session,
 			Repo:     repo,
 			Question: args[0],
@@ -60,14 +60,27 @@ var sidecarAskCmd = &cobra.Command{
 			return err
 		}
 
+		artifacts := turn.Artifacts
 		if jsonOut {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			return enc.Encode(report)
+			return enc.Encode(askEnvelope{Report: report, Artifacts: artifacts})
 		}
 		printHumanReport(report)
+		if footer := artifacts.FooterLine(); footer != "" {
+			fmt.Printf("\n%s\n", footer)
+		}
 		return nil
 	},
+}
+
+// askEnvelope is the `ghx sidecar ask --json` output shape: the validated
+// report unchanged under "report", plus the artifacts pointer (session dir +
+// root trace ID) as a sibling — the report schema (ADR-0021) itself stays
+// untouched, and the caller never has to guess where the audit trail lives.
+type askEnvelope struct {
+	Report    *sidecar.Report      `json:"report"`
+	Artifacts sidecar.ArtifactsRef `json:"artifacts"`
 }
 
 // sidecarReportSinkCmd is a hidden, internal command: it serves the
@@ -244,9 +257,8 @@ func runSidecarConfigInit(claudeACP, force bool) error {
 		return fmt.Errorf("no ACP-compatible agents found on PATH (tried: claude, codex, kiro); " +
 			"run `ghx sidecar config init --claude-acp` to configure the pinned Claude ACP adapter (needs Node/npx)")
 	}
-	// Always write the new ~/.ghx root (ADR-0022 D3): start from the fresh
-	// default rooted there and carry over any existing model/visibility, so
-	// init migrates a legacy config to the new location instead of pinning it.
+	// Start from the fresh default config (rooted at ~/.ghx or $GHX_HOME,
+	// ADR-0022 D3) and carry over any existing model/visibility settings.
 	existing := sidecar.LoadConfig()
 	cfg := sidecar.NewDefaultConfig()
 	cfg.Model = existing.Model

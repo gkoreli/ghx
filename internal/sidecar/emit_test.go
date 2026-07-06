@@ -43,7 +43,7 @@ func TestAskEmitsSessionArtifacts(t *testing.T) {
 		}, "sess-1", nil
 	}
 
-	report, _, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock", Model: "test-model"}, AskRequest{
+	report, result, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock", Model: "test-model"}, AskRequest{
 		Session:  "s",
 		Repo:     "o/r",
 		Question: "where are routes configured?",
@@ -56,6 +56,19 @@ func TestAskEmitsSessionArtifacts(t *testing.T) {
 	}
 
 	sess := filepath.Join(dir, "s")
+
+	// ArtifactsRef: the returned TurnResult points at the absolute session dir
+	// and carries the root trace ID of the emitted sidecar.ask span.
+	absSess, err := filepath.Abs(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Artifacts.SessionDir != absSess {
+		t.Fatalf("Artifacts.SessionDir = %q, want %q", result.Artifacts.SessionDir, absSess)
+	}
+	if !hexTraceRE.MatchString(result.Artifacts.TraceID) {
+		t.Fatalf("Artifacts.TraceID = %q, want 32-char hex", result.Artifacts.TraceID)
+	}
 
 	// traces.jsonl: session + turn + tool spans, spec hex IDs, no eval spans.
 	lines, spans := readProdSpans(t, filepath.Join(sess, "traces.jsonl"))
@@ -73,6 +86,10 @@ func TestAskEmitsSessionArtifacts(t *testing.T) {
 	}
 	if !hexTraceRE.MatchString(names["sidecar.turn"].TraceID) {
 		t.Fatalf("turn traceId = %q, want 32-char hex", names["sidecar.turn"].TraceID)
+	}
+	if names["sidecar.ask"].TraceID != result.Artifacts.TraceID {
+		t.Fatalf("Artifacts.TraceID = %q, want the sidecar.ask span's trace %q",
+			result.Artifacts.TraceID, names["sidecar.ask"].TraceID)
 	}
 	for _, sp := range spans {
 		if strings.HasPrefix(sp.Name, "eval.") || sp.Name == "eval.reward.compute" {

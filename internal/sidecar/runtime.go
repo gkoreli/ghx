@@ -293,7 +293,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		if meta != nil {
 			turn = meta.TurnCount + 1
 		}
-		emitTurnArtifacts(ctx, turnTelemetry{
+		turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
 			SessionsDir:    sessionsDir,
 			Session:        req.Session,
 			Repo:           req.Repo,
@@ -385,8 +385,10 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	// Production visibility: append this turn's traces/logs/metrics to the
 	// session artifact set via the shared telemetry runtime (ADR-0022 D2).
 	// No reward/evaluation events — that is the eval layer. Failures degrade to
-	// a stderr warning inside emitTurnArtifacts and never fail the ask.
-	emitTurnArtifacts(ctx, turnTelemetry{
+	// a stderr warning inside emitTurnArtifacts and never fail the ask. The
+	// returned ArtifactsRef travels back on the TurnResult so every response
+	// surface can point the caller at the audit trail.
+	turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
 		SessionsDir:    sessionsDir,
 		Session:        req.Session,
 		Repo:           req.Repo,
