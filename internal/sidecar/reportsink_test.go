@@ -416,6 +416,7 @@ func TestDecodeReportStrictAcceptsRepoLevelCitations(t *testing.T) {
 			{"path": "open-telemetry/opentelemetry-go:exporters/stdout/stdouttrace/trace.go", "reason": "exporter implementation"}
 		],
 		"evidence": [{"source": "ghx search \"stdouttrace\"", "summary": "candidate sweep"}],
+		"commandsRun": ["ghx search \"stdouttrace\"", "ghx read open-telemetry/opentelemetry-go exporters/stdout/stdouttrace/trace.go"],
 		"uncertainty": ["candidate sweep bounded at depth normal"]
 	}`
 	r, err := DecodeReportStrict([]byte(payload))

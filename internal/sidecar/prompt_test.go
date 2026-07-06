@@ -42,12 +42,14 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 	}
 }
 
-// TestRepoScopedPersonaByteStable pins the repo-scoped persona to its exact
-// pre-ADR-0019.1 bytes: discovery mode must not perturb the persona used when
-// a repo IS provided (ADR-0019.1 D4).
+// TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
+// accidental drift is caught: discovery mode must not perturb the persona used
+// when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
+// the golden hash in the same commit as their ADR (current bytes: ADR-0027 D4
+// evidence-requirement wording).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "552924a2d49c5a57d1c0bdab8afa1e0e41f6a9f6b3ae9932e4b4cd1c1061ab77"
+	const wantSHA = "326bb25c80a465f959323048c6fc09f0c4868f127280a870ffd7b06fe32a8077"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}
