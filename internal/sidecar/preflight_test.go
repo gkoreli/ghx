@@ -29,7 +29,10 @@ func TestCheckACPHandshakeAcceptsInitializeResponse(t *testing.T) {
 	dir := t.TempDir()
 	agent := writeFakeAgent(t, dir, "fake-acp", fakeACPAgentScript())
 
-	if err := CheckACPHandshake(context.Background(), agent, "", nil, time.Second); err != nil {
+	// Generous timeout: the fake agent responds instantly, but parallel
+	// builds on a loaded machine have pushed sh startup past 1s (observed
+	// flake 2026-07-05).
+	if err := CheckACPHandshake(context.Background(), agent, "", nil, 10*time.Second); err != nil {
 		t.Fatalf("CheckACPHandshake returned error: %v", err)
 	}
 }
