@@ -324,6 +324,7 @@ func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
 	rec.ReportCoerced = turn.ReportCoerced
 	rec.WrapUpRecovered = turn.WrapUpRecovered
 	rec.SessionRecreated = turn.SessionRecreated
+	rec.RawSDK = turn.RawSDK
 	for _, tr := range turn.ToolTraces {
 		rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
 	}
@@ -373,7 +374,15 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 		ep.Identity.AdapterSubjectModel = modelFromMeta(initResp.AgentInfo.Meta)
 	}
 
-	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: rt.Cwd, McpServers: []acp.McpServer{}})
+	// Direct-profile sessions enable only the raw-SDK audit channel
+	// (ADR-0016.10 D2): it adds audit notifications for the trace-capture
+	// comparator without steering the subject agent, so baseline conditions
+	// are unchanged.
+	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        rt.Cwd,
+		McpServers: []acp.McpServer{},
+		Meta:       map[string]any{"claudeCode": map[string]any{"emitRawSDKMessages": true}},
+	})
 	if err != nil {
 		return fmt.Errorf("acp new session: %w", err)
 	}

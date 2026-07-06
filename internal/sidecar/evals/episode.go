@@ -138,6 +138,12 @@ type TurnRecord struct {
 	// turn's prompt was sent. It is excluded from actions, observations,
 	// memory/repeat-read scoring, ledger derivation, and char accounting.
 	ReplayedToolTraces []ToolCallTrace `json:"replayedToolTraces,omitempty"`
+	// RawSDK is the normalized raw-SDK audit for this turn (ADR-0016.10 D1):
+	// tool_use/tool_result blocks and provider-reported token usage captured
+	// from the adapter's _claude/sdkMessage stream. Nil on artifacts produced
+	// before ADR-0016.10 or when the eval-only audit channel was off; the
+	// trace-capture comparator skips such turns. Never a reward input.
+	RawSDK *sidecar.RawSDKAudit `json:"rawSDK,omitempty"`
 	// Report is the structured report extracted this turn (sidecar profile).
 	Report *sidecar.Report `json:"report,omitempty"`
 	// ReportRetried records whether sidecar report extraction needed the
