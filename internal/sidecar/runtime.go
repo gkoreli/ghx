@@ -60,6 +60,19 @@ func mergeWrapUpTurn(dst *TurnResult, src TurnResult) {
 	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
 	dst.ToolTraces = append(dst.ToolTraces, src.ToolTraces...)
 	dst.ToolOutputChars += src.ToolOutputChars
+	mergeRawSDK(dst, src)
+}
+
+// mergeRawSDK folds a follow-up attempt's raw-SDK audit into the primary
+// turn (ADR-0016.10 D2) — the raw twin of appending ToolTraces above.
+func mergeRawSDK(dst *TurnResult, src TurnResult) {
+	if src.RawSDK == nil {
+		return
+	}
+	if dst.RawSDK == nil {
+		dst.RawSDK = &RawSDKAudit{}
+	}
+	dst.RawSDK.Merge(src.RawSDK)
 }
 
 // newReportSinkPath creates a runtime-owned sink path for one Ask invocation
@@ -137,6 +150,7 @@ func mergeRetryTurn(dst *TurnResult, src TurnResult) {
 	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
 	dst.ToolTraces = append(dst.ToolTraces, src.ToolTraces...)
 	dst.ToolOutputChars += src.ToolOutputChars
+	mergeRawSDK(dst, src)
 }
 
 // AskRequest is the input for a single sidecar investigation.
@@ -298,11 +312,15 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			wrapUpErr = fmt.Errorf("no ACP session id available to resume")
 		} else {
 			wrapResult, wrapSessionID, werr := runner(ctx, RunTurnOptions{
-				AgentCmd:       cfg.AgentCmd,
-				ACPSessionID:   resumeID,
-				Prompt:         turnCapWrapUpPrompt,
-				Cwd:            cfg.Cwd,
-				Env:            cfg.Env,
+				AgentCmd:     cfg.AgentCmd,
+				ACPSessionID: resumeID,
+				Prompt:       turnCapWrapUpPrompt,
+				Cwd:          cfg.Cwd,
+				Env:          cfg.Env,
+				// SessionMeta rides along so the resumed wrap-up keeps the
+				// eval raw-SDK audit channel (ADR-0016.10 D2); LoadSession
+				// forwards only that subset.
+				SessionMeta:    sessionMeta,
 				ReportSinkPath: sinkPath,
 			})
 			// Fold the wrap-up's telemetry in on both outcomes: even a failed
@@ -383,11 +401,15 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			break
 		}
 		retryResult, retryNewID, retryErr := runner(ctx, RunTurnOptions{
-			AgentCmd:       cfg.AgentCmd,
-			ACPSessionID:   retrySessionID,
-			Prompt:         reportRetryPromptWithError(reason),
-			Cwd:            cfg.Cwd,
-			Env:            cfg.Env,
+			AgentCmd:     cfg.AgentCmd,
+			ACPSessionID: retrySessionID,
+			Prompt:       reportRetryPromptWithError(reason),
+			Cwd:          cfg.Cwd,
+			Env:          cfg.Env,
+			// SessionMeta rides along so the resumed retry keeps the eval
+			// raw-SDK audit channel (ADR-0016.10 D2); LoadSession forwards
+			// only that subset.
+			SessionMeta:    sessionMeta,
 			ReportSinkPath: sinkPath,
 		})
 		if retryErr != nil {

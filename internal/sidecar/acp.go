@@ -67,6 +67,10 @@ type TurnResult struct {
 	// turn belongs to (session dir + root trace ID). Populated by Ask after
 	// artifact emission; zero for a bare RunTurnWithOptions result.
 	Artifacts ArtifactsRef
+	// RawSDK is the normalized raw-SDK audit for the turn (ADR-0016.10 D1),
+	// captured from _claude/sdkMessage extension notifications. Nil when the
+	// eval-only audit channel is off or the adapter never emitted.
+	RawSDK *RawSDKAudit
 }
 
 // ImplementationInfo records the ACP adapter identity returned by initialize.
@@ -273,6 +277,30 @@ func (c *denyClient) markPromptSent() {
 	c.mu.Lock()
 	c.promptSent = true
 	c.mu.Unlock()
+}
+
+// HandleExtensionMethod receives ACP extension notifications. The only one
+// consumed is the adapter's _claude/sdkMessage raw-SDK audit stream
+// (ADR-0016.10 D1), recorded into the turn's RawSDKAudit under the same
+// lock/closed/promptSent discipline as SessionUpdate. Raw messages count as
+// liveness activity too — a turn streaming only raw messages is not hung.
+func (c *denyClient) HandleExtensionMethod(_ context.Context, method string, params json.RawMessage) (any, error) {
+	if method != RawSDKMessageMethod {
+		return nil, acp.NewMethodNotFound(method)
+	}
+	if c.onActivity != nil {
+		c.onActivity()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, nil
+	}
+	if c.result.RawSDK == nil {
+		c.result.RawSDK = &RawSDKAudit{}
+	}
+	c.result.RawSDK.Record(params, !c.promptSent)
+	return nil, nil
 }
 
 // closeAndSnapshot stops recording and returns a copy of the accumulated turn
@@ -591,8 +619,9 @@ type RunTurnOptions struct {
 	Cwd          string
 	Env          []string
 	// SessionMeta is the _meta map forwarded to the adapter on session creation
-	// (NewSession only — LoadSession and retry turns do not re-create the
-	// session). Nil means no steering options. Populated by Ask via
+	// (NewSession). LoadSession forwards only the raw-SDK audit subset via
+	// RawSDKLoadSessionMeta (ADR-0016.10 D2) — resumed turns never receive the
+	// steering options. Nil means no steering options. Populated by Ask via
 	// BuildSessionMeta (ADR-0020.1 D2).
 	SessionMeta map[string]any
 	// ReportSinkPath, when non-empty, registers the session-scoped report-sink
@@ -778,10 +807,15 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		}
 		sessionID = resp.SessionId
 	} else {
+		// Resumed turns re-enable only the eval raw-SDK audit channel
+		// (ADR-0016.10 D2): each RunTurn is a fresh adapter process and the
+		// adapter defaults emitRawSDKMessages to false on load. The full
+		// steering meta is deliberately not forwarded here.
 		_, err := conn.LoadSession(turnCtx, acp.LoadSessionRequest{
 			SessionId:  acp.SessionId(opts.ACPSessionID),
 			Cwd:        cwd,
 			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
+			Meta:       RawSDKLoadSessionMeta(opts.SessionMeta),
 		})
 		if err != nil {
 			return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(turnCtx, err))

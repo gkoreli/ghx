@@ -26,9 +26,9 @@ number quoted anywhere is only as strong as its rows here.
 |---|---|---|---|
 | H1 | **Checks measure fact recall, not quality.** Substring gates can score a lucky mention. | Quality claims overstate | Judge layer built; **uncalibrated (κ never computed)** — gold-set packets ready, founder labeling session pending; judge moving to CLI rails |
 | H2 | **Memorization confound.** Famous-repo tasks (gin/flask/express); plain baseline ~0.90 may be recall-from-weights, not exploration. Never quantified. | All profiles inflated; exploration signal unknown per task | Closed-book probe being pre-registered (ADR-0016.9 draft in flight) |
-| H3 | **Trace-capture completeness.** toolTraces come from ACP notifications; drops would be silent. | Trajectory metrics under-count | Raw-SDK-diff comparator being designed (audit in flight) |
+| H3 | **Trace-capture completeness.** toolTraces come from ACP notifications; drops would be silent. | Trajectory metrics under-count | Comparator built (ADR-0016.10: raw-SDK audit persisted per turn, `trace_capture_gap` soft anomaly), pending first instrumented run |
 | H4 | **Anomaly taxonomy is closed-world.** Detectors only catch pre-registered patterns. | Unknown failure modes pass | Standing; judge + human trace review are the backstop |
-| H5 | **Token accounting is a chars/4 proxy**, not provider-reported tokens. | SPT absolute values approximate (ratios robust) | Documented in ADR-0016.6; real token capture is a follow-up |
+| H5 | **Token accounting is a chars/4 proxy**, not provider-reported tokens. | SPT absolute values approximate (ratios robust) | Documented in ADR-0016.6; provider-reported usage now persisted per turn (ADR-0016.10 D6, inert — no scorer reads it); promotion to the real-token source is a follow-up ADR |
 | H6 | **Sample economics.** n=5 trials/cell; thin-margin gates swing on single episodes. | Verdict fragility on close calls | Stopping bounds + at_least(n) reducers queued (ADR-0025 stats follow-up) |
 | H7 | **Ceiling effects.** Correctness 0.89–0.97 across profiles — tasks may be too easy to discriminate. | Improvements invisible | Corpus refresh criterion: closed-book gap (H2) becomes the task-acceptance bar |
 

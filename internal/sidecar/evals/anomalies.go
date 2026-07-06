@@ -77,6 +77,16 @@ const (
 	// window (ADR-0027 D2). Breaking: the episode's turn died without a
 	// usable report; detected from the persisted turn error string.
 	AnomalyEpisodeHangTimeout = "episode_hang_timeout"
+	// AnomalyTraceCaptureGap: the raw-SDK audit (ADR-0016.10, TRUST H3) shows
+	// tool activity the ACP capture path missed — a raw tool_use with no
+	// captured trace, a missing terminal status, a mangled input, or dropped
+	// output. Soft, deliberately: it flags measurement *undercounting* of
+	// trajectory/tool metrics, not a product-contract violation — the answer
+	// and report (which correctness/evidence read) are unaffected, and the
+	// bias makes the subject look less active, never better. Applies only to
+	// runs whose turns carry the rawSDK field (ADR-0016.10 D5); a human
+	// reading the anomaly table decides any exclusion.
+	AnomalyTraceCaptureGap = "trace_capture_gap"
 )
 
 // Anomaly is one declaratively-detected failure pattern on an episode.
@@ -152,6 +162,19 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 			}
 		}
 	}
+	// Trace-capture completeness (ADR-0016.10 D4): compare each turn's
+	// raw-SDK audit against its live captured traces — replayed traces were
+	// accounted on the turn that originally ran them (ADR-0016.5). At most
+	// one anomaly per turn; turns without a raw audit are skipped inside the
+	// comparator, so pre-ADR artifacts derive zero anomalies here.
+	for _, turn := range ep.Turns {
+		if gaps := CompareTraceCapture(turn.RawSDK, turn.ToolTraces); len(gaps) > 0 {
+			out = append(out, Anomaly{
+				Kind: AnomalyTraceCaptureGap, Severity: SeveritySoft, Turn: turn.Turn,
+				Detail: boundedString(summarizeTraceCaptureGaps(gaps), 256),
+			})
+		}
+	}
 	// Contamination guard (ADR-0016.8 D2): declarative substring detection
 	// over live tool calls only — replayed traces were already accounted on
 	// the turn that originally ran them (ADR-0016.5). One anomaly per
@@ -217,6 +240,7 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalyDirectGhxNoncompliance, SeveritySoft},
 		{AnomalyParallelRateLimited, SeveritySoft},
 		{AnomalyAnswerDocContamination, SeveritySoft},
+		{AnomalyTraceCaptureGap, SeveritySoft},
 	}
 	counts := map[string]int{}
 	episodesWith := map[string]int{}

@@ -2,6 +2,7 @@ package evals
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -147,6 +148,24 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		}
 	}
 	return nil
+}
+
+// HandleExtensionMethod records the adapter's _claude/sdkMessage raw-SDK
+// audit stream into the current turn (ADR-0016.10 D1). Direct-profile
+// sessions enable the channel via directSessionMeta; turns without a current
+// record (between prompts) drop the message.
+func (c *evalClient) HandleExtensionMethod(_ context.Context, method string, params json.RawMessage) (any, error) {
+	if method != sidecar.RawSDKMessageMethod {
+		return nil, acp.NewMethodNotFound(method)
+	}
+	if c.current == nil {
+		return nil, nil
+	}
+	if c.current.RawSDK == nil {
+		c.current.RawSDK = &sidecar.RawSDKAudit{}
+	}
+	c.current.RawSDK.Record(params, !c.promptSent)
+	return nil, nil
 }
 
 func nowUTC() time.Time { return time.Now().UTC() }
