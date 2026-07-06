@@ -185,15 +185,24 @@ var sidecarToolsAllowlist = []string{"Bash", "Read"}
 //   - depth: "cheap", "normal", or "deep". Unknown values default to "normal".
 //   - model: subject model string (empty = adapter default).
 //   - emitRaw: true only when running under evals.
-func BuildSessionMeta(persona, depth, model string, emitRaw bool) map[string]any {
+//   - settingSources: host setting files the agent may load
+//     (Config.AgentSettingSources). Nil means full isolation ([] on the wire,
+//     the default posture); non-nil values are forwarded verbatim after
+//     validation at config load. Enterprise/toolbox Claude installs need
+//     ["user"] because the native binary resolves Bedrock model aliases from
+//     ~/.claude/settings.json and hangs in streaming mode without it.
+func BuildSessionMeta(persona, depth, model string, emitRaw bool, settingSources []string) map[string]any {
 	budget, ok := depthBudgets[depth]
 	if !ok {
 		budget = depthBudgets["normal"]
 	}
 
+	if settingSources == nil {
+		settingSources = []string{} // explicitly [] — disables host settings inheritance
+	}
 	opts := SessionOptions{
 		SystemPrompt:    persona,
-		SettingSources:  []string{}, // explicitly [] — disables host settings inheritance
+		SettingSources:  settingSources,
 		StrictMcpConfig: true,
 		Tools:           sidecarToolsAllowlist,
 		// Auto-approve the report-sink submit_report MCP tool (ADR-0021 D1).

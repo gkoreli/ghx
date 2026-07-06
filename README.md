@@ -199,11 +199,23 @@ diff-and-`--force` rules apply).
 > `settingSources: []` for session isolation, and some wrappers stall instead
 > of erroring when settings loading is suppressed (isolated 2026-07-06:
 > `settingSources: []` alone reproduces the hang; `strictMcpConfig` and
-> `tools` do not). Until that is fixed upstream in `claude-agent-acp`/the
-> SDK, wrap the *adapter* instead — a small script that exports your auth env
-> (Bedrock/gateway vars, or credentials from your wrapper's own export
-> command) and `exec`s `npx -y @agentclientprotocol/claude-agent-acp` — and
-> set it as `"agent"`.
+> `tools` do not; mechanism: the native binary resolves Bedrock
+> `modelOverrides` from `~/.claude/settings.json` and stalls instead of
+> erroring when that read is suppressed). The fix is one config line:
+>
+> ```json
+> {
+>   "agent": "env CLAUDE_CODE_EXECUTABLE=/path/to/your/claude npx -y @agentclientprotocol/claude-agent-acp@0.55.0",
+>   "agentSettingSources": ["user"]
+> }
+> ```
+>
+> `agentSettingSources` opts the spawned agent into loading your user
+> settings (`~/.claude/settings.json`) so the wrapper's model aliases and
+> credential hooks work. It deliberately weakens session isolation — host
+> user settings apply to sidecar sessions — which is why it is opt-in and
+> off by default (ADR-0033.2). Wrapping the *adapter* in a script that
+> exports auth env itself remains a valid alternative.
 
 Embedding `env VAR=...` in the agent command makes the setting travel with the
 command itself, so it works no matter which process (CLI or resident daemon)

@@ -269,12 +269,16 @@ func ConfigDigest(cfg Config) string {
 		// warm daemon must not keep routing on stale thresholds/windows
 		// after the config changes.
 		Route *RouteSettings `json:"route,omitempty"`
+		// AgentSettingSources shapes every session's isolation posture
+		// (settingSources on the wire); a warm daemon must not keep
+		// serving the old posture after the config changes.
+		AgentSettingSources []string `json:"agentSettingSources,omitempty"`
 	}
 	// Hash the explicit override only: an empty value means "own executable",
 	// which the version handshake already validates, and full resolution is
 	// process-dependent (a spawned daemon and a go-test client resolve
 	// differently, which would force restart loops).
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route})
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route, AgentSettingSources: cfg.AgentSettingSources})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

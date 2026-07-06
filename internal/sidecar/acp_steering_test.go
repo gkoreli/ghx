@@ -99,7 +99,7 @@ func metaOptions(t *testing.T, metaJSON string) (claudeCode, options map[string]
 func TestLoadSessionCarriesFullSteeringMeta(t *testing.T) {
 	const persona = "test persona doctrine"
 	newMeta, loadMeta := runTwoTurnSession(t,
-		sidecar.BuildSessionMeta(persona, "normal", "claude-test-model", true))
+		sidecar.BuildSessionMeta(persona, "normal", "claude-test-model", true, nil))
 
 	// One meta map, both concerns: NewSession and LoadSession wire payloads
 	// must be byte-identical (mockagent re-marshals with sorted keys).
@@ -146,7 +146,7 @@ func TestLoadSessionCarriesFullSteeringMeta(t *testing.T) {
 // LoadSession still re-asserts the full steering options.
 func TestLoadSessionCarriesSteeringMetaInProduction(t *testing.T) {
 	newMeta, loadMeta := runTwoTurnSession(t,
-		sidecar.BuildSessionMeta("prod persona", "normal", "", false))
+		sidecar.BuildSessionMeta("prod persona", "normal", "", false, nil))
 
 	if newMeta != loadMeta {
 		t.Fatalf("production LoadSession meta diverges from NewSession meta:\nnew:  %s\nload: %s", newMeta, loadMeta)

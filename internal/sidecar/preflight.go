@@ -298,7 +298,7 @@ func CheckLiveTurn(ctx context.Context, cfg Config) PreflightCheck {
 		Prompt:          liveTurnPrompt,
 		Cwd:             dir,
 		Env:             cfg.Env,
-		SessionMeta:     BuildSessionMeta(persona, "cheap", cfg.Model, false),
+		SessionMeta:     BuildSessionMeta(persona, "cheap", cfg.Model, false, cfg.AgentSettingSources),
 		AgentStderrPath: stderrLog,
 		LivenessTimeout: liveTurnTimeout,
 	})

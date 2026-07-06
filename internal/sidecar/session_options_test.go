@@ -27,7 +27,7 @@ import (
 //	}
 func TestBuildSessionMetaShape(t *testing.T) {
 	persona := BuildPersonaSystemPrompt()
-	meta := BuildSessionMeta(persona, "normal", "claude-test-model", false)
+	meta := BuildSessionMeta(persona, "normal", "claude-test-model", false, nil)
 
 	// Marshal to JSON so we can inspect the exact wire shape.
 	data, err := json.Marshal(meta)
@@ -144,7 +144,7 @@ func TestBuildSessionMetaShape(t *testing.T) {
 // TestBuildSessionMetaEvalMode verifies emitRawSDKMessages is set true only
 // in eval mode (ADR-0020.1 D5).
 func TestBuildSessionMetaEvalMode(t *testing.T) {
-	meta := BuildSessionMeta("persona", "normal", "", true)
+	meta := BuildSessionMeta("persona", "normal", "", true, nil)
 	data, err := json.Marshal(meta)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -186,7 +186,7 @@ func TestBuildSessionMetaDepthBudgets(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.depth, func(t *testing.T) {
-			meta := BuildSessionMeta("p", tc.depth, "", false)
+			meta := BuildSessionMeta("p", tc.depth, "", false, nil)
 			data, err := json.Marshal(meta)
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
@@ -220,7 +220,7 @@ func TestBuildSessionMetaDepthBudgets(t *testing.T) {
 // TestBuildSessionMetaModelEmpty verifies that when no model is provided,
 // the model field is omitted (adapter picks its default).
 func TestBuildSessionMetaModelEmpty(t *testing.T) {
-	meta := BuildSessionMeta("persona", "normal", "", false)
+	meta := BuildSessionMeta("persona", "normal", "", false, nil)
 	data, err := json.Marshal(meta)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -239,7 +239,7 @@ func TestBuildSessionMetaModelEmpty(t *testing.T) {
 // is always serialized as an explicit empty array [] even when empty, not
 // omitted. This is required to override the adapter's default ["user","project","local"].
 func TestBuildSessionMetaSettingSourcesExplicitEmpty(t *testing.T) {
-	meta := BuildSessionMeta("p", "normal", "", false)
+	meta := BuildSessionMeta("p", "normal", "", false, nil)
 	data, err := json.Marshal(meta)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -262,4 +262,16 @@ func indexOfString(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// TestBuildSessionMetaSettingSourcesOptIn verifies the ADR-0033.2 enterprise
+// escape hatch: a non-nil Config.AgentSettingSources is forwarded verbatim,
+// so a toolbox Claude install can load ~/.claude/settings.json (Bedrock
+// modelOverrides resolution) while the default stays full isolation.
+func TestBuildSessionMetaSettingSourcesOptIn(t *testing.T) {
+	meta := BuildSessionMeta("p", "normal", "", false, []string{"user"})
+	opts := meta["claudeCode"].(map[string]any)["options"].(SessionOptions)
+	if len(opts.SettingSources) != 1 || opts.SettingSources[0] != "user" {
+		t.Fatalf("settingSources = %v, want [user]", opts.SettingSources)
+	}
 }

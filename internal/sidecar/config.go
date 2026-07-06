@@ -60,6 +60,18 @@ type Config struct {
 	// the pinned defaults; the knobs are part of the daemon config digest so
 	// a change restarts the warm daemon (ADR-0030 D6).
 	Route *RouteSettings `json:"route,omitempty"`
+	// AgentSettingSources opts the spawned agent into loading host Claude Code
+	// setting files: any of "user" (~/.claude/settings.json), "project",
+	// "local". DEFAULT (nil/absent) is full isolation — the session sends
+	// settingSources:[] so the agent inherits no host CLAUDE.md/settings
+	// (the ADR-0016.3 isolation posture). Set ["user"] on machines whose
+	// Claude install NEEDS user settings to function — enterprise/toolbox
+	// builds resolve Bedrock model aliases (modelOverrides) from that file,
+	// and blocking it hangs the agent at prompt time (founder isolation,
+	// 2026-07-06). Opting in weakens session isolation: host user settings
+	// (env, hooks, model overrides) apply to sidecar sessions. Eval runs
+	// construct their own Config and are unaffected.
+	AgentSettingSources []string `json:"agentSettingSources,omitempty"`
 	// Cwd overrides the ACP session cwd. Empty means current working directory.
 	Cwd string `json:"-"`
 	// Env overrides the spawned ACP adapter environment. Nil means inherit.
@@ -148,7 +160,28 @@ func LoadConfig() Config {
 	if c.SessionsDir == "" {
 		c.SessionsDir = def.SessionsDir
 	}
+	c.AgentSettingSources = validAgentSettingSources(c.AgentSettingSources)
 	return c
+}
+
+// validAgentSettingSources filters agentSettingSources to the adapter's
+// recognized values (user, project, local), warning about anything else so a
+// typo degrades loudly to isolation instead of silently misconfiguring the
+// session. nil in, nil out (full isolation default).
+func validAgentSettingSources(sources []string) []string {
+	if sources == nil {
+		return nil
+	}
+	valid := sources[:0]
+	for _, s := range sources {
+		switch s {
+		case "user", "project", "local":
+			valid = append(valid, s)
+		default:
+			fmt.Fprintf(os.Stderr, "warning: agentSettingSources: unknown value %q ignored (valid: user, project, local)\n", s)
+		}
+	}
+	return valid
 }
 
 // ConfigFileExists reports whether a config file already exists at the root,

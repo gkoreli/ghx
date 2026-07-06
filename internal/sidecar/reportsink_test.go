@@ -450,7 +450,7 @@ func TestReportSinkMcpServers_Registration(t *testing.T) {
 // carries the fully-qualified submit_report tool id, so the adapter approves
 // the MCP tool instead of routing it through the read-only permission gate.
 func TestBuildSessionMeta_AllowsSubmitReport(t *testing.T) {
-	meta := BuildSessionMeta("persona", "normal", "", false)
+	meta := BuildSessionMeta("persona", "normal", "", false, nil)
 	cc, _ := meta["claudeCode"].(map[string]any)
 	opts, _ := cc["options"].(SessionOptions)
 	found := false

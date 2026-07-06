@@ -74,3 +74,21 @@ func TestSplitAgentCmd(t *testing.T) {
 		t.Fatalf("command line: got %q %v", name, args)
 	}
 }
+
+// validAgentSettingSources: recognized values pass, typos are dropped loudly,
+// nil stays nil (full isolation default).
+func TestValidAgentSettingSources(t *testing.T) {
+	if got := validAgentSettingSources(nil); got != nil {
+		t.Fatalf("nil must stay nil, got %v", got)
+	}
+	got := validAgentSettingSources([]string{"user", "usr", "project", "local", "flag"})
+	want := []string{"user", "project", "local"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}

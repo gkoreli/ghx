@@ -380,6 +380,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		depth,
 		cfg.Model,
 		cfg.EvalMode,
+		cfg.AgentSettingSources,
 	)
 
 	// Runtime-owned sink for the strict submit_report path (ADR-0021 D1). When
