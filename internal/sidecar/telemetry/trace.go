@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -101,6 +103,25 @@ func (e *otlpJSONFileExporter) Shutdown(ctx context.Context) error {
 	default:
 		return nil
 	}
+}
+
+// validUTF8 replaces invalid UTF-8 byte sequences with the Unicode
+// replacement rune (U+FFFD). proto3 requires string fields to be valid
+// UTF-8, so protojson.Marshal fails the ENTIRE export batch when any span
+// carries invalid bytes (e.g. binary tool output in an attribute value) —
+// observed live in spot-instrumented-2026-07-06, where one of 33 tool spans
+// was dropped from traces.jsonl by "AnyValue.string_value contains invalid
+// UTF-8". Dropping spans silently corrupts the audit surface (AGENTS.md
+// visibility/truthfulness), so every proto string field on the span path is
+// sanitized before marshal: a span with a replacement rune is faithful
+// evidence, a missing span is not. Valid strings are returned unchanged
+// (strings.ToValidUTF8 only copies on invalid input; the utf8.ValidString
+// fast path skips even that scan's allocation checks).
+func validUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "�")
 }
 
 // hexEncodeSpanIDs rewrites the base64 ID strings protojson produces for
@@ -199,8 +220,8 @@ func protoSpan(span sdktrace.ReadOnlySpan) *tracepb.Span {
 	out := &tracepb.Span{
 		TraceId:                tid[:],
 		SpanId:                 sid[:],
-		TraceState:             span.SpanContext().TraceState().String(),
-		Name:                   span.Name(),
+		TraceState:             validUTF8(span.SpanContext().TraceState().String()),
+		Name:                   validUTF8(span.Name()),
 		Kind:                   spanKind(span.SpanKind()),
 		StartTimeUnixNano:      uint64(maxInt64(0, span.StartTime().UnixNano())),
 		EndTimeUnixNano:        uint64(maxInt64(0, span.EndTime().UnixNano())),
@@ -231,8 +252,8 @@ func instrumentationScope(scope instrumentation.Scope) *commonpb.Instrumentation
 		return nil
 	}
 	return &commonpb.InstrumentationScope{
-		Name:       scope.Name,
-		Version:    scope.Version,
+		Name:       validUTF8(scope.Name),
+		Version:    validUTF8(scope.Version),
 		Attributes: iteratorValues(scope.Attributes.Iter()),
 	}
 }
@@ -260,7 +281,7 @@ func iteratorValues(iter attribute.Iterator) []*commonpb.KeyValue {
 }
 
 func keyValue(attr attribute.KeyValue) *commonpb.KeyValue {
-	return &commonpb.KeyValue{Key: string(attr.Key), Value: anyValue(attr.Value)}
+	return &commonpb.KeyValue{Key: validUTF8(string(attr.Key)), Value: anyValue(attr.Value)}
 }
 
 func anyValue(v attribute.Value) *commonpb.AnyValue {
@@ -279,7 +300,7 @@ func anyValue(v attribute.Value) *commonpb.AnyValue {
 	case attribute.FLOAT64SLICE:
 		out.Value = &commonpb.AnyValue_ArrayValue{ArrayValue: &commonpb.ArrayValue{Values: float64Values(v.AsFloat64Slice())}}
 	case attribute.STRING:
-		out.Value = &commonpb.AnyValue_StringValue{StringValue: v.AsString()}
+		out.Value = &commonpb.AnyValue_StringValue{StringValue: validUTF8(v.AsString())}
 	case attribute.STRINGSLICE:
 		out.Value = &commonpb.AnyValue_ArrayValue{ArrayValue: &commonpb.ArrayValue{Values: stringValues(v.AsStringSlice())}}
 	case attribute.BYTESLICE:
@@ -318,7 +339,7 @@ func float64Values(vals []float64) []*commonpb.AnyValue {
 func stringValues(vals []string) []*commonpb.AnyValue {
 	out := make([]*commonpb.AnyValue, len(vals))
 	for i, v := range vals {
-		out[i] = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: v}}
+		out[i] = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: validUTF8(v)}}
 	}
 	return out
 }
@@ -338,7 +359,7 @@ func events(es []sdktrace.Event) []*tracepb.Span_Event {
 	out := make([]*tracepb.Span_Event, len(es))
 	for i, e := range es {
 		out[i] = &tracepb.Span_Event{
-			Name:                   e.Name,
+			Name:                   validUTF8(e.Name),
 			TimeUnixNano:           uint64(maxInt64(0, e.Time.UnixNano())),
 			Attributes:             keyValues(e.Attributes),
 			DroppedAttributesCount: clampUint32(e.DroppedAttributeCount),
@@ -367,6 +388,7 @@ func links(ls []sdktrace.Link) []*tracepb.Span_Link {
 }
 
 func status(code codes.Code, description string) *tracepb.Status {
+	description = validUTF8(description)
 	switch code {
 	case codes.Ok:
 		return &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK, Message: description}
