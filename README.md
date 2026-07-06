@@ -180,6 +180,10 @@ wrapped `claude` that carries work credentials, point the adapter at it with
 }
 ```
 
+`ghx sidecar config init --claude-exe /path/to/your/claude` writes exactly this
+config for you (`--claude-exe auto` resolves `claude` from your PATH; the same
+diff-and-`--force` rules apply).
+
 Embedding `env VAR=...` in the agent command makes the setting travel with the
 command itself, so it works no matter which process (CLI or resident daemon)
 spawns the agent. Exporting `CLAUDE_CODE_EXECUTABLE` in your shell also works:
