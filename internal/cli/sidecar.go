@@ -85,12 +85,17 @@ var sidecarReportSinkCmd = &cobra.Command{
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Run preflight diagnostics (token, network, ghx binary)",
+	Short: "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		result := sidecar.RunPreflight(context.Background())
+		cfg := sidecar.LoadConfig()
+		// Show what the config resolves to before probing it, so a failing
+		// handshake or sink check is immediately attributable.
+		fmt.Printf("Agent command: %s\n", cfg.AgentCmd)
+		fmt.Printf("Config file:   %s\n\n", sidecar.ConfigFilePath())
+		result := sidecar.RunPreflight(context.Background(), VERSION)
 		fmt.Print(sidecar.FormatPreflight(result))
 		fmt.Println()
-		fmt.Println(sidecar.ArtifactsHint(sidecar.LoadConfig()))
+		fmt.Println(sidecar.ArtifactsHint(cfg))
 		if !result.Passed {
 			os.Exit(1)
 		}
@@ -210,31 +215,80 @@ var sidecarConfigShowCmd = &cobra.Command{
 	},
 }
 
-// sidecarConfigInitCmd auto-detects agents and writes initial config.
+// sidecarConfigInitCmd writes the initial config: either the pinned Claude ACP
+// adapter (--claude-acp, the documented one-command setup) or PATH
+// auto-detection (the original behavior, unchanged).
 var sidecarConfigInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Auto-detect available ACP agents and write initial config",
+	Short: "Write initial config (--claude-acp for the pinned Claude ACP adapter, else auto-detect)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		found := sidecar.DetectAgents(context.Background())
-		if len(found) == 0 {
-			return fmt.Errorf("no ACP-compatible agents found on PATH (tried: claude, codex, kiro)")
-		}
-		// Always write the new ~/.ghx root (ADR-0022 D3): start from the fresh
-		// default rooted there and carry over any existing model/visibility, so
-		// init migrates a legacy config to the new location instead of pinning it.
-		existing := sidecar.LoadConfig()
-		cfg := sidecar.NewDefaultConfig()
-		cfg.Model = existing.Model
-		cfg.Visibility = existing.Visibility
-		cfg.AgentCmd = found[0]
-		if err := sidecar.SaveConfig(cfg); err != nil {
-			return err
-		}
-		fmt.Printf("Detected agents: %v\n", found)
-		fmt.Printf("Using: %s\n\n", cfg.AgentCmd)
-		fmt.Println(sidecar.FormatConfig(cfg))
-		return nil
+		claudeACP, _ := cmd.Flags().GetBool("claude-acp")
+		force, _ := cmd.Flags().GetBool("force")
+		return runSidecarConfigInit(claudeACP, force)
 	},
+}
+
+func runSidecarConfigInit(claudeACP, force bool) error {
+	if claudeACP {
+		return initClaudeACPConfig(force)
+	}
+	found := sidecar.DetectAgents(context.Background())
+	if len(found) == 0 {
+		return fmt.Errorf("no ACP-compatible agents found on PATH (tried: claude, codex, kiro); " +
+			"run `ghx sidecar config init --claude-acp` to configure the pinned Claude ACP adapter (needs Node/npx)")
+	}
+	// Always write the new ~/.ghx root (ADR-0022 D3): start from the fresh
+	// default rooted there and carry over any existing model/visibility, so
+	// init migrates a legacy config to the new location instead of pinning it.
+	existing := sidecar.LoadConfig()
+	cfg := sidecar.NewDefaultConfig()
+	cfg.Model = existing.Model
+	cfg.Visibility = existing.Visibility
+	cfg.AgentCmd = found[0]
+	if err := sidecar.SaveConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Detected agents: %v\n", found)
+	fmt.Printf("Using: %s\n\n", cfg.AgentCmd)
+	fmt.Println(sidecar.FormatConfig(cfg))
+	return nil
+}
+
+// initClaudeACPConfig writes the pinned Claude ACP adapter command line
+// (sidecar.ClaudeACPAgentCmd) into the config, carrying over any existing
+// model/visibility settings. An existing config is never overwritten without
+// --force; the field diff of what would change is always shown first.
+func initClaudeACPConfig(force bool) error {
+	existing := sidecar.LoadConfig()
+	cfg := sidecar.NewDefaultConfig()
+	cfg.Model = existing.Model
+	cfg.Visibility = existing.Visibility
+	cfg.AgentCmd = sidecar.ClaudeACPAgentCmd
+	if path, exists := sidecar.ConfigFileExists(); exists {
+		diff := sidecar.DiffConfigs(existing, cfg)
+		if len(diff) == 0 {
+			fmt.Printf("Config at %s already uses the Claude ACP adapter — nothing to change.\n\n", path)
+			fmt.Println(sidecar.FormatConfig(cfg))
+			return nil
+		}
+		fmt.Printf("Config already exists at %s — this would change:\n", path)
+		for _, line := range diff {
+			fmt.Println(line)
+		}
+		if !force {
+			return fmt.Errorf("refusing to overwrite existing config %s; re-run with --force to apply the change above", path)
+		}
+		fmt.Println()
+	}
+	if err := sidecar.SaveConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Println("Wrote Claude ACP adapter config.")
+	fmt.Println(sidecar.FormatConfig(cfg))
+	fmt.Println()
+	fmt.Println("Next: `ghx sidecar doctor` to verify the setup (needs Node/npx and a Claude Code login),")
+	fmt.Println("then `ghx sidecar ask --repo <owner/repo> \"<question>\"`.")
+	return nil
 }
 
 func init() {
@@ -244,6 +298,9 @@ func init() {
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 
 	sidecarReportSinkCmd.Flags().String("out", "", "Path to write the accepted report JSON (required)")
+
+	sidecarConfigInitCmd.Flags().Bool("claude-acp", false, "Write the pinned Claude ACP adapter command (npx @agentclientprotocol/claude-agent-acp) instead of auto-detecting")
+	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp; a diff is shown first)")
 
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)

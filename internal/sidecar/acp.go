@@ -63,6 +63,21 @@ type ImplementationInfo struct {
 
 const defaultHandshakeTimeout = 10 * time.Second
 
+// splitAgentCmd splits a configured agent command into argv. The config value
+// may be a bare binary name ("claude") or a whitespace-separated command line
+// ("npx -y @agentclientprotocol/claude-agent-acp@0.55.0" — what `config init
+// --claude-acp` writes), so first-time setup does not require hand-writing a
+// wrapper script (dogfood friction 2026-07-05). Splitting is plain field
+// splitting with no shell quoting; a binary path containing spaces still
+// needs a wrapper script.
+func splitAgentCmd(agentCmd string) (name string, args []string) {
+	fields := strings.Fields(agentCmd)
+	if len(fields) == 0 {
+		return agentCmd, nil
+	}
+	return fields[0], fields[1:]
+}
+
 // ACPHandshakeFailureMessage is the actionable failure text shared by ask,
 // doctor, and config init when a configured binary exists but does not speak
 // ACP initialize on stdio.
@@ -452,6 +467,29 @@ type RunTurnOptions struct {
 	ReportSinkPath string
 }
 
+// ResolveReportSinkExe returns the ghx executable that will serve the
+// session-scoped report-sink MCP server (`sidecar report-sink`), plus a human
+// label for where the decision came from. This is the single resolution
+// authority — reportSinkMcpServers (the ACP wiring) and the doctor
+// report-sink-version check both use it, so what doctor diagnoses is exactly
+// what a session would spawn. Order: GHX_REPORT_SINK_EXE when set, else the
+// current executable. Errors cover the unusable cases: os.Executable failure
+// and running under `go test` (the test binary cannot serve `sidecar
+// report-sink`).
+func ResolveReportSinkExe() (exe string, source string, err error) {
+	if exe := os.Getenv("GHX_REPORT_SINK_EXE"); exe != "" {
+		return exe, "GHX_REPORT_SINK_EXE", nil
+	}
+	exe, resolveErr := os.Executable()
+	if resolveErr != nil || exe == "" {
+		return "", "current executable", fmt.Errorf("cannot resolve executable: %v", resolveErr)
+	}
+	if strings.HasSuffix(exe, ".test") {
+		return exe, "current executable", fmt.Errorf("running under go test (%s); set GHX_REPORT_SINK_EXE to a built ghx binary", exe)
+	}
+	return exe, "current executable", nil
+}
+
 // reportSinkMcpServers returns the ACP McpServer list to register for a turn.
 // When a report-sink path is set it registers the ghx-report-sink stdio server,
 // pointing the adapter at this same executable (os.Executable), or at
@@ -470,18 +508,10 @@ func reportSinkMcpServers(sinkPath string) []acp.McpServer {
 	if sinkPath == "" {
 		return []acp.McpServer{}
 	}
-	exe := os.Getenv("GHX_REPORT_SINK_EXE")
-	if exe == "" {
-		var err error
-		exe, err = os.Executable()
-		if err != nil || exe == "" {
-			fmt.Fprintf(os.Stderr, "warning: report-sink disabled (cannot resolve executable: %v)\n", err)
-			return []acp.McpServer{}
-		}
-		if strings.HasSuffix(exe, ".test") {
-			fmt.Fprintf(os.Stderr, "warning: report-sink disabled (running under go test: %s); set GHX_REPORT_SINK_EXE to a built ghx binary\n", exe)
-			return []acp.McpServer{}
-		}
+	exe, _, err := ResolveReportSinkExe()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: report-sink disabled (%v)\n", err)
+		return []acp.McpServer{}
 	}
 	return []acp.McpServer{{
 		Stdio: &acp.McpServerStdio{
@@ -505,7 +535,8 @@ func RunTurn(ctx context.Context, agentCmd, acpSessionID, prompt string) (result
 
 // RunTurnWithOptions is RunTurn plus eval/runtime overrides for cwd and env.
 func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnResult, newSessionID string, err error) {
-	cmd := exec.CommandContext(ctx, opts.AgentCmd)
+	agentBin, agentArgs := splitAgentCmd(opts.AgentCmd)
+	cmd := exec.CommandContext(ctx, agentBin, agentArgs...)
 	if opts.Env != nil {
 		cmd.Env = opts.Env
 	}
@@ -599,7 +630,8 @@ func CheckACPHandshake(ctx context.Context, agentCmd, cwd string, env []string, 
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(tctx, agentCmd)
+	agentBin, agentArgs := splitAgentCmd(agentCmd)
+	cmd := exec.CommandContext(tctx, agentBin, agentArgs...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

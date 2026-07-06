@@ -42,13 +42,13 @@ Entry format:
 - Attempted: first-time production setup (`~/.ghx/config.json`).
 - Ground: the default agent `claude` fails the ACP handshake (correct fail-fast), but the fix requires knowing about `@agentclientprotocol/claude-agent-acp` and hand-writing a wrapper command; the only working wrapper lives in this repo's `scripts/` for evals. A real user has neither. `config init` detection can only find agents that already speak ACP on PATH.
 - Trace: doctor run (preflight PASS after manual config).
-- Disposition: open — ship a documented default agent command (or `config init --claude-acp` that writes the npx adapter line) so setup is one command.
+- Disposition: fixed 61a0e3c — `ghx sidecar config init --claude-acp` writes the pinned npx adapter command line (same pin as scripts/eval-agent-acp.sh); agent command lines are split into argv so no wrapper script is needed; README documents install → init → doctor → ask.
 
 ## 2026-07-05 report-sink depends on a current ghx binary — soft
 - Attempted: real asks with PATH ghx 2.1.13 (released) while the sidecar features live on unreleased mainline.
 - Ground: the submit_report MCP server is served by the ghx binary itself; a stale binary silently degrades the contract to the text fallback (loud stderr warning exists, but only if you read stderr). Needed manual `GHX_REPORT_SINK_EXE` to a fresh build.
 - Trace: session dirs under ~/.ghx (see reports/ presence as the tell).
-- Disposition: open — release cadence question + doctor should check the sink-server version matches.
+- Disposition: fixed 61a0e3c — `ghx sidecar doctor` now resolves the sink-serving binary exactly like the session wiring (GHX_REPORT_SINK_EXE, else current executable), invokes its `version`, and fails loudly with remediation on mismatch or a missing/stale binary. The release-cadence question stays open but is no longer silent.
 
 ## 2026-07-05 max-turns exhaustion destroys the exploration — breaking
 - Attempted: `sidecar ask --repo Arize-ai/phoenix "how does LLM-as-judge eval work..."` (large repo, sprawling internals) at default depth.

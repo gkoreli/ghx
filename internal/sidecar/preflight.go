@@ -16,6 +16,10 @@ type PreflightCheck struct {
 	Name    string
 	Passed  bool
 	Message string
+	// Remediation is concrete fix-it text printed under a failing check.
+	// Failures that would otherwise degrade silently (e.g. a stale report-sink
+	// binary) must fail loudly here instead of relying on a buried stderr line.
+	Remediation string
 }
 
 // PreflightResult aggregates all preflight checks.
@@ -25,21 +29,35 @@ type PreflightResult struct {
 }
 
 // RunPreflight executes all standard checks in parallel against the
-// configured agent.
-func RunPreflight(ctx context.Context) PreflightResult {
-	return RunPreflightForAgent(ctx, "")
+// configured agent. runningVersion is the version of the calling binary
+// (cli.VERSION); the report-sink check compares the sink-serving binary
+// against it.
+func RunPreflight(ctx context.Context, runningVersion string) PreflightResult {
+	return runPreflight(ctx, "", runningVersion)
 }
 
 // RunPreflightForAgent runs the same checks but probes agentCmd instead of
 // the configured agent when agentCmd is non-empty. Eval runs pass
 // GHX_EVAL_AGENT here so the handshake checks the agent actually under
-// test, not whatever ~/.ghx/config.json points at.
+// test, not whatever ~/.ghx/config.json points at. The running version is
+// unknown under go test, so the report-sink check only verifies that the
+// resolved sink binary exists and answers `version` (which still requires
+// GHX_REPORT_SINK_EXE under go test — exactly the loud failure eval runs
+// need instead of a silent text-fallback degradation).
 func RunPreflightForAgent(ctx context.Context, agentCmd string) PreflightResult {
+	return runPreflight(ctx, agentCmd, "")
+}
+
+func runPreflight(ctx context.Context, agentCmd, runningVersion string) PreflightResult {
 	type fn func(context.Context) PreflightCheck
 	cfg := preflightAgentConfig(agentCmd)
-	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary, func(ctx context.Context) PreflightCheck {
-		return checkACPAgent(ctx, cfg)
-	}}
+	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary,
+		func(ctx context.Context) PreflightCheck {
+			return checkACPAgent(ctx, cfg)
+		},
+		func(ctx context.Context) PreflightCheck {
+			return checkReportSinkVersion(ctx, runningVersion)
+		}}
 
 	tctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
@@ -75,9 +93,15 @@ func preflightAgentConfig(agentCmd string) Config {
 
 func checkACPAgent(ctx context.Context, cfg Config) PreflightCheck {
 	if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
-		return PreflightCheck{Name: "acp-handshake", Passed: false, Message: err.Error()}
+		return PreflightCheck{
+			Name:    "acp-handshake",
+			Passed:  false,
+			Message: fmt.Sprintf("agent command %q: %s", cfg.AgentCmd, err.Error()),
+			Remediation: "Run `ghx sidecar config init --claude-acp` to configure the pinned Claude ACP adapter\n" +
+				"(needs Node/npx and a Claude Code login), or set an ACP-capable agent in " + ConfigFilePath() + ".",
+		}
 	}
-	return PreflightCheck{Name: "acp-handshake", Passed: true, Message: cfg.AgentCmd + " completed ACP initialize"}
+	return PreflightCheck{Name: "acp-handshake", Passed: true, Message: fmt.Sprintf("agent command %q completed ACP initialize", cfg.AgentCmd)}
 }
 
 // FormatPreflight returns a human-readable diagnostic block.
@@ -94,6 +118,11 @@ func FormatPreflight(r PreflightResult) string {
 			mark = "✗"
 		}
 		fmt.Fprintf(&sb, "  %s %s: %s\n", mark, c.Name, c.Message)
+		if !c.Passed && c.Remediation != "" {
+			for _, line := range strings.Split(c.Remediation, "\n") {
+				fmt.Fprintf(&sb, "      → %s\n", line)
+			}
+		}
 	}
 	return sb.String()
 }
@@ -127,6 +156,73 @@ func checkNetwork(ctx context.Context) PreflightCheck {
 		return PreflightCheck{Name: "network", Passed: true, Message: fmt.Sprintf("api.github.com reachable (HTTP %d)", resp.StatusCode)}
 	}
 	return PreflightCheck{Name: "network", Passed: false, Message: fmt.Sprintf("api.github.com returned HTTP %d", resp.StatusCode)}
+}
+
+// checkReportSinkVersion verifies that the ghx binary which will serve the
+// session-scoped report-sink MCP server (`sidecar report-sink`, resolved by
+// ResolveReportSinkExe — the exact binary a session would spawn) is the same
+// version as the binary running preflight. A stale sink binary silently
+// degrades the submit_report contract to the <ghx-report> text fallback
+// (dogfood friction 2026-07-05 "report-sink depends on a current ghx
+// binary"), so any mismatch or a binary that cannot report its version is a
+// loud preflight failure with remediation, never just a stderr warning.
+// runningVersion may be empty (unknown, e.g. under go test); then only the
+// resolution and `version` invocation are checked, not equality.
+func checkReportSinkVersion(ctx context.Context, runningVersion string) PreflightCheck {
+	const name = "report-sink-version"
+	remediation := "Without a working report sink, submit_report silently degrades to the <ghx-report> text fallback.\n" +
+		"Fix: reinstall/update ghx so the running binary is current, or set GHX_REPORT_SINK_EXE to a\n" +
+		"freshly built ghx of the same version (go build -o ghx ./cmd/ghx)."
+	exe, source, err := ResolveReportSinkExe()
+	if err != nil {
+		return PreflightCheck{
+			Name:        name,
+			Passed:      false,
+			Message:     "cannot resolve the report-sink binary: " + err.Error(),
+			Remediation: remediation,
+		}
+	}
+	out, err := exec.CommandContext(ctx, exe, "version").Output()
+	if err != nil {
+		return PreflightCheck{
+			Name:        name,
+			Passed:      false,
+			Message:     fmt.Sprintf("report-sink binary %s (via %s) failed `version`: %v — likely a stale or broken install", exe, source, err),
+			Remediation: remediation,
+		}
+	}
+	sinkVersion := parseGhxVersion(string(out))
+	if sinkVersion == "" {
+		return PreflightCheck{
+			Name:        name,
+			Passed:      false,
+			Message:     fmt.Sprintf("report-sink binary %s (via %s) printed unrecognized version output %q", exe, source, strings.TrimSpace(string(out))),
+			Remediation: remediation,
+		}
+	}
+	if runningVersion != "" && sinkVersion != runningVersion {
+		return PreflightCheck{
+			Name:        name,
+			Passed:      false,
+			Message:     fmt.Sprintf("report-sink binary %s (via %s) is version %s but this binary is %s — reports would silently degrade", exe, source, sinkVersion, runningVersion),
+			Remediation: remediation,
+		}
+	}
+	return PreflightCheck{
+		Name:    name,
+		Passed:  true,
+		Message: fmt.Sprintf("report sink served by %s (via %s), version %s", exe, source, sinkVersion),
+	}
+}
+
+// parseGhxVersion extracts the version from `ghx version` output ("ghx 2.1.13").
+// Returns "" when the output is not in that shape.
+func parseGhxVersion(out string) string {
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) < 2 || fields[0] != "ghx" {
+		return ""
+	}
+	return fields[1]
 }
 
 func checkGhxBinary(ctx context.Context) PreflightCheck {
