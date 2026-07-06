@@ -167,6 +167,17 @@ assertion. Binding rules:
   measurement — but expectations are never citable results: any "even better"
   claim waits for the re-measured run that shows it.
 
+- **Full gate runs never block engineering** (Goga, 2026-07-05). The
+  measurement ladder (ADR-0016.3) assigns roles: feature-level go/no-go
+  rides smokes and spot checks (minutes); full pre-registered runs exist
+  only to re-ground the citable verdict after product deltas accumulate,
+  and they run in the background while engineering continues. If a full
+  run ever sits between an engineer and their next feature, the process
+  is being used wrong — the only thing a full run gates is quoting new
+  numbers. Reducing the cost of full-rigor runs (baseline reuse, bounded
+  parallelism, sequential early-stopping) is standing eval-framework work,
+  each change pre-registered by ADR before use.
+
 ## Open Source Leverage (core tenet)
 
 Do not hand-roll OTel variants, eval formats, or frameworks when official
