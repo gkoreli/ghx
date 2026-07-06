@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestConfigInitClaudeACPWritesFreshConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("GHX_HOME", home)
 
-	if err := runSidecarConfigInit(true, false); err != nil {
+	if err := runSidecarConfigInit(true, false, "", false); err != nil {
 		t.Fatalf("fresh init --claude-acp failed: %v", err)
 	}
 	if got := sidecar.LoadConfig().AgentCmd; got != sidecar.ClaudeACPAgentCmd {
@@ -45,7 +46,7 @@ func TestConfigInitClaudeACPRefusesExistingConfigWithoutForce(t *testing.T) {
 	if err := sidecar.SaveConfig(sidecar.Config{AgentCmd: "claude", SessionsDir: filepath.Join(home, "sessions")}); err != nil {
 		t.Fatal(err)
 	}
-	err := runSidecarConfigInit(true, false)
+	err := runSidecarConfigInit(true, false, "", false)
 	if err == nil {
 		t.Fatal("init --claude-acp overwrote an existing config without --force")
 	}
@@ -68,7 +69,7 @@ func TestConfigInitClaudeACPForceOverwritesAndKeepsModel(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runSidecarConfigInit(true, true); err != nil {
+	if err := runSidecarConfigInit(true, false, "", true); err != nil {
 		t.Fatalf("init --claude-acp --force failed: %v", err)
 	}
 	cfg := sidecar.LoadConfig()
@@ -84,15 +85,153 @@ func TestConfigInitClaudeACPIdempotentWithoutForce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("GHX_HOME", home)
 
-	if err := runSidecarConfigInit(true, false); err != nil {
+	if err := runSidecarConfigInit(true, false, "", false); err != nil {
 		t.Fatalf("first init failed: %v", err)
 	}
 	// Re-running on a config that already matches changes nothing and needs no --force.
-	if err := runSidecarConfigInit(true, false); err != nil {
+	if err := runSidecarConfigInit(true, false, "", false); err != nil {
 		t.Fatalf("re-run on matching config failed: %v", err)
 	}
 	if got := sidecar.LoadConfig().AgentCmd; got != sidecar.ClaudeACPAgentCmd {
 		t.Fatalf("agent = %q, want %q", got, sidecar.ClaudeACPAgentCmd)
+	}
+}
+
+// writeFakeClaude creates an executable fake `claude` binary in dir and
+// returns its path.
+func writeFakeClaude(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "claude")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestConfigInitClaudeExeWritesEnvPrefixedAdapterCmd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+	exe := writeFakeClaude(t, t.TempDir())
+
+	if err := runSidecarConfigInit(false, true, exe, false); err != nil {
+		t.Fatalf("init --claude-exe %s failed: %v", exe, err)
+	}
+	want := "env CLAUDE_CODE_EXECUTABLE=" + exe + " " + sidecar.ClaudeACPAgentCmd
+	if got := sidecar.LoadConfig().AgentCmd; got != want {
+		t.Fatalf("agent = %q, want %q", got, want)
+	}
+	if !strings.Contains(readConfigAgent(t, home), "CLAUDE_CODE_EXECUTABLE") {
+		t.Fatal("config.json does not carry CLAUDE_CODE_EXECUTABLE")
+	}
+}
+
+func TestConfigInitClaudeExeAutoResolvesFromPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+	bin := t.TempDir()
+	exe := writeFakeClaude(t, bin)
+	t.Setenv("PATH", bin)
+
+	// Both spellings of auto mode: explicit "auto" and an explicit empty value.
+	for _, val := range []string{"auto", ""} {
+		if err := runSidecarConfigInit(false, true, val, true); err != nil {
+			t.Fatalf("init --claude-exe %q failed: %v", val, err)
+		}
+		want := "env CLAUDE_CODE_EXECUTABLE=" + exe + " " + sidecar.ClaudeACPAgentCmd
+		if got := sidecar.LoadConfig().AgentCmd; got != want {
+			t.Fatalf("--claude-exe %q: agent = %q, want %q", val, got, want)
+		}
+	}
+}
+
+func TestConfigInitClaudeExeAutoErrorsWithoutClaudeOnPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+	t.Setenv("PATH", t.TempDir()) // empty dir: no claude anywhere
+
+	err := runSidecarConfigInit(false, true, "auto", false)
+	if err == nil {
+		t.Fatal("init --claude-exe auto succeeded with no claude on PATH")
+	}
+	if !strings.Contains(err.Error(), "no claude on PATH") {
+		t.Fatalf("error = %q, want 'no claude on PATH' hint", err)
+	}
+	if _, exists := sidecar.ConfigFileExists(); exists {
+		t.Fatal("config was written despite the resolution error")
+	}
+}
+
+func TestConfigInitClaudeExeRejectsNonexistentPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+
+	missing := filepath.Join(t.TempDir(), "nope", "claude")
+	err := runSidecarConfigInit(false, true, missing, false)
+	if err == nil {
+		t.Fatal("init --claude-exe accepted a nonexistent path")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %q, want a not-found message", err)
+	}
+}
+
+func TestConfigInitClaudeExeRejectsNonExecutablePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable-bit check is skipped on windows")
+	}
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+
+	path := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(path, []byte("not a binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runSidecarConfigInit(false, true, path, false)
+	if err == nil {
+		t.Fatal("init --claude-exe accepted a non-executable file")
+	}
+	if !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("error = %q, want 'not executable' message", err)
+	}
+}
+
+func TestConfigInitClaudeExeExclusiveWithClaudeACP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+
+	err := runSidecarConfigInit(true, true, "/usr/local/bin/claude", false)
+	if err == nil {
+		t.Fatal("init accepted both --claude-acp and --claude-exe")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %q, want mutual-exclusion message", err)
+	}
+}
+
+func TestConfigInitClaudeExeRefusesExistingConfigWithoutForce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GHX_HOME", home)
+	exe := writeFakeClaude(t, t.TempDir())
+
+	if err := sidecar.SaveConfig(sidecar.Config{AgentCmd: "codex", SessionsDir: filepath.Join(home, "sessions")}); err != nil {
+		t.Fatal(err)
+	}
+	err := runSidecarConfigInit(false, true, exe, false)
+	if err == nil {
+		t.Fatal("init --claude-exe overwrote an existing config without --force")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("error = %q, want --force hint", err)
+	}
+	if got := sidecar.LoadConfig().AgentCmd; got != "codex" {
+		t.Fatalf("agent = %q after refusal, want unchanged %q", got, "codex")
+	}
+	if err := runSidecarConfigInit(false, true, exe, true); err != nil {
+		t.Fatalf("init --claude-exe --force failed: %v", err)
+	}
+	want := "env CLAUDE_CODE_EXECUTABLE=" + exe + " " + sidecar.ClaudeACPAgentCmd
+	if got := sidecar.LoadConfig().AgentCmd; got != want {
+		t.Fatalf("agent = %q, want %q", got, want)
 	}
 }
 

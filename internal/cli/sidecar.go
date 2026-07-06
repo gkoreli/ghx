@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -441,9 +444,11 @@ var sidecarConfigCmd = &cobra.Command{
 	Long: `View and initialize the sidecar config at ~/.ghx/config.json (or $GHX_HOME),
 which selects the ACP agent command and model/visibility settings. Run
 ` + "`config init`" + ` once to write it — ` + "`--claude-acp`" + ` for the pinned Claude ACP adapter,
+` + "`--claude-exe`" + ` to run your own Claude Code binary through that adapter,
 otherwise PATH auto-detection — then ` + "`config show`" + ` to see the resolved values.`,
 	Example: `  ghx sidecar config show
   ghx sidecar config init --claude-acp
+  ghx sidecar config init --claude-exe /opt/toolbox/bin/claude
   ghx sidecar config init --claude-acp --force`,
 	Run: func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
 }
@@ -463,30 +468,52 @@ after editing the config or setting $GHX_HOME.`,
 	},
 }
 
-// sidecarConfigInitCmd writes the initial config: either the pinned Claude ACP
-// adapter (--claude-acp, the documented one-command setup) or PATH
-// auto-detection (the original behavior, unchanged).
+// sidecarConfigInitCmd writes the initial config: the pinned Claude ACP
+// adapter (--claude-acp, the documented one-command setup), the same adapter
+// pointed at the user's own Claude Code binary (--claude-exe, for
+// toolbox/wrapper installs whose credentials live in the wrapped binary), or
+// PATH auto-detection (the original behavior, unchanged).
 var sidecarConfigInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Write initial config (--claude-acp for the pinned Claude ACP adapter, else auto-detect)",
+	Short: "Write initial config (--claude-acp for the pinned Claude ACP adapter, --claude-exe for your own Claude Code binary, else auto-detect)",
 	Long: `Write the initial sidecar config. ` + "`--claude-acp`" + ` pins the Claude ACP adapter
 (` + "`npx @agentclientprotocol/claude-agent-acp`" + `, needs Node/npx and a Claude login);
-without it, ghx auto-detects an ACP-capable agent already on PATH. This is the
-first setup step — follow it with ` + "`ghx sidecar doctor`" + `. An existing config is never
-overwritten silently: the field diff is shown first, and ` + "`--force`" + ` (only with
-` + "`--claude-acp`" + `) is required to apply it.`,
+` + "`--claude-exe <path>`" + ` writes the same adapter command prefixed with
+` + "`env CLAUDE_CODE_EXECUTABLE=<path>`" + ` so the adapter runs your own installed
+Claude Code binary instead of its bundled one (toolbox/wrapper installs; pass
+` + "`auto`" + ` to resolve ` + "`claude`" + ` from PATH); without either flag, ghx auto-detects
+an ACP-capable agent already on PATH. This is the first setup step — follow it
+with ` + "`ghx sidecar doctor`" + `. An existing config is never overwritten silently:
+the field diff is shown first, and ` + "`--force`" + ` (only with ` + "`--claude-acp`" + ` or
+` + "`--claude-exe`" + `) is required to apply it.`,
 	Example: `  ghx sidecar config init --claude-acp
+  ghx sidecar config init --claude-exe /opt/toolbox/bin/claude
+  ghx sidecar config init --claude-exe auto
   ghx sidecar config init --claude-acp --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		claudeACP, _ := cmd.Flags().GetBool("claude-acp")
+		claudeExe, _ := cmd.Flags().GetString("claude-exe")
 		force, _ := cmd.Flags().GetBool("force")
-		return runSidecarConfigInit(claudeACP, force)
+		return runSidecarConfigInit(claudeACP, cmd.Flags().Changed("claude-exe"), claudeExe, force)
 	},
 }
 
-func runSidecarConfigInit(claudeACP, force bool) error {
+// runSidecarConfigInit dispatches `config init` between the three modes.
+// claudeExeSet distinguishes an explicitly passed --claude-exe (even with an
+// empty value, which means "resolve from PATH") from the flag being absent.
+func runSidecarConfigInit(claudeACP, claudeExeSet bool, claudeExe string, force bool) error {
+	if claudeACP && claudeExeSet {
+		return fmt.Errorf("--claude-acp and --claude-exe are mutually exclusive; --claude-exe already writes the pinned Claude ACP adapter command, pointed at your binary")
+	}
+	if claudeExeSet {
+		agentCmd, err := claudeExeAgentCmd(claudeExe)
+		if err != nil {
+			return err
+		}
+		return initPinnedAgentConfig(agentCmd, force)
+	}
 	if claudeACP {
-		return initClaudeACPConfig(force)
+		return initPinnedAgentConfig(sidecar.ClaudeACPAgentCmd, force)
 	}
 	found := sidecar.DetectAgents(context.Background())
 	if len(found) == 0 {
@@ -510,21 +537,58 @@ func runSidecarConfigInit(claudeACP, force bool) error {
 	return nil
 }
 
-// initClaudeACPConfig writes the pinned Claude ACP adapter command line
-// (sidecar.ClaudeACPAgentCmd) into the config, carrying over any existing
-// model/visibility settings. An existing config is never overwritten without
-// --force; the field diff of what would change is always shown first.
-func initClaudeACPConfig(force bool) error {
+// claudeExeAgentCmd composes the pinned Claude ACP adapter command line with
+// CLAUDE_CODE_EXECUTABLE pointing at the user's own Claude Code binary, so the
+// adapter (>= 0.55) runs that binary — and its credential store — instead of
+// the SDK's bundled one (toolbox/wrapper installs). path "" or "auto" resolves
+// `claude` from PATH; an explicit path must exist and be executable.
+func claudeExeAgentCmd(path string) (string, error) {
+	if path == "" || path == "auto" {
+		resolved, err := exec.LookPath("claude")
+		if err != nil {
+			return "", fmt.Errorf("no claude on PATH; pass the path explicitly: `ghx sidecar config init --claude-exe /path/to/claude`")
+		}
+		if abs, err := filepath.Abs(resolved); err == nil {
+			resolved = abs
+		}
+		path = resolved
+	} else {
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", fmt.Errorf("claude executable not found at %s; check the path, or pass `--claude-exe auto` to resolve claude from PATH", path)
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%s is a directory; point --claude-exe at the Claude Code binary itself", path)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			return "", fmt.Errorf("%s is not executable; `chmod +x` it or point --claude-exe at the real Claude Code binary", path)
+		}
+	}
+	// The config's agent command is split into argv by plain field splitting
+	// (sidecar.SplitAgentCmd — no shell quoting), so a path containing
+	// whitespace cannot travel through it.
+	if strings.ContainsAny(path, " \t") {
+		return "", fmt.Errorf("path %q contains whitespace, which the config's field-split agent command cannot carry; symlink the binary to a space-free path and pass that", path)
+	}
+	return "env CLAUDE_CODE_EXECUTABLE=" + path + " " + sidecar.ClaudeACPAgentCmd, nil
+}
+
+// initPinnedAgentConfig writes agentCmd (a pinned Claude ACP adapter command
+// line, optionally env-prefixed by --claude-exe) into the config, carrying
+// over any existing model/visibility settings. An existing config is never
+// overwritten without --force; the field diff of what would change is always
+// shown first.
+func initPinnedAgentConfig(agentCmd string, force bool) error {
 	existing := sidecar.LoadConfig()
 	cfg := sidecar.NewDefaultConfig()
 	cfg.Model = existing.Model
 	cfg.Visibility = existing.Visibility
 	cfg.Route = existing.Route
-	cfg.AgentCmd = sidecar.ClaudeACPAgentCmd
+	cfg.AgentCmd = agentCmd
 	if path, exists := sidecar.ConfigFileExists(); exists {
 		diff := sidecar.DiffConfigs(existing, cfg)
 		if len(diff) == 0 {
-			fmt.Printf("Config at %s already uses the Claude ACP adapter — nothing to change.\n\n", path)
+			fmt.Printf("Config at %s already uses this agent command — nothing to change.\n\n", path)
 			fmt.Println(sidecar.FormatConfig(cfg))
 			return nil
 		}
@@ -567,7 +631,8 @@ func init() {
 	sidecarEvalsExportCmd.Flags().String("out", "", "Output JSONL path")
 
 	sidecarConfigInitCmd.Flags().Bool("claude-acp", false, "Write the pinned Claude ACP adapter command (npx @agentclientprotocol/claude-agent-acp) instead of auto-detecting")
-	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp; a diff is shown first)")
+	sidecarConfigInitCmd.Flags().String("claude-exe", "", "Write the pinned Claude ACP adapter command prefixed with env CLAUDE_CODE_EXECUTABLE=<path> so it runs your own Claude Code binary (toolbox/wrapper installs); pass \"auto\" or an empty value to resolve claude from PATH")
+	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp or --claude-exe; a diff is shown first)")
 
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd, sidecarSessionsRerouteCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
