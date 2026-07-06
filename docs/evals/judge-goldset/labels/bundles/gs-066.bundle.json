@@ -1,0 +1,75 @@
+{
+  "labelId": "gs-066",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Turn 1 identifies middleware composition in src/compose.ts (the compose and dispatch mechanism) rather than a wrapper or type file.",
+    "Turn 2 traces error propagation through the composition path to onError in src/hono-base.ts, carrying turn-1 context forward without redundant re-reads.",
+    "Cites the composition and dispatch functions directly and separates verified control flow from inferred behavior."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "hono-middleware",
+    "repo": "honojs/hono",
+    "questions": [
+      "Where is middleware composition implemented?",
+      "How do errors propagate through the middleware composition path?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is middleware composition implemented?",
+        "agentText": "Found `compose.ts` at the top level of `src/`. Let me read it along with `hono-base.ts` where it's used.This confirms it — a koa-compose-style onion model. Now let's see where `compose()` is invoked in `hono-base.ts`.I now have the full picture. Also worth checking `middleware/combine` since it's about composing multiple middleware (some/every/except).## Middleware composition in `honojs/hono`\n\n**Core engine: `src/compose.ts` — `compose()`**\n- Signature: `compose\u003cE\u003e(middleware: [[Function, unknown], unknown][] | [[Function]][], onError?, onNotFound?) =\u003e (context, next?) =\u003e Promise\u003cContext\u003e`\n- Implements a koa-compose-style \"onion\" model (the doc comment literally says \"based on `koa-compose` package\"). It returns a closure over a recursive `dispatch(i)` function:\n  - Tracks `index` and throws `'next() called multiple times'` if `dispatch` is re-invoked at or below the current index.\n  - Looks up `middleware[i][0][0]` as the handler for step `i`, sets `context.req.routeIndex = i`, and calls it with `(context, () =\u003e dispatch(i + 1))` — that's the recursive \"next\" passed to each middleware.\n  - When `i` reaches the end of the array, falls through to the outer `next` (if given) or to `onNotFound`.\n  - Catches errors from a handler and routes them to `onError`, setting `context.error` and marking `isError`.\n  - Assigns `context.res` when a handler returns a response and the context isn't already finalized (or when it's an error result).\n- Evidence: full file read above, `/private/.../src/compose.ts`.\n\n**Where it's invoked: `src/hono-base.ts`**\n- `import { compose } from './compose'` (line 7).\n- `#dispatch()` (the internal request handler behind `.fetch()`) matches the route via `this.router.match(method, path)` to get `matchResult`, then:\n  - **Fast path optimization** (line ~429-448): if only one handler matched (`matchResult[0].length === 1`), it calls that handler directly without invoking `compose` at all — an explicit perf shortcut, per the comment `// Do not compose if it has only one handler`.\n  - **General path** (line 450): `const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler)`, then `await composed(c)` to run the full middleware+handler chain for the matched route.\n- `.route()` (sub-app mounting, ~line 223-227) also calls `compose([], app.errorHandler)(c, () =\u003e r.handler(c, next))` to wrap a mounted sub-app's handler so its own custom `errorHandler` applies when errors bubble up during composition.\n- Route registration (`.get/.post/.../.use/.on`, constructor ~lines 122-160) pushes `[method, path, handler]` entries into `this.routes` via `#addRoute`; the router later returns matched `[handler, route][]` tuples that become the `middleware` array fed into `compose`.\n\n**Higher-level composition helpers: `src/middleware/combine/index.ts`**\n- `some(...)`, `every(...)`, `except(...)` — these build on top of `compose` for conditional/combinatorial middleware chaining (not the core dispatch mechanism, but composition logic worth noting):\n  - `every()` directly calls `compose(middleware.map(...))(c, next)`, wrapping each middleware to preserve `c.req.routeIndex`.\n  - `some()` and `except()` are built on `every`/`some` without calling `compose` directly.\n\n**Not verified**\n- I did not inspect the router implementations (`RegExpRouter`, `TrieRouter`, etc. in `src/router/*`) to confirm the exact shape of `matchResult[0]` beyond what's implied by usage (`[[handler, route], ...]` tuples).\n- I did not check `src/compose.test.ts` or `src/hono.test.ts` for additional composition edge cases/behavioral guarantees.\n- I did not check other adapter-specific dispatch paths (e.g., `adapter/aws-lambda`) — only the core `hono-base.ts` `#dispatch`.",
+        "toolCalls": [
+          {
+            "title": "ghx explore honojs/hono",
+            "outputSummary": "```console description: Web framework built on Web Standards branch: main files: .editorconfig .github/ .gitignore .prettierrc .tool-versions .vscode/ LICENSE README.md benchmarks/ build/ bun.lock bunfig.toml codecov.yml docs/ eslint.config.mjs jsr.json package.cjs.json package.j",
+            "outputChars": 8207
+          },
+          {
+            "title": "ghx tree honojs/hono src --depth 2",
+            "outputSummary": "```console adapter/ adapter/aws-lambda/ adapter/bun/ adapter/cloudflare-pages/ adapter/cloudflare-workers/ adapter/deno/ adapter/lambda-edge/ adapter/netlify/ adapter/service-worker/ adapter/vercel/ client/ client/client.test.ts client/client.ts client/fetch-result-please.ts clie",
+            "outputChars": 5685
+          },
+          {
+            "title": "ghx read honojs/hono src/compose.ts",
+            "outputSummary": "```console === src/compose.ts (2203 bytes) === import type { Context } from './context' import type { Env, ErrorHandler, Next, NotFoundHandler } from './types' /** * Compose middleware functions into a single function based on `koa-compose` package. * * @template E - The environm",
+            "outputChars": 4491
+          },
+          {
+            "title": "ghx read honojs/hono --grep \"compose|matchResult|handler\\[|routeIndex\" src/hono-base.ts",
+            "outputSummary": "```console === src/hono-base.ts (16237 bytes) === 5: 6: /* eslint-disable @typescript-eslint/no-explicit-any */ \u003e 7: import { compose } from './compose' 8: import { Context } from './context' 9: import type { ExecutionContext } from './context' -- 26: Schema, 27: } from './types'",
+            "outputChars": 3161
+          },
+          {
+            "title": "ghx read honojs/hono src/hono-base.ts | sed -n '190,240p;400,470p'",
+            "outputSummary": "```console /** * `.route()` allows grouping other Hono instance in routes. * * @see {@link https://hono.dev/docs/api/routing#grouping} * * @param {string} path - base Path * @param {Hono} app - other Hono instance * @returns {Hono} routed Hono instance * * @example * ```ts * cons",
+            "outputChars": 6787
+          },
+          {
+            "title": "ghx read honojs/hono src/hono-base.ts | sed -n '1,190p'",
+            "outputSummary": "```console === src/hono-base.ts (16237 bytes) === /** * @module * This module is the base module for the Hono object. */ /* eslint-disable @typescript-eslint/no-explicit-any */ import { compose } from './compose' import { Context } from './context' import type { ExecutionContext ",
+            "outputChars": 11623
+          },
+          {
+            "title": "ghx tree honojs/hono src/middleware/combine --depth 2 \u0026\u0026 ghx read honojs/hono src/middleware/combine/index.ts",
+            "outputSummary": "```console index.test.ts index.ts === src/middleware/combine/index.ts (5282 bytes) === /** * @module * Combine Middleware for Hono. */ import { compose } from '../../compose' import type { Context } from '../../context' import { METHOD_NAME_ALL } from '../../router' import { Trie",
+            "outputChars": 10729
+          }
+        ]
+      },
+      {
+        "turn": 1,
+        "question": "How do errors propagate through the middleware composition path?",
+        "agentText": "This confirms `HTTPException extends Error`, and `.onError()` sets `this.errorHandler` used by `compose()`. I now have a complete picture.\n\n## Error propagation through Hono's middleware composition\n\n**1. Every error is caught at the level closest to where it's thrown, inside `compose()`'s `dispatch()` (`src/compose.ts`):**\n\n```js\ntry {\n  res = await handler(context, () =\u003e dispatch(i + 1))\n} catch (err) {\n  if (err instanceof Error \u0026\u0026 onError) {\n    context.error = err\n    res = await onError(err, context)\n    isError = true\n  } else {\n    throw err\n  }\n}\n```\n\nBecause `dispatch` is recursive and each recursion level wraps its own `handler` call in try/catch, a throw from the innermost (deepest-matched) handler is caught by the **innermost** enclosing `dispatch` frame first — not necessarily the outermost. Concretely:\n\n- If middleware `i` calls `await next()` and something downstream (`dispatch(i+1)`, ...deeper) throws, that throw surfaces inside the deepest frame's own try/catch before it ever reaches frame `i`.\n- If `err instanceof Error` and an `onError` was supplied, that frame sets `context.error = err`, calls `onError(err, context)` to get a `Response`, sets `isError = true`, and — crucially — **returns normally** (resolves the promise, does not rethrow). That result is assigned to `context.res` because `isError` is true, bypassing the normal `context.finalized === false` guard.\n- Because this returns instead of throwing, the `await next()` call in every *outer* middleware sees `next()` resolve successfully, as if nothing went wrong — the onion unwinds normally, and outer middleware's post-`next()` code (e.g., logging, cleanup) still runs, now observing `context.res` already populated with the error response.\n\n**2. Non-`Error` throws, or an `onError` that itself throws, are not swallowed — they cascade upward:**\n\n- The `else { throw err }` branch re-throws anything that isn't an `Error` instance (or if `onError` wasn't provided to that `compose()` call), propagating it to the *next* outer `dispatch` frame's try/catch, where the same check repeats.\n- If `onError(err, context)` itself throws, that new error is **not** caught by its own enclosing catch block (a catch doesn't catch errors from its own body) — it propagates to whatever called that `dispatch` frame, i.e., either the parent frame's try/catch (repeating the same logic) or, if it's the top-level `dispatch(0)`, straight out of `compose(...)(c)`.\n\n**3. Final fallback net in `src/hono-base.ts` `#dispatch()`:**\n\n```js\nconst composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler)\ntry {\n  const context = await composed(c)\n  ...\n} catch (err) {\n  return this.#handleError(err, c)\n}\n```\n```js\n#handleError(err: unknown, c: Context\u003cE\u003e) {\n  if (err instanceof Error) return this.errorHandler(err, c)\n  throw err\n}\n```\n\nSince `this.errorHandler` (default or set via `app.onError()`) is *already* passed into `compose()` as `onError`, in the common case errors are fully handled inside `compose` and never reach this outer catch. This outer catch only fires when: the thrown value is a non-`Error` that cascaded all the way up, or the `errorHandler` itself threw while building a response. If the escaped value is an `Error`, it's given one more chance via `this.errorHandler`; if not an `Error`, it's rethrown (escapes `.fetch()` entirely — an unhandled rejection).\n\n**4. `app.onError(handler)`** (`src/hono-base.ts:271`) just sets `this.errorHandler`, which is threaded into every `compose()` call built for that app's routes. The default `errorHandler` (`src/hono-base.ts:35`) special-cases errors exposing `getResponse()` — i.e. `HTTPException` (`src/http-exception.ts`, `class HTTPException extends Error { res?: Response; ... getResponse() }`) — unwrapping it to that custom `Response`; anything else falls back to `console.error` + a generic 500 `Response`.\n\n**5. Sub-app mounting (`.route()`, `src/hono-base.ts:219-227`)** wraps a mounted sub-app's handler in its own `compose([], app.errorHandler)(c, () =\u003e r.handler(c, next))` — but only if the sub-app has a *distinct* `errorHandler` from the default. This lets a mounted sub-app's own `onError` catch errors from its own handler before they'd otherwise reach the parent app's `errorHandler`.\n\n**Not verified:** I did not trace behavior for the fast-path single-handler branch in `#dispatch` (`matchResult[0].length === 1`), which bypasses `compose()` entirely and uses its own inline try/catch → `#handleError` — worth confirming it produces identical semantics to the composed path for `HTTPException` and non-Error throws. I also did not check `compose.test.ts` for explicit test cases covering these edge cases (rethrow-from-onError, non-Error throws).",
+        "toolCalls": [
+          {
+            "title": "ghx read honojs/hono --grep \"onError|errorHandler|HTTPException\" src/hono-base.ts src/http-exception.ts",
+            "outputSummary": "```console === src/hono-base.ts (16237 bytes) === 12: import type { 13: Env, \u003e 14: ErrorHandler, 15: FetchEventLike, 16: H, -- 33: } 34: \u003e 35: const errorHandler: ErrorHandler = (err, c) =\u003e { 36: if ('getResponse' in err) { 37: const res = err.getResponse() -- 178: getPath: this.",
+            "outputChars": 8319
+          }
+        ]
+      }
+    ]
+  }
+}

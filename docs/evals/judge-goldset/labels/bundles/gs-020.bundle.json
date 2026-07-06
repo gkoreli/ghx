@@ -1,0 +1,77 @@
+{
+  "labelId": "gs-020",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Locates application-level route wiring in lib/application.js and the public entrypoint in lib/express.js with file-level evidence.",
+    "Correctly concludes the router is NOT implemented inside this repository — Express delegates to the external router package — and never claims an in-repo lib/router/index.js implementation.",
+    "Separates what it verified from directory-name assumptions, and flags the delegation as the key uncertainty rather than asserting it as fact."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "express-router-location",
+    "repo": "expressjs/express",
+    "questions": [
+      "Where is application-level route handling wired up, and is the router itself implemented inside this repository?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is application-level route handling wired up, and is the router itself implemented inside this repository?",
+        "agentText": "I'll investigate the express repo structure via the GitHub API without cloning.This confirms it clearly. Let me pull a bit more detail (the `lazyrouter`/`init` wiring and confirm `router` is an external npm package, not a subdirectory of this repo).Confirmed — no `lib/router` directory exists; only test fixtures and an example reference \"router\" but the implementation itself isn't in this repo. Now let me check `handle` and `route`/`use` to fully describe the wiring, and confirm the `router` npm package's repo location for completeness.I now have everything needed to answer.\n\n## Where application-level route handling is wired up\n\n**File: `lib/application.js`** — this is where Express's `app` object gets its routing behavior:\n\n- `app.init` (`lib/application.js:56`) lazily creates the router: `router = new Router({ caseSensitive: ..., strict: ... })` via `var Router = require('router')` (`lib/application.js:26`), exposed through a getter on `this.router` (`lib/application.js:69-82`).\n- `app.handle` (`lib/application.js:~177`) — the core request dispatcher — ends with `this.router.handle(req, res, done)`, handing every incoming request off to the router instance.\n- `app.use` (`lib/application.js:189` area) proxies to `router.use(path, fn)`, with extra logic here only for mounting sub-apps (setting `mountpath`, `parent`, restoring `req.app`/`res.app` prototypes, emitting `'mount'`).\n- `app.route` (`lib/application.js:256`) proxies directly to `this.router.route(path)`.\n- `app.param` (`lib/application.js:~331`) proxies to `this.router.param(name, fn)`.\n- The `.get/.post/.put/...` verb methods (`lib/application.js:468-483`) are generated in a loop over `methods` and each just does `this.route(path)[method](...)`, i.e. delegates to the router's route object.\n\nSo `lib/application.js` is the **wiring/adapter layer** — it owns app-level concerns (settings, view rendering, mounting sub-apps, engines, locals) and forwards all actual path-matching/dispatch behavior to a `Router` instance.\n\n`lib/express.js` just constructs the `app` object and mixes in `application.js`'s prototype plus `request.js`/`response.js` prototypes — no routing logic there.\n\n## Is the router implemented in this repo?\n\n**No.** Verified two ways:\n1. `package.json` dependencies list `\"router\": \"^2.2.0\"` as a regular npm dependency (confirmed via `gh api .../contents/package.json`).\n2. `lib/application.js:26` does `var Router = require('router')` — pulling in that npm package, not a local file.\n3. A full recursive tree listing of the repo (`git/trees/master?recursive=true`) shows no `lib/router/` directory or similar — only test fixtures (`test/Router.js`, `test/app.router.js`) and an example folder (`examples/multi-router`) reference \"router\" by name; none contain the implementation.\n\nThe actual router implementation lives in the separate `router` npm package, maintained at **pillarjs/router** (github.com/pillarjs/router) — confirmed via `gh repo view pillarjs/router`, description \"Simple middleware-style router.\" This matches Express 5's architecture, where routing was split out of core into that standalone package (historically Express bundled `lib/router/` itself in Express 4 and earlier).\n\n## Not verified\n- I did not open pillarjs/router's source to confirm its internal implementation details (e.g., how it does path-to-regexp matching) — only confirmed it's the external package Express depends on and that it's a real, actively described repo.\n- I did not check whether other files (`lib/request.js`, `lib/response.js`) reference `router` internals beyond what's already shown — grep on `application.js` was sufficient to answer the question, but I didn't audit those two files line-by-line.",
+        "toolCalls": [
+          {
+            "title": "gh repo view expressjs/express --json description,defaultBranchRef -q '.description, .defaultBranchRef.name'",
+            "outputSummary": "```console Fast, unopinionated, minimalist web framework for node. master ```Fast, unopinionated, minimalist web framework for node. master",
+            "outputChars": 139
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib -q '.[].path'",
+            "outputSummary": "```console lib/application.js lib/express.js lib/request.js lib/response.js lib/utils.js lib/view.js ```lib/application.js lib/express.js lib/request.js lib/response.js lib/utils.js lib/view.js",
+            "outputChars": 193
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/package.json -q '.content' | base64 -d | grep -A 30 '\"dependencies\"'",
+            "outputSummary": "```console \"dependencies\": { \"accepts\": \"^2.0.0\", \"body-parser\": \"^2.2.1\", \"content-disposition\": \"^2.0.1\", \"content-type\": \"^2.0.0\", \"cookie\": \"^0.7.1\", \"cookie-signature\": \"^1.2.1\", \"debug\": \"^4.4.0\", \"depd\": \"^2.0.0\", \"encodeurl\": \"^2.0.0\", \"escape-html\": \"^1.0.3\", \"etag\": \"^1",
+            "outputChars": 1611
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js -q '.content' | base64 -d | grep -n -i 'router\\|route(' | head -50",
+            "outputSummary": "```console 26:var Router = require('router'); 60: var router = null; 68: // Setup getting to lazily add base router 69: Object.defineProperty(this, 'router', { 72: get: function getrouter() { 73: if (router === null) { 74: router = new Router({ 80: return router; 177: this.router",
+            "outputChars": 2031
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js -q '.content' | base64 -d | sed -n '1,100p'",
+            "outputSummary": "```console /*! * express * Copyright(c) 2009-2013 TJ Holowaychuk * Copyright(c) 2013 Roman Shtylman * Copyright(c) 2014-2015 Douglas Christopher Wilson * MIT Licensed */ 'use strict'; /** * Module dependencies. * @private */ var finalhandler = require('finalhandler'); var debug =",
+            "outputChars": 4337
+          },
+          {
+            "title": "echo \"--- check for any router dir in repo tree ---\"\ngh api repos/expressjs/express/git/trees/master?recursive=true -q '.tree[].path' | grep -i router",
+            "outputSummary": "```console --- check for any router dir in repo tree --- (eval):2: no matches found: repos/expressjs/express/git/trees/master?recursive=true ```--- check for any router dir in repo tree --- (eval):2: no matches found: repos/expressjs/express/git/trees/master?recursive=true",
+            "outputChars": 273
+          },
+          {
+            "title": "gh api \"repos/expressjs/express/git/trees/master?recursive=true\" -q '.tree[].path' | grep -i router",
+            "outputSummary": "```console examples/multi-router examples/multi-router/controllers examples/multi-router/controllers/api_v1.js examples/multi-router/controllers/api_v2.js examples/multi-router/index.js test/Router.js test/acceptance/multi-router.js test/app.router.js ```examples/multi-router exa",
+            "outputChars": 495
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js -q '.content' | base64 -d | sed -n '160,260p'",
+            "outputSummary": "```console if (this.enabled('x-powered-by')) { res.setHeader('X-Powered-By', 'Express'); } // set circular references req.res = res; res.req = req; // alter the prototypes Object.setPrototypeOf(req, this.request) Object.setPrototypeOf(res, this.response) // setup locals if (!res.",
+            "outputChars": 4223
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js -q '.content' | base64 -d | sed -n '460,500p'",
+            "outputSummary": "```console * @public */ app.disable = function disable(setting) { return this.set(setting, false); }; /** * Delegate `.VERB(...)` calls to `router.VERB(...)`. */ methods.forEach(function (method) { app[method] = function (path) { if (method === 'get' \u0026\u0026 arguments.length === 1) { ",
+            "outputChars": 1767
+          },
+          {
+            "title": "gh repo view pillarjs/router --json description,url -q '.description, .url' 2\u003e\u00261",
+            "outputSummary": "```console Simple middleware-style router https://github.com/pillarjs/router ```Simple middleware-style router https://github.com/pillarjs/router",
+            "outputChars": 145
+          }
+        ]
+      }
+    ]
+  }
+}

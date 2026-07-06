@@ -1,0 +1,62 @@
+{
+  "labelId": "gs-012",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Locates application-level route wiring in lib/application.js and the public entrypoint in lib/express.js with file-level evidence.",
+    "Correctly concludes the router is NOT implemented inside this repository — Express delegates to the external router package — and never claims an in-repo lib/router/index.js implementation.",
+    "Separates what it verified from directory-name assumptions, and flags the delegation as the key uncertainty rather than asserting it as fact."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "express-router-location",
+    "repo": "expressjs/express",
+    "questions": [
+      "Where is application-level route handling wired up, and is the router itself implemented inside this repository?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is application-level route handling wired up, and is the router itself implemented inside this repository?",
+        "agentText": "I'll inspect the expressjs/express repo structure and key files via GitHub API without cloning.I have everything needed to answer confidently.\n\n## Where application-level route handling is wired up\n\n**File: `lib/express.js`**\n- Requires the router package: `var Router = require('router');` and re-exports it: `exports.Route = Router.Route; exports.Router = Router;`\n- Builds the app object (a callable function) and mixes in `application.js`'s prototype (`proto`) via `merge-descriptors`.\n\n**File: `lib/application.js`** — this is the actual wiring layer:\n- `app.init()` (around line 60-82) lazily creates the app's root router instance: `router = new Router({ caseSensitive: ..., strict: ... })`, exposed via a getter property `this.router`.\n- `app.handle()` (~line 177) delegates every incoming request to it: `this.router.handle(req, res, done)`.\n- `app.use()` (~line 195-245) is a documented proxy: *\"Proxy `Router#use()` to add middleware to the app router\"* — it grabs `this.router` and calls `router.use(path, fn)`, with special-case handling for mounting sub-apps (`mounted_app` wrapper that restores `req.app`/`res.app` prototypes).\n- `app.route()` (~line 257) is *\"Proxy to the app `Router#route()`\"* — returns `this.router.route(path)`.\n- `app.param()` (~line 331) proxies to `this.router.param(name, fn)`.\n- The `methods.forEach(...)` block (~line 468) delegates `app.get/post/put/...()` calls to `this.route(path)[method](...)`.\n\nSo application.js is a thin façade: it doesn't implement routing logic itself, it lazily instantiates one `Router` per app and forwards `use`, `route`, `param`, and verb methods to it, plus handles Express-specific concerns (mounting sub-apps, settings inheritance, view rendering, etc.).\n\n## Is the router implemented inside this repo?\n\n**No.** In current Express (v5.2.1, confirmed via `package.json`), the router is an external dependency:\n```json\n\"router\": \"^2.2.0\"\n```\nand `lib/express.js` / `lib/application.js` simply `require('router')`. There is no `lib/router/` directory in this repo — I confirmed `gh api repos/expressjs/express/contents/lib/router` returns `404 Not Found`. `lib/` only contains `application.js`, `express.js`, `request.js`, `response.js`, `utils.js`, `view.js`.\n\nThe actual `Router`, `Route`, and layer-matching logic live in the separate package **pillarjs/router** (`https://github.com/pillarjs/router`, described as \"Simple middleware-style router\"), pulled in as a normal npm dependency.\n\nNote: this is a change from Express 4.x, where the router (`lib/router/index.js`, `lib/router/route.js`, `lib/router/layer.js`) was implemented in-tree. Express 5 extracted it into the standalone `router` package.\n\n## What I did not verify\n- I didn't clone/diff pillarjs/router's source itself, so I can't describe its internal matching algorithm (path-to-regexp version, layer/route internals) — only that Express's app layer treats it as an opaque dependency.\n- I didn't check every Express 4.x tag to pinpoint exactly which release removed `lib/router/`; I'm relying on the current `package.json` dependency and the 404 on `lib/router` as evidence for the present state only.\n- I read `application.js` via `sed` excerpts, not the full file end-to-end, so there could be other minor router-touching methods I didn't quote (though the pattern is consistent throughout: proxy to `this.router`).",
+        "toolCalls": [
+          {
+            "title": "gh api repos/expressjs/express/contents/lib | jq -r '.[].name'",
+            "outputSummary": "List files in lib directory of expressjs/express```console",
+            "outputChars": 193
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/router | jq -r '.[].name'",
+            "outputSummary": "List files in lib/router directory```",
+            "outputChars": 244
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/package.json --jq '.content' | base64 -d",
+            "outputSummary": "Fetch package.json to check dependencies```console",
+            "outputChars": 5515
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js --jq '.content' | base64 -d | grep -n \"router\\|Router\\|require(\" | head -60",
+            "outputSummary": "Search application.js for router wiring and requires```console",
+            "outputChars": 3399
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/express.js --jq '.content' | base64 -d",
+            "outputSummary": "View lib/express.js content```console",
+            "outputChars": 3312
+          },
+          {
+            "title": "gh api repos/expressjs/express/contents/lib/application.js --jq '.content' | base64 -d | sed -n '55,90p;170,260p;460,490p'",
+            "outputSummary": "View key sections of application.js```console",
+            "outputChars": 6620
+          },
+          {
+            "title": "gh repo view pillarjs/router --json name,description,url,pushedAt 2\u003e\u00261\necho \"---\"\ngh api repos/expressjs/express/contents/History.md --jq '.content' | base64 -d | head -40",
+            "outputSummary": "Check pillarjs/router repo and recent History.md changes```console",
+            "outputChars": 6615
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "labelId": "gs-029",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Identifies the map engine's core types in internal/mapengine and the two distinct parser backends (Go AST and tree-sitter) rather than treating the engine as monolithic.",
+    "Explains how the engine is selected per file (the mapAuto / EngineAuto path) with evidence from the selection code, not a plausible-sounding guess.",
+    "Grounds claims in internal/mapengine source rather than README prose or CLI help text."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "ghx-mapengine",
+    "repo": "gkoreli/ghx",
+    "questions": [
+      "Where is the structural map engine implemented, and how is the parser engine selected per file?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is the structural map engine implemented, and how is the parser engine selected per file?",
+        "agentText": "I'll start by exploring the repo structure to find where the structural map engine lives.The README already points to `internal/mapengine/`. Let me look at its structure and the engine-selection logic directly.Now let me get the structural map of these files and look for the engine-selection function specifically.The routing logic is in `types.go`'s `Map` and `mapAuto` functions. Let me read those exact lines plus the tree-sitter entry-lookup function to confirm how file extensions map to engines.Now let me confirm where this is wired to the CLI (`--map-engine` flag) and where `Map()` is invoked from the read command.I now have the complete picture. Here's the answer:\n\n## Structural map engine\n\n**Implemented in `internal/mapengine/`** (Go package `mapengine`), with routing/dispatch in `internal/mapengine/types.go` and three concrete parser backends:\n\n- **`internal/mapengine/types.go`** — shared types (`Engine`, `Options`, `Result`, `Symbol`, `Mapper` interface) and the dispatch logic: `Map()` (types.go:125), `mapAuto()` (types.go:143), `mapTreeSitterWithFallback()` (types.go:160).\n- **`internal/mapengine/goast.go`** — `GoASTMapper` (`goast.go:11`), uses Go's standard `go/ast` + `go/token` to extract top-level declarations (`goASTSymbols`, `goFuncDeclSymbol`, `goTypeSymbol`, etc.).\n- **`internal/mapengine/treesitter.go`** — `TreeSitterMapper` (`treesitter.go:12`), built on the external `gotreesitter` library (grammars via `grammars.LangEntry`), with per-language configs (`defaultTreeSitterLanguageConfigs`, `treesitter.go:281`) and tag-based symbol extraction (`symbolFromTag`, `computeTreeSitterParents`).\n- **`internal/mapengine/regex.go`** — `RegexMapper` (`regex.go:10`), a per-language regex rule table (`regexRules`, `regex.go:20`) used as the universal fallback.\n\n## Engine selection per file\n\nSelection happens in `Map()` and `mapAuto()` in `internal/mapengine/types.go`:\n\n1. `Map(path, content, opts)` (types.go:125) first normalizes `opts.Engine` via `normalizeEngine()` (only `regex`, `tree-sitter`, or the default `auto` are recognized — anything else falls through to a regex fallback with a warning).\n2. If the engine is `EngineAuto`, it calls `mapAuto()` (types.go:143), which switches on the **lowercased file extension** (`filepath.Ext(path)`):\n   - `.go` → `GoASTMapper{}.Map()`, falling back to `RegexMapper` on error.\n   - `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs` → `mapTreeSitterWithFallback()`, which runs `TreeSitterMapper{}.Map()` and falls back to `RegexMapper` if tree-sitter errors (e.g. unsupported grammar).\n   - anything else → `RegexMapper{}.Map()` directly.\n3. If the engine was explicitly forced to `tree-sitter` or `regex` (via the CLI `--map-engine` flag), that mapper is used directly regardless of extension.\n\nThis is wired to the CLI/library boundary in **`internal/ghx/read.go:187-196`**, where `Read()` calls `mapengine.Map(path, content, mapengine.Options{Engine: mapengine.Engine(opts.MapEngine), ...})`, with `opts.MapEngine` sourced from the `--map-engine` flag (also exposed via MCP tool schema in `internal/ghx/register.go:57-68`, described there as `\"map engine: auto|regex|tree-sitter\"`). Confirmed by `read_test.go:98` and `:125-127`, which assert `.ts` files map via `tree-sitter` and that forcing `tree-sitter` on an unsupported extension (`.md`) falls back to `regex`.\n\n**Not verified:** the actual CLI flag definition/cobra wiring in `internal/cli/*.go` (I confirmed no direct `mapengine` references there — the flag is passed through `internal/ghx.ReadOpts.MapEngine`, but I didn't trace the cobra flag-parsing code itself), and the internals of the `gotreesitter`/`grammars` dependency itself (external library, not in this repo).",
+        "toolCalls": [
+          {
+            "title": "ghx explore gkoreli/ghx",
+            "outputSummary": "```console description: Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go. branch: mainline files: .claude-plugin/ .claude/ .envrc.example .github/ ",
+            "outputChars": 19151
+          },
+          {
+            "title": "ghx tree gkoreli/ghx internal/mapengine --depth 3",
+            "outputSummary": "```console goast.go regex.go regex_test.go treesitter.go types.go ```goast.go regex.go regex_test.go treesitter.go types.go",
+            "outputChars": 123
+          },
+          {
+            "title": "ghx read gkoreli/ghx --map internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go",
+            "outputSummary": "```console === internal/mapengine/types.go (5583 bytes) === 1: package mapengine 3: import ( 11: type Engine string 13: const ( 20: type Level string 22: const ( 29: type Kind string 31: const ( 41: type Options struct { 47: type Mapper interface { 51: type Result struct { 61: ty",
+            "outputChars": 9083
+          },
+          {
+            "title": "ghx read gkoreli/ghx --lines 1-175 internal/mapengine/types.go",
+            "outputSummary": "```console === internal/mapengine/types.go (5583 bytes) === package mapengine import ( \"errors\" \"fmt\" \"path/filepath\" \"sort\" \"strings\" ) type Engine string const ( EngineAuto Engine = \"auto\" EngineGoAST Engine = \"go-ast\" EngineRegex Engine = \"regex\" EngineTreeSitter Engine = \"tre",
+            "outputChars": 8113
+          },
+          {
+            "title": "ghx search \"mapengine.Map( repo:gkoreli/ghx\"\nghx search \"map-engine repo:gkoreli/ghx\"",
+            "outputSummary": "``` Exit code 1 0 results (showing 0) → To search repos by topic, use: ghx repos \"\u003cquery\u003e\" 0 results (showing 0) → To search repos by topic, use: ghx repos \"\u003cquery\u003e\" ```Exit code 1 0 results (showing 0) → To search repos by topic, use: ghx repos \"\u003cquery\u003e\" 0 results (showing",
+            "outputChars": 338
+          },
+          {
+            "title": "ghx read gkoreli/ghx --grep \"mapengine\\.(Map|Options|Engine)\" internal/cli\necho ---\nghx read gkoreli/ghx --grep \"map-engine|MapEngine\" internal/cli",
+            "outputSummary": "```console === internal/cli (directory, 4 entries) === code.go ghx.go serve.go sidecar.go → use: ghx read gkoreli/ghx \"internal/cli/*\" --map --- === internal/cli (directory, 4 entries) === code.go ghx.go serve.go sidecar.go → use: ghx read gkoreli/ghx \"internal/cli/*\" --map `",
+            "outputChars": 583
+          },
+          {
+            "title": "ghx read gkoreli/ghx --grep \"mapengine\\.\" \"internal/cli/*.go\"\necho ---GHX---\nghx read gkoreli/ghx --grep \"map-engine|MapEngine|mapengine\" \"internal/ghx/*.go\"",
+            "outputSummary": "```console ---GHX--- === internal/ghx/read.go (9012 bytes, via internal/ghx/*.go) === 8: 9: \"github.com/cli/go-gh/v2/pkg/api\" \u003e 10: \"github.com/gkoreli/ghx/v2/internal/mapengine\" 11: ) 12: -- 26: MapLines []string `json:\"mapLines,omitempty\"` // populated when Map is true 27: MapC",
+            "outputChars": 6827
+          }
+        ]
+      }
+    ]
+  }
+}

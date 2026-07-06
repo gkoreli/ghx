@@ -1,0 +1,237 @@
+{
+  "labelId": "gs-116",
+  "protocolVersion": "goldset-protocol-v1",
+  "rubricVersion": "core-rubric-v1",
+  "taskCriteria": [
+    "Locates the core streaming implementation in src/core/streaming.ts and the higher-level stream classes (ResponseStream, AssistantStream).",
+    "Traces which public API methods route into the streaming implementation by following the call path, not by guessing from names.",
+    "Given multiple plausible streaming entry points, honestly separates the paths it verified from those it only inferred."
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "openai-node-streaming",
+    "repo": "openai/openai-node",
+    "questions": [
+      "Where are streaming responses implemented, and which public API methods route into the streaming implementation?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where are streaming responses implemented, and which public API methods route into the streaming implementation?",
+        "agentText": "I'll explore the repo structure first to find streaming-related files.Now let me look at how `.stream()` and streaming params are wired into the API resources, plus the ChatCompletionStream/ResponseStream/AssistantStream helper implementations.Found it — `src/internal/parse.ts` is the central dispatch point. Let me read it.Confirmed — `ChatCompletionStream` overrides `_createChatCompletion` to actually call `client.chat.completions.create(..., stream: true)` and iterate chunks. Now let me check the public entry points: `.stream()` methods on `chat.completions`, `responses`, `beta.threads.runs`, `beta.chat.completions`, and image streaming.It's a re-export barrel. Let me check the actual directory.Let me get the class body (lines ~26-229) to see the actual public methods including `create()` and `stream()`.I have a complete picture now. This confirms the pattern across all resources: low-level `Stream\u003cT\u003e` (core/streaming.ts) plus higher-level helper streams (ChatCompletionStream, ResponseStream, AssistantStream), all reachable from public `.create()`/`.stream()` methods. That's sufficient to answer.\n\n## Where streaming is implemented\n\n**Core transport (low-level SSE parsing):** `src/core/streaming.ts`\n- `class Stream\u003cItem\u003e` — wraps a `fetch` `Response` body, implements `AsyncIterable\u003cItem\u003e`\n- `Stream.fromSSEResponse()` — parses `text/event-stream` bytes into typed JSON items\n- `Stream.fromReadableStream()` — parses a newline-delimited JSON `ReadableStream`\n- `_iterSSEMessages()` / `iterSSEChunks()` / `SSEDecoder` — low-level SSE framing (splits on `\\n\\n`, parses `event:`/`data:` fields)\n- `.tee()`, `.toReadableStream()` — stream utilities\n\n**Central dispatch point:** `src/internal/parse.ts`, function `defaultParseResponse()`. When a request's `FinalRequestOptions.stream` is `true`, it calls either `props.options.__streamClass.fromSSEResponse(...)` (if a resource specified a custom stream class) or falls back to the base `Stream.fromSSEResponse(...)`. This is the single choke point where every streaming HTTP response gets turned into an async-iterable object — evidence: `src/internal/parse.ts` lines ~26–36.\n\n**Higher-level, event-emitting wrappers** (built on top of the core `Stream`, adding accumulation/parsing/events):\n- `src/lib/EventStream.ts` — base `EventStream` class (`.on()`, `.off()`, `.once()`, `.emitted()`, `._emit()`)\n- `src/lib/ChatCompletionStream.ts` — `ChatCompletionStream` (extends `AbstractChatCompletionRunner`, which extends `EventStream`); accumulates `ChatCompletionChunk`s into a snapshot, emits `content`, `chunk`, etc. Static factory `ChatCompletionStream.createChatCompletion()` overrides `_createChatCompletion()` to call `client.chat.completions.create({...params, stream:true})` and iterate the resulting core `Stream`.\n- `src/lib/ChatCompletionStreamingRunner.ts` — extends `ChatCompletionStream`, adds automatic tool-call execution (`runTools`).\n- `src/lib/responses/ResponseStream.ts` — `ResponseStream`, static `ResponseStream.createResponse()`; calls `client.responses.create({...params, stream:true})` or `client.responses.retrieve(id, {stream:true})` and `for await`s the raw `Stream\u003cResponseStreamEvent\u003e`, accumulating a full `Response` via `ResponseAccumulator.ts`.\n- `src/lib/AssistantStream.ts` — `AssistantStream` (Assistants/Threads API, deprecated in favor of Responses), with factories `createThreadAssistantStream`, `createAssistantStream`, `createToolAssistantStream`.\n- `src/lib/AbstractChatCompletionRunner.ts` — shared base for both streaming and non-streaming chat-completion runners.\n\n## Public API methods that route into streaming\n\n| Public method | File | Mechanism |\n|---|---|---|\n| `client.chat.completions.create(body, opts)` with `body.stream: true` | `src/resources/chat/completions/completions.ts` | returns raw `Stream\u003cChatCompletionChunk\u003e` via core dispatch |\n| `client.chat.completions.stream(body, opts)` | same file | `ChatCompletionStream.createChatCompletion()` |\n| `client.chat.completions.runTools(body, opts)` with `body.stream: true` | same file | `ChatCompletionStreamingRunner.runTools()` |\n| `client.responses.create(body, opts)` with `stream: true` | `src/resources/responses/responses.ts` | raw `Stream\u003cResponseStreamEvent\u003e` |\n| `client.responses.retrieve(id, {stream:true}, opts)` | same file | raw `Stream\u003cResponseStreamEvent\u003e` |\n| `client.responses.stream(body, opts)` | same file | `ResponseStream.createResponse()` |\n| `client.completions.create(body, opts)` (legacy `/completions`) with `stream:true` | `src/resources/completions.ts` | raw `Stream\u003cCompletion\u003e` |\n| `client.images.edit(body, opts)` / `.generate(body, opts)` with `stream:true` | `src/resources/images.ts` | raw `Stream\u003cImageEditStreamEvent\u003e` / `Stream\u003cImageGenStreamEvent\u003e` |\n| `client.beta.threads.createAndRun(body, opts)` with `stream:true` (deprecated) | `src/resources/beta/threads/threads.ts` | raw `Stream\u003cAssistantStreamEvent\u003e` |\n| `client.beta.threads.createAndRunStream(body, opts)` (deprecated) | same file | `AssistantStream.createThreadAssistantStream()` |\n| `client.beta.threads.runs.stream(threadId, body, opts)` / `.createAndStream(...)` (deprecated) | `src/resources/beta/threads/runs/runs.ts` | `AssistantStream.createAssistantStream()` |\n| `client.beta.threads.runs.submitToolOutputsStream(...)` (deprecated) | same file | `AssistantStream.createToolAssistantStream()` |\n\nAll of these ultimately bottom out at `src/internal/parse.ts`'s `defaultParseResponse()`, which is the actual place the SSE `Response` gets turned into a `Stream` object, using either the base class or a resource-supplied `__streamClass`.\n\n**Not verified:** I did not trace `src/resources/audio/speech.ts` / `transcriptions.ts` streaming paths, the Azure/Bedrock provider wrappers (`src/azure.ts`, `src/bedrock.ts`, `src/providers/bedrock*`), or the separate WebSocket-based `Realtime` API (`src/realtime/`, `src/resources/realtime/`) in detail — the Realtime API uses a different transpo",
+        "toolCalls": [
+          {
+            "title": "ghx tree openai/openai-node src --depth 2",
+            "outputSummary": "List top-level src directory structure```console",
+            "outputChars": 4743
+          },
+          {
+            "title": "ghx search \"class Stream repo:openai/openai-node\"",
+            "outputSummary": "Search for Stream class definition```",
+            "outputChars": 218
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/streaming.ts",
+            "outputSummary": "Read core streaming implementation```console",
+            "outputChars": 19649
+          },
+          {
+            "title": "ghx tree openai/openai-node src/lib/responses --depth 2",
+            "outputSummary": "List responses lib subdirectory```console",
+            "outputChars": 198
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream\\.fromSSEResponse|new Stream|stream: true|_iterSSEMessages\" src/resources/responses.ts src/resources/chat/completions.ts src/resources/completions.ts src/resources/audio/speech.ts src/resources/audio/transcriptions.ts src/api-promise.ts",
+            "outputSummary": "Grep for stream wiring in resource files```console",
+            "outputChars": 1279
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"class .*Stream|static createChatCompletion|static fromReadableResponse|static createResponse|extends \" src/lib/AssistantStream.ts src/lib/ChatCompletionStream.ts src/lib/ChatCompletionStreamingRunner.ts src/lib/EventStream.ts src/lib/responses/ResponseStream.ts src/lib/AbstractChatCompletionRunner.ts",
+            "outputSummary": "Grep for stream class definitions in lib files```console",
+            "outputChars": 12339
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream\\.fromSSEResponse|Stream\u003c|stream ?\\?\" src/client.ts src/core/api-promise.ts | head -100",
+            "outputSummary": "Find where client.ts wires Stream.fromSSEResponse```console",
+            "outputChars": 7760
+          },
+          {
+            "title": "ghx search \"\\\"stream(\\\" repo:openai/openai-node path:src/resources\"",
+            "outputSummary": "Search for stream( method in resources```",
+            "outputChars": 222
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse|Stream\\.from|stream:\" src/core/api-promise.ts src/resources/chat/completions.ts",
+            "outputSummary": "Grep api-promise and chat completions for stream wiring```console",
+            "outputChars": 132
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse\" -- \"src/**/*.ts\"",
+            "outputSummary": "Grep entire src tree for fromSSEResponse usage```console",
+            "outputChars": 353
+          },
+          {
+            "title": "ghx search \"fromSSEResponse repo:openai/openai-node\"",
+            "outputSummary": "Code search for fromSSEResponse usage```console",
+            "outputChars": 698
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse\" src/core/api-promise.ts src/client.ts src/resources/chat/completions.ts src/resources/responses.ts src/resources/completions.ts src/resources/images.ts src/resources/audio/speech.ts",
+            "outputSummary": "Grep specific files for fromSSEResponse```console",
+            "outputChars": 116
+          },
+          {
+            "title": "ghx read openai/openai-node src/internal/parse.ts",
+            "outputSummary": "Read internal/parse.ts to see stream class dispatch```console",
+            "outputChars": 6384
+          },
+          {
+            "title": "ghx search \"__streamClass repo:openai/openai-node\"",
+            "outputSummary": "Search for __streamClass usages across repo```",
+            "outputChars": 227
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream: true|stream ===|options.stream|body: { \\.\\.\\.body, stream\" src/resources/chat/completions.ts src/resources/responses.ts",
+            "outputSummary": "Grep for stream:true usage in chat completions and responses resources```console",
+            "outputChars": 147
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/responses/ResponseStream.ts | head -120",
+            "outputSummary": "Read ResponseStream.ts top portion```console",
+            "outputChars": 8405
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/ChatCompletionStream.ts | sed -n '130,230p'",
+            "outputSummary": "Read ChatCompletionStream createChatCompletion section```console",
+            "outputChars": 6463
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"_runChatCompletion|_createOrRetrieveResponse|for await\" src/lib/AbstractChatCompletionRunner.ts src/lib/responses/ResponseStream.ts",
+            "outputSummary": "Grep for the private methods that make the raw create() call```console",
+            "outputChars": 1777
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"\\.stream(|\\.create(|stream:\" src/resources/chat/completions.ts src/resources/responses.ts src/resources/beta/threads/runs.ts src/resources/beta/threads/threads.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "Grep public resource methods for .stream() entry points```console",
+            "outputChars": 132
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/responses/ResponseStream.ts --offset 160 --limit 40 2\u003e\u00261; echo ---; ghx read openai/openai-node src/lib/AbstractChatCompletionRunner.ts --offset 270 --limit 40 2\u003e\u00261",
+            "outputSummary": "Read specific line ranges for stream request calls```",
+            "outputChars": 180
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/responses/ResponseStream.ts | sed -n '160,220p'",
+            "outputSummary": "View ResponseStream request logic lines 160-220```console",
+            "outputChars": 3588
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/AbstractChatCompletionRunner.ts | sed -n '260,320p'",
+            "outputSummary": "View AbstractChatCompletionRunner request logic lines 260-320```console",
+            "outputChars": 4426
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"_createChatCompletion|override|protected async\" src/lib/ChatCompletionStream.ts",
+            "outputSummary": "Check if ChatCompletionStream overrides _createChatCompletion```console",
+            "outputChars": 1210
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\\(\" src/resources/chat/completions.ts src/resources/responses.ts src/resources/beta/chat/completions.ts 2\u003e\u00261\necho \"---threads---\"\nghx tree openai/openai-node src/resources/beta/threads --depth 1\necho \"---images---\"\nghx read openai/openai-node --grep \"stream\\(\" src/resources/images.ts 2\u003e\u00261",
+            "outputSummary": "Find public .stream() methods on resource classes```console",
+            "outputChars": 1196
+          },
+          {
+            "title": "ghx search \"\\\"stream(body\\\" repo:openai/openai-node\"\necho \"===\"\nghx search \"ChatCompletionStream.createChatCompletion repo:openai/openai-node\"\necho \"===\"\nghx search \"ResponseStream.createResponse repo:openai/openai-node\"\necho \"===\"\nghx search \"AssistantStream.createToolAssistantStream repo:openai/openai-node\"",
+            "outputSummary": "Search code for stream helper invocations from resource classes```",
+            "outputChars": 1795
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/chat/completions.ts | grep -i \"  stream(\" \necho \"---full grep chat completions class methods---\"\nghx read openai/openai-node --grep \"^  [a-zA-Z]+\\(|class Completions|class Chat\" src/resources/chat/completions.ts 2\u003e\u00261 | head -40",
+            "outputSummary": "Find stream method signature in chat completions resource```console",
+            "outputChars": 164
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions.ts --map 2\u003e\u00261 | head -60",
+            "outputSummary": "Structural map of chat completions resource```console",
+            "outputChars": 350
+          },
+          {
+            "title": "ghx tree openai/openai-node src/resources/chat --depth 2",
+            "outputSummary": "List chat resources subdirectory```console",
+            "outputChars": 279
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions/completions.ts --map 2\u003e\u00261 | head -80",
+            "outputSummary": "Structural map of actual chat completions.ts```console",
+            "outputChars": 10505
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"  create\\(|  parse\\(|  stream\\(|  runTools\\(|  runFunctions\\(\" src/resources/chat/completions/completions.ts",
+            "outputSummary": "Grep for public method signatures in Completions class```console",
+            "outputChars": 131
+          },
+          {
+            "title": "ghx search \"class Completions extends APIResource repo:openai/openai-node\"\necho \"---\"\nghx read openai/openai-node --grep \"\\bcreate\\(|\\bparse\\(|\\bstream\\(|\\brunTools\\(|\\brunFunctions\\(\" src/resources/chat/completions/completions.ts",
+            "outputSummary": "Try alternate grep patterns for method names```console",
+            "outputChars": 219
+          },
+          {
+            "title": "ghx read --help 2\u003e\u00261 | head -50",
+            "outputSummary": "Check ghx read command help for line range options```console",
+            "outputChars": 671
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions/completions.ts --lines 26-229",
+            "outputSummary": "Read Completions class body lines 26-229```console",
+            "outputChars": 14415
+          },
+          {
+            "title": "ghx tree openai/openai-node src/resources/responses --depth 1",
+            "outputSummary": "List responses resource directory```console",
+            "outputChars": 234
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/responses/responses.ts --lines 1-40 2\u003e\u00261\necho \"...\"\nghx read openai/openai-node --grep \"stream\\(|create\\(|APIPromise\u003cStream\" src/resources/responses/responses.ts",
+            "outputSummary": "Check responses.ts imports and method signatures```console",
+            "outputChars": 3457
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream(\" src/resources/responses/responses.ts",
+            "outputSummary": "Grep for stream( single term in responses.ts```console",
+            "outputChars": 121
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"class Responses\" src/resources/responses/responses.ts",
+            "outputSummary": "Find class Responses declaration line number```console",
+            "outputChars": 815
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/responses/responses.ts --lines 74-260",
+            "outputSummary": "Read Responses class body```console",
+            "outputChars": 12574
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"class Completions extends APIResource\" src/resources/completions.ts\necho \"---\"\nghx read openai/openai-node src/resources/completions.ts --lines 1-30\necho \"=== find create signature ===\"\nghx search \"createChatCompletion repo:openai/openai-node completions.ts\" 2\u003e\u00261 | head -5",
+            "outputSummary": "Check legacy completions.ts resource for streaming```console",
+            "outputChars": 3519
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/beta/threads/threads.ts | head -60",
+            "outputSummary": "Grep threads.ts for stream-related lines```console",
+            "outputChars": 4991
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"AssistantStream\\.\" src/resources/beta/threads/threads.ts src/resources/beta/threads/runs/runs.ts",
+            "outputSummary": "Find AssistantStream static factory usages in threads/runs resources```console",
+            "outputChars": 2169
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"images.edit|images.generate|stream: true|ImageEditStreamEvent|ImageGenStreamEvent\" src/resources/images.ts | head -40",
+            "outputSummary": "Check images.ts for image streaming events```console",
+            "outputChars": 3125
+          }
+        ]
+      }
+    ]
+  }
+}
