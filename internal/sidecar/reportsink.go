@@ -198,16 +198,24 @@ func citesScratchSource(value string) bool {
 		strings.Contains(lower, " /var/folders/")
 }
 
+// reportTiers are the canonical tierUsed values (ADR-0024.1 "Visibility
+// Contract"): the highest escalation tier that produced the answer.
+var reportTiers = map[string]bool{"tier0": true, "tier1": true, "tier2": true, "tier3": true}
+
 // ValidateReport enforces the semantic minimum shared by the strict submission
-// path and the lenient fallback path: a report must carry a non-empty answer.
-// Shape validation is handled by the typed (de)serialization of the Report type
-// itself, keeping this the only hand-written semantic rule.
+// path and the lenient fallback path: a report must carry a non-empty answer,
+// and tierUsed — when present — must be a canonical tier ID (ADR-0024.1).
+// Shape validation is handled by the typed (de)serialization of the Report
+// type itself, keeping these the only hand-written semantic rules.
 func ValidateReport(r *Report) error {
 	if r == nil {
 		return errors.New("report is nil")
 	}
 	if r.Answer == "" {
 		return ErrEmptyAnswer
+	}
+	if r.TierUsed != "" && !reportTiers[r.TierUsed] {
+		return fmt.Errorf(`report failed validation: tierUsed: %q is not a canonical tier ("tier0" | "tier1" | "tier2" | "tier3")`, r.TierUsed)
 	}
 	return nil
 }
@@ -241,7 +249,8 @@ var reportFieldDescriptions = map[string]string{
 	"unverified":    "Open claims you could not confirm: [{summary, evidence}].",
 	"relevantFiles": "1-5 most relevant files: [{path, reason}].",
 	"evidence":      "Evidence entries: [{source, summary}] — source is the ghx command.",
-	"backendsUsed":  "Evidence backends used, e.g. [\"remote\"].",
+	"tierUsed":      "Highest escalation tier used: \"tier0\" | \"tier1\" | \"tier2\" | \"tier3\". Omit when tier tracking is unavailable.",
+	"backendsUsed":  "Evidence backends used — canonical IDs: \"remote\", \"local:codemap\", \"local:ast-grep\", \"local:repomap\".",
 	"commandsRun":   "ghx commands you ran.",
 	"uncertainty":   "What remains uncertain.",
 	"nextReads":     "Suggested next files or areas to read.",

@@ -494,3 +494,42 @@ func TestDecodeReportStrictAcceptsRepoLevelCitations(t *testing.T) {
 		t.Fatalf("owner/repo:path form mangled: %q", r.RelevantFiles[1].Path)
 	}
 }
+
+// TestDecodeReportStrict_TierUsed covers the ADR-0024.1 report contract
+// extension: tierUsed is optional, canonical tier IDs are accepted, and any
+// other value is rejected with a teaching error. A tier2 report carries its
+// local:* backend in backendsUsed alongside the recomputable command.
+func TestDecodeReportStrict_TierUsed(t *testing.T) {
+	args := validReportArgs()
+	args["tierUsed"] = "tier2"
+	args["backendsUsed"] = []any{"remote", "local:codemap"}
+	args["commandsRun"] = []any{"ghx tier2 codemap owner/repo --importers internal/http/router.go"}
+	data, _ := json.Marshal(args)
+	r, err := DecodeReportStrict(data)
+	if err != nil {
+		t.Fatalf("tier2 report rejected: %v", err)
+	}
+	if r.TierUsed != "tier2" || len(r.BackendsUsed) != 2 || r.BackendsUsed[1] != "local:codemap" {
+		t.Fatalf("tier fields lost in decode: %+v", r)
+	}
+
+	for _, tier := range []string{"tier0", "tier1", "tier3"} {
+		args["tierUsed"] = tier
+		data, _ = json.Marshal(args)
+		if _, err := DecodeReportStrict(data); err != nil {
+			t.Errorf("canonical tier %q rejected: %v", tier, err)
+		}
+	}
+
+	// Omitted tierUsed stays valid (pre-tier reports are unchanged).
+	data, _ = json.Marshal(validReportArgs())
+	if r, err := DecodeReportStrict(data); err != nil || r.TierUsed != "" {
+		t.Fatalf("report without tierUsed must remain valid: %v", err)
+	}
+
+	args["tierUsed"] = "local"
+	data, _ = json.Marshal(args)
+	if _, err := DecodeReportStrict(data); err == nil || !strings.Contains(err.Error(), "tierUsed") {
+		t.Fatalf("non-canonical tierUsed must be rejected with a tierUsed error, got %v", err)
+	}
+}

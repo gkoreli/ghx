@@ -42,10 +42,18 @@ type Report struct {
 	Unverified    []Claim        `json:"unverified"`
 	RelevantFiles []RelevantFile `json:"relevantFiles"`
 	Evidence      []Evidence     `json:"evidence"`
-	BackendsUsed  []string       `json:"backendsUsed"`
-	CommandsRun   []string       `json:"commandsRun"`
-	Uncertainty   []string       `json:"uncertainty"`
-	NextReads     []string       `json:"nextReads"`
+	// TierUsed is the highest escalation tier used to answer the question:
+	// "tier0", "tier1", "tier2", or "tier3" (ADR-0024.1 "Visibility
+	// Contract"). Empty on reports produced before tier tracking; ValidateReport
+	// rejects any other value. A tier2 report must also carry the local:*
+	// backend(s) that produced its structural evidence in BackendsUsed
+	// (canonical IDs: "remote", "local:codemap", "local:ast-grep",
+	// "local:repomap").
+	TierUsed     string   `json:"tierUsed,omitempty"`
+	BackendsUsed []string `json:"backendsUsed"`
+	CommandsRun  []string `json:"commandsRun"`
+	Uncertainty  []string `json:"uncertainty"`
+	NextReads    []string `json:"nextReads"`
 }
 
 var ghxReportRE = regexp.MustCompile(`(?s)<ghx-report>(.*?)</ghx-report>`)
