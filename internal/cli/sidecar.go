@@ -10,8 +10,23 @@ import (
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
+	"github.com/gkoreli/ghx/v2/internal/sidecar/tier2"
 	"github.com/spf13/cobra"
 )
+
+// askAllowedBackends translates the ask command's --local flag into the
+// request's backend allowlist. Default is remote-only: tier-2 local analysis
+// (clone, codemap, ast-grep, repomap) never runs unless the caller grants it,
+// because escalation is a recorded policy decision, not an agent whim
+// (ADR-0024.2). With the grant, the escalation policy engine may allow
+// `ghx tier2` commands and the decision lands in the session's
+// tier-decisions.jsonl.
+func askAllowedBackends(local bool) []string {
+	if local {
+		return []string{"remote", tier2.LocalBackendGrant}
+	}
+	return nil
+}
 
 // sidecarCmd is the top-level "ghx sidecar" command group.
 var sidecarCmd = &cobra.Command{
@@ -43,6 +58,7 @@ instead of the human summary. Every answer ends with an artifacts footer —
 and reports under ~/.ghx that back the report.`,
 	Example: `  ghx sidecar ask --repo hono/hono "How is middleware chained?"
   ghx sidecar ask --repo gkoreli/ghx --depth deep "Where are sidecar reports validated?"
+  ghx sidecar ask --repo golang/go --local "Which packages import internal/abi, and through what chains?"
   ghx sidecar ask --json "Which Go repos implement ACP agents?"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -50,6 +66,7 @@ and reports under ~/.ghx that back the report.`,
 		repo, _ := cmd.Flags().GetString("repo")
 		depth, _ := cmd.Flags().GetString("depth")
 		jsonOut, _ := cmd.Flags().GetBool("json")
+		local, _ := cmd.Flags().GetBool("local")
 
 		// Session routing (ADR-0030.1): --session and --repo keep the exact
 		// ADR-0019.1 D2 behavior (R1/R2 — the name is deterministic, printed
@@ -67,10 +84,11 @@ and reports under ~/.ghx that back the report.`,
 
 		cfg := sidecar.LoadConfig()
 		report, turn, _, err := sidecar.AskViaDaemon(context.Background(), VERSION, cfg, sidecar.AskRequest{
-			Session:  session,
-			Repo:     repo,
-			Question: args[0],
-			Depth:    depth,
+			Session:         session,
+			Repo:            repo,
+			Question:        args[0],
+			Depth:           depth,
+			AllowedBackends: askAllowedBackends(local),
 		})
 		if err != nil {
 			return err
@@ -535,6 +553,7 @@ func init() {
 	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (optional scope; omit for cross-GitHub discovery)")
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
+	sidecarAskCmd.Flags().Bool("local", false, "Allow tier-2 local analysis (SHA-pinned clone, codemap, ast-grep, repomap) when remote evidence falls short")
 
 	sidecarDoctorCmd.Flags().Bool("live", false, "Also run a real one-prompt turn through the agent (spawns it; diagnoses failures ACP initialize misses)")
 

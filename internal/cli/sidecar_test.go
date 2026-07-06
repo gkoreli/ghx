@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
+	"github.com/gkoreli/ghx/v2/internal/sidecar/tier2"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -272,5 +273,19 @@ func TestHandleReconAppendsArtifactsFooter(t *testing.T) {
 	}
 	if !strings.HasPrefix(text.Text, "{") {
 		t.Fatalf("recon text no longer starts with the report JSON:\n%s", text.Text)
+	}
+}
+
+// askAllowedBackends (--local flag): default is nil (remote-only per the
+// prompt default), the grant adds tier2.LocalBackendGrant so the escalation
+// policy engine may allow local analysis (ADR-0024.2).
+func TestAskAllowedBackends(t *testing.T) {
+	if got := askAllowedBackends(false); got != nil {
+		t.Fatalf("askAllowedBackends(false) = %v, want nil (remote-only default)", got)
+	}
+	got := askAllowedBackends(true)
+	want := []string{"remote", tier2.LocalBackendGrant}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("askAllowedBackends(true) = %v, want %v", got, want)
 	}
 }
