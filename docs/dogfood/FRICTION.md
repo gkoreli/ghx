@@ -62,6 +62,18 @@ Entry format:
 - Trace: ~/.ghx/sessions/arize-ai-phoenix/ (absence of artifacts is the evidence).
 - Disposition: open — emit per-turn artifacts incrementally or flush on error path.
 
+## 2026-07-05 live progress stream is opaque — soft
+- Attempted: watching two `--depth deep` asks live (ADR-0026 second wave: letta-ai/letta ~95s, mastra-ai/mastra ~240s).
+- Ground: stdout during the run is almost entirely repeated `▶ execute: Terminal (pending)` lines — the mastra ask printed ~48 identical ones — with no command text, no completion status, and only the rare agent-thought line breaking the monotony. The operator (or a parent agent tailing the child) gets near-zero signal about what the delegate is doing until the final answer lands; auditing mid-flight means separately tailing `traces.jsonl`, which does have the per-tool detail. The visibility exists in the artifacts but not on the consumption surface while it matters.
+- Trace: ~/.ghx/sessions/letta-ai-letta/, ~/.ghx/sessions/mastra-ai-mastra/ (contrast stdout vs traces.jsonl richness).
+- Disposition: open — render tool-call titles (command text, resolved status) in the progress stream instead of the bare pending marker.
+
+## 2026-07-05 SDK warning noise on every ask — soft
+- Attempted: every `sidecar ask` in the ADR-0026 second wave.
+- Ground: each run opens with a Node `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning about `mcp__ghx-report-sink__submit_report` being auto-approved by a bare allowedTools entry ("canUseTool will not be invoked..."). Harmless — the auto-approve is intentional — but it reads like a security misconfiguration to a first-time user and pollutes captured output.
+- Trace: ~/.ghx/sessions/{letta-ai-letta, mastra-ai-mastra}/ (warning is on the ask's stderr, before the session stream).
+- Disposition: open — either configure the adapter so the warning path isn't triggered (PreToolUse hook / drop the bare name) or suppress/explain it in the ask output.
+
 _Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
 "<question>"` directly or wire `ghx serve --recon` into your agent's MCP

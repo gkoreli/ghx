@@ -13,13 +13,15 @@ author: "Goga Koreli"
 Accepted as a landscape record (founder directive 2026-07-05: know the
 competition, steal what serves, cross-reference with rationales). Evidence
 has a property no earlier research ADR had: **the sidecar gathered it
-itself.** Six real `ghx sidecar ask` investigations, one per subject repo;
-every claim below traces to a report + full OTel trail in
+itself.** Nine real `ghx sidecar ask` investigations, one per subject
+repo; every claim below traces to a report + full OTel trail in
 `~/.ghx/sessions/<slug>/` (reports/, traces.jsonl with per-tool spans,
-ledger). Two of eight questions died to the 24-turn cap (crewai; phoenix
+ledger). Two of eleven questions died to the 24-turn cap (crewai; phoenix
 at normal depth — answered at `--depth deep`), logged as breaking friction
-in `docs/dogfood/FRICTION.md`. This ADR is therefore both landscape and
-dogfood artifact.
+in `docs/dogfood/FRICTION.md`. Second wave (same day, later):
+openai-agents-python, letta, mastra — all three completed at
+`--depth deep`, no new breaking friction. This ADR is therefore both
+landscape and dogfood artifact.
 
 ## The organizing lens (founder, 2026-07-05)
 
@@ -64,10 +66,79 @@ flood) and "one message" (no evidence). The evidence-shaped middle — a
 compact report *with* citations and an audit trail — is exactly the gap
 ghx occupies. Swarm handoffs move control, not evidence.
 
+### OpenAI Agents SDK (handoffs vs agents-as-tools) — session `openai-openai-agents-python`
+
+Two delegation mechanisms, cleanly split by return semantics. **Handoffs**
+(`Handoff` dataclass, `src/agents/handoffs/__init__.py`) transfer control,
+not evidence: `on_invoke_handoff` returns the next `Agent`, the runner
+swaps `current_agent`, and the parent never gets a value back — only
+`HandoffCallItem`/`HandoffOutputItem` run items in the shared transcript.
+**Agents-as-tools** (`Agent.as_tool()`) is a real call/return, but the
+payload is a **string** by default (last message text), with a
+caller-supplied `custom_output_extractor(RunResult) -> str` as the escape
+hatch — the richest return-shape dial found in any handoff framework, and
+still string-typed at the boundary; the schema is the user's problem. The
+steering surface is genuinely strong: `input_filter (HandoffInputData ->
+HandoffInputData)` lets the caller rewrite what history crosses the
+boundary (a caller-owned compression dial), plus `nest_handoff_history`
+and per-nested-run `max_turns`/`session`/`hooks`/`run_config`. Artifacts:
+run items persist in `RunResult.new_items` with `agent_tool_invocation`
+metadata — in-process objects for the host program, nothing a parent
+*agent* can read afterward without holding the live object. Steal:
+`input_filter` as prior art for caller-owned boundary transforms;
+`custom_output_extractor` as proof the field feels the pressure to escape
+the string return but ships no contract to escape *to*.
+
+### Mastra (networks, workflows) — session `mastra-ai-mastra`
+
+The richest return shape found anywhere in this scan: delegated steps
+return a **discriminated `StepResult` union**
+(success/failed/suspended/waiting/paused/skipped) with typed
+payload/output/error (`packages/core/src/workflows/types.ts`), and the
+whole run resolves to a `WorkflowResult` that **mixes in
+`TracingProperties` (traceId/spanId)** — a trace handle inside the return
+value, the only framework found that hands the caller a pointer into the
+delegate's audit trail. Dials are real too: `NetworkOptions` (memory,
+maxSteps, routing instructions, completion scorers, structuredOutput
+schema) and `TracingOptions`/`TracingPolicy` (join the parent trace via
+traceId/parentSpanId, hideInput/hideOutput masking). What's missing is
+exactly our lane: spans persist in **framework storage domains** (DB via
+`storage/domains/observability`), so following that traceId requires
+Mastra's storage stack, not `ls` and `jq`; and the typed envelope carries
+status + output, not evidence — no citations, no commands run, no
+uncertainty. Mastra is the closest single competitor on the
+steer-and-trace axes and stops short of the evidence contract and
+artifact-level visibility. Steal: trace-handle-in-the-return-value (our
+report/MCP response should carry the session dir + trace id explicitly,
+not implicitly); structured-output schema as a per-delegation dial.
+
 ### CrewAI — session `crewaiinc-crewai` (INCOMPLETE — recon died at turn cap)
 
 Delegation-tool pattern known from public docs; not source-verified
 tonight. Honest gap; re-run post max-turns fix.
+
+## Agent memory (persistence-adjacent)
+
+### Letta (memory blocks, archival passages) — session `letta-ai-letta`
+
+Persistent memory as first-class, externally inspectable data: labeled
+`Block` rows with **versioned `BlockHistory`** for core memory, embedded
+`Passage` rows for archival, all in Postgres/SQLite via SQLAlchemy; on
+resume, `AgentManager.rebuild_system_prompt()` re-renders
+`Memory.compile()` into the system message each turn — memory is
+*recompiled into context*, not merely stored. Crucially for the lens:
+**external callers can inspect the delegate's memory directly** via REST
+(`GET /agents/{id}/core-memory`, `/archival-memory`, standalone
+blocks/passages routers) — the strongest found instance of inspectable
+agent memory, but it requires a running server + database, not `cat`.
+Our `ledger.json` is the file-shaped version of the same instinct, and
+the comparison cuts both ways: Letta's memory is *editable and versioned*
+through the API; our ledger is readable but has no edit audit trail yet.
+Steal: block versioning (BlockHistory) as prior art for audited ledger
+edits; compile-on-resume as independent validation of the
+ledger-feeds-resumed-turns design (ADR-0022). Caveat from the report:
+active development has moved to letta-ai/letta-code; newer session/resume
+semantics may live there, not in this repo.
 
 ## Eval harnesses (SAFE-adjacent)
 
@@ -99,18 +170,25 @@ a service DB, ours in local OTel artifacts.
 
 ## What nobody found does (the competitive claim, stated carefully)
 
-Across all six: **delegation returns strings or transcripts; none returns
-a schema-validated evidence contract** (claims with citations, commands,
-uncertainty) — and none gives the parent agent artifact-level visibility
-(files it can read without the framework), an OTel audit trail of the
-delegate, persistent cross-question session memory it can inspect, or
-measured signal-per-token economics. Each element exists somewhere in
-embryo (LangGraph checkpoints, AutoGen's last-message flag, Phoenix span
-scores); the *combination* — auditable, steerable, persistent,
-evidence-bearing delegation as a product — has no found occupant. This is
-the moat sentence, and it stays PRELIMINARY-honest: based on six repos on
-one evening; the landscape moves monthly; re-scan quarterly or on any
-funding-scale competitor signal.
+Across all nine: **delegation returns strings, transcripts, or — at the
+richest (Mastra) — typed status/output envelopes; none returns a
+schema-validated evidence contract** (claims with citations, commands
+run, uncertainty). The second wave sharpened the other clauses by giving
+each a nearest neighbor: Mastra hands the caller a traceId inside the
+return value, but the trail lives in framework storage domains, not files
+a parent agent can read without the stack; Letta exposes persistent,
+versioned agent memory to external callers, but through a running
+server + DB, not artifacts; OpenAI's `custom_output_extractor` is the
+field visibly straining against the string return without shipping a
+contract to escape to. Earlier embryos stand (LangGraph checkpoints,
+AutoGen's last-message flag, Phoenix span scores). None combines the
+elements, and none measures signal-per-token. The *combination* —
+auditable, steerable, persistent, evidence-bearing delegation as a
+product — still has no found occupant; Mastra is the closest single
+competitor on the steer-and-trace axes and should be on the re-scan
+shortlist. PRELIMINARY-honest: nine repos across two sittings on one day;
+the landscape moves monthly; re-scan quarterly or on any funding-scale
+competitor signal.
 
 ### Inspect AI deep-dive (turn 2, same session — resume dogfood PASSED)
 
@@ -146,6 +224,11 @@ the ledger carried turn-1 context). The high-impact/low-effort findings:
 | Team-member-as-tool ergonomics | smolagents | recon skill / serve --recon copy |
 | Channel-schema framing for boundary docs | LangGraph | boundary-contract docs, A2A mapping (ADR-0020.1 D3) |
 | Transcript-vs-last-message dial as cautionary tale | AutoGen | marketing narrative: the evidence-shaped middle |
+| Caller-owned boundary transform (`input_filter: HandoffInputData -> HandoffInputData`) | OpenAI Agents SDK | compression-dial design; boundary-contract docs (ADR-0020.1 D3) |
+| `custom_output_extractor` as string-escape pressure | OpenAI Agents SDK | marketing narrative + report-schema rationale (they ship the hook, we ship the contract) |
+| Trace handle in the return value (`traceId`/`spanId` on `WorkflowResult`) | Mastra | report/MCP response: carry session dir + trace id explicitly |
+| Structured-output schema as a per-delegation dial | Mastra | consumption-surface dials (serve --recon) |
+| Versioned memory blocks (`BlockHistory`) | Letta | session ledger evolution — audited ledger edits |
 
 ## Absorption watchlist (standing — the codemap pattern, generalized)
 
@@ -172,8 +255,10 @@ API (inside ghx). The scan is standing: every prior-art review asks
 
 ## Cross-references
 
-- Sessions: `~/.ghx/sessions/{ukgovernmentbeis-inspect-ai, huggingface-smolagents, langchain-ai-langgraph, microsoft-autogen, arize-ai-phoenix-deep, crewaiinc-crewai}` — reports + traces (the evidence).
-- docs/dogfood/FRICTION.md — the two breaking entries this recon produced.
+- Sessions: `~/.ghx/sessions/{ukgovernmentbeis-inspect-ai, huggingface-smolagents, langchain-ai-langgraph, microsoft-autogen, arize-ai-phoenix-deep, crewaiinc-crewai, openai-openai-agents-python, letta-ai-letta, mastra-ai-mastra}` — reports + traces (the evidence).
+- docs/dogfood/FRICTION.md — the two breaking entries this recon produced,
+  plus the second wave's soft entries (progress-stream opacity, SDK
+  warning noise).
 - ADR-0020 (protocol landscape), ADR-0023 (judge research), ADR-0024 (M7
   research) — sibling landscape memos this complements.
 - NORTH_STAR "The Moat", capability §3 (main-agent-as-consumer lens).
