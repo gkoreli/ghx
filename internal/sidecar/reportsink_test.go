@@ -295,3 +295,30 @@ func TestBuildSessionMeta_AllowsSubmitReport(t *testing.T) {
 		t.Fatalf("SubmitReportToolID = %q, unexpected qualified name", SubmitReportToolID)
 	}
 }
+
+// TestDecodeReportStrictAcceptsRepoLevelCitations verifies ADR-0019.1 D3: the
+// report contract does not change for discovery, and nothing in strict
+// validation rejects owner/repo or owner/repo:path citation forms.
+func TestDecodeReportStrictAcceptsRepoLevelCitations(t *testing.T) {
+	payload := `{
+		"answer": "open-telemetry/opentelemetry-go ships a stdout OTLP-shaped exporter.",
+		"verified": [{"summary": "stdouttrace exporter exists", "evidence": "open-telemetry/opentelemetry-go:exporters/stdout/stdouttrace/trace.go"}],
+		"inferred": [{"summary": "tobert/otel-file-exporter looked relevant in search results only"}],
+		"relevantFiles": [
+			{"path": "open-telemetry/opentelemetry-go", "reason": "verified candidate (repo-level)"},
+			{"path": "open-telemetry/opentelemetry-go:exporters/stdout/stdouttrace/trace.go", "reason": "exporter implementation"}
+		],
+		"evidence": [{"source": "ghx search \"stdouttrace\"", "summary": "candidate sweep"}],
+		"uncertainty": ["candidate sweep bounded at depth normal"]
+	}`
+	r, err := DecodeReportStrict([]byte(payload))
+	if err != nil {
+		t.Fatalf("repo-level citations must pass strict validation: %v", err)
+	}
+	if r.RelevantFiles[0].Path != "open-telemetry/opentelemetry-go" {
+		t.Fatalf("owner/repo path mangled: %q", r.RelevantFiles[0].Path)
+	}
+	if r.RelevantFiles[1].Path != "open-telemetry/opentelemetry-go:exporters/stdout/stdouttrace/trace.go" {
+		t.Fatalf("owner/repo:path form mangled: %q", r.RelevantFiles[1].Path)
+	}
+}

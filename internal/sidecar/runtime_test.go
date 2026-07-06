@@ -295,3 +295,48 @@ func TestAskFailsBeforeTurnWhenACPHandshakeFails(t *testing.T) {
 		t.Fatalf("Ask error = %v, want handshake failure", err)
 	}
 }
+
+// TestAskPersonaSelectionByRepoScope verifies ADR-0019.1 D4: a repo-scoped ask
+// keeps the exact existing persona in the session meta, while an ask without
+// repo scope gets the discovery persona.
+func TestAskPersonaSelectionByRepoScope(t *testing.T) {
+	stubHandshake(t)
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+
+	var systemPrompt string
+	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		systemPrompt = ""
+		if opts.SessionMeta != nil {
+			if cc, ok := opts.SessionMeta["claudeCode"].(map[string]any); ok {
+				if so, ok := cc["options"].(SessionOptions); ok {
+					systemPrompt = so.SystemPrompt
+				}
+			}
+		}
+		return TurnResult{FullText: `<ghx-report>{"answer":"ok"}</ghx-report>`}, "sid", nil
+	}
+
+	// Repo-scoped: byte-identical to the existing persona.
+	if _, _, err := Ask(context.Background(), Config{SessionsDir: t.TempDir(), AgentCmd: "mock"}, AskRequest{
+		Session: "s1", Repo: "o/r", Question: "q",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if systemPrompt != BuildPersonaSystemPrompt() {
+		t.Fatal("repo-scoped ask must use the exact repo-scoped persona")
+	}
+
+	// Discovery: persona plus the discovery doctrine.
+	if _, _, err := Ask(context.Background(), Config{SessionsDir: t.TempDir(), AgentCmd: "mock"}, AskRequest{
+		Session: "s2", Question: "which repos do X",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if systemPrompt != BuildDiscoveryPersonaSystemPrompt() {
+		t.Fatal("discovery ask must use the discovery persona")
+	}
+	if !strings.Contains(systemPrompt, "## Discovery mode") {
+		t.Fatal("discovery persona missing discovery doctrine section")
+	}
+}

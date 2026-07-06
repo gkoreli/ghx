@@ -10,6 +10,8 @@ type Request struct {
 	// Session is the named session identifier (e.g. "myfeature").
 	Session string
 	// Repo is the GitHub repo under investigation ("owner/repo").
+	// Empty means discovery mode: no repo scope, cross-GitHub sweep
+	// (ADR-0019.1 D1).
 	Repo string
 	// Question is the English question about the repo.
 	Question string
@@ -120,6 +122,40 @@ call submit_report with:
 	return sb.String()
 }
 
+// discoveryDoctrine is the persona section for discovery reconnaissance
+// (ADR-0019.1 D4). It is rendered ONLY when the ask has no repo scope; the
+// repo-scoped persona stays byte-identical to BuildPersonaSystemPrompt.
+const discoveryDoctrine = `
+## Discovery mode
+
+No repo scope was given: the question asks which repos, libraries, or
+frameworks do something, and your scope is the whole GitHub open-source
+world reachable through ghx.
+
+1. Sweep broadly first: run ghx search (code) and ghx repos (repositories)
+   with several distinct query formulations before reading anything.
+2. Triangulate candidates by signals worth trusting: real usage in code,
+   repository activity, and docs — never name similarity alone.
+3. Verify before claiming: only repos you actually read into (ghx explore,
+   ghx read) may back verified claims. A repo seen only in search results
+   is an inferred candidate, never a verified one.
+4. Report a ranked comparison of the top candidates, and be honest about
+   the unverified tail: name the candidates you did not read into in
+   inferred/uncertainty instead of silently dropping them.
+
+Cite repo-level evidence as owner/repo (or owner/repo:path for a specific
+file) in relevantFiles paths and evidence sources. The depth budget bounds
+the sweep exactly as it bounds repo-scoped exploration.
+`
+
+// BuildDiscoveryPersonaSystemPrompt returns the persona for discovery
+// reconnaissance (ADR-0019.1 D1/D4): the exact repo-scoped persona from
+// BuildPersonaSystemPrompt plus the discovery doctrine section. Callers select
+// it when the ask carries no repo scope.
+func BuildDiscoveryPersonaSystemPrompt() string {
+	return BuildPersonaSystemPrompt() + discoveryDoctrine
+}
+
 // BuildPrompt constructs the per-turn user prompt for a sidecar turn.
 //
 // The stable persona/doctrine is NOT included here — it moves to the ACP
@@ -151,7 +187,13 @@ func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "## Repo\n\n%s\n\n", req.Repo)
+	if req.Repo != "" {
+		fmt.Fprintf(&sb, "## Repo\n\n%s\n\n", req.Repo)
+	} else {
+		// Discovery mode (ADR-0019.1 D1): no repo pinned; the persona's
+		// discovery doctrine section governs how to sweep and verify.
+		sb.WriteString("## Scope\n\ndiscovery — no repo pinned; sweep GitHub for candidates\n\n")
+	}
 	fmt.Fprintf(&sb, "## Session\n\n%s\n\n", req.Session)
 	fmt.Fprintf(&sb, "## Question\n\n%s\n\n", req.Question)
 	fmt.Fprintf(&sb, "## Depth\n\n%s\n\n", depth)

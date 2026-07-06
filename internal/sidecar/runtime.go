@@ -87,6 +87,8 @@ type AskRequest struct {
 	// Session is the named session to use (created if it does not exist).
 	Session string
 	// Repo is the GitHub repo under investigation ("owner/repo").
+	// Empty means discovery mode: no repo scope, cross-GitHub sweep
+	// (ADR-0019.1 D1).
 	Repo string
 	// Question is the English question about the repo.
 	Question string
@@ -163,8 +165,15 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	if depth == "" {
 		depth = "normal"
 	}
+	// Persona selection (ADR-0019.1 D4): a repo-scoped ask keeps the exact
+	// existing persona; an ask without repo scope gets the discovery persona
+	// (same doctrine plus the discovery-mode section).
+	persona := BuildPersonaSystemPrompt()
+	if req.Repo == "" {
+		persona = BuildDiscoveryPersonaSystemPrompt()
+	}
 	sessionMeta := BuildSessionMeta(
-		BuildPersonaSystemPrompt(),
+		persona,
 		depth,
 		cfg.Model,
 		cfg.EvalMode,

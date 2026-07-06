@@ -180,9 +180,12 @@ instead.
 ghx sidecar ask --repo hono/hono "How does Hono implement middleware chaining, and which files define it?"
 ```
 
-- `--repo owner/repo` is required — the sidecar is remote-first and
-  repo-explicit; it never guesses the repo.
-- `--session <name>` is optional (defaults to a repo slug, e.g. `hono-hono`); use
+- `--repo owner/repo` is optional scope. With it: repo-scoped reconnaissance.
+  Without it: **discovery** — "which repos/libraries do X" — the sidecar sweeps
+  GitHub for candidates and reads into the top ones before claiming anything
+  (see [ADR-0019.1](docs/adr/0019.1-discovery-tier.md)).
+- `--session <name>` is optional (defaults to a repo slug like `hono-hono`, or a
+  question-derived slug for discovery asks — printed so you can resume it); use
   it to keep parallel investigation threads apart.
 - `--json` prints the full report struct; without it you get the answer plus
   compact verified / relevant-files / uncertainty sections.
