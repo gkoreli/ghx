@@ -54,7 +54,7 @@ Entry format:
 - Attempted: `sidecar ask --repo Arize-ai/phoenix "how does LLM-as-judge eval work..."` (large repo, sprawling internals) at default depth.
 - Ground: the agent explored ~20+ tool calls, then the adapter killed the prompt with `Internal error: Reached maximum number of turns (24)`. The entire exploration was lost — no report, not even a partial. The budget safety net fires as a hard error instead of forcing a "submit what you have" wrap-up.
 - Trace: ~/.ghx/sessions/arize-ai-phoenix/ — see next entry.
-- Disposition: open — runtime should catch the max-turns error and send a forced submit_report follow-up in the same session (the session survives; a fresh query gets fresh turns); depth heuristics may also need repo-size awareness.
+- Disposition: open — design settled (Goga, 2026-07-05): this is a SESSION RESUME problem, not error handling. The ACP session survives the turn error; the runtime must LoadSession-resume it and send a "wrap up: submit_report with what you have" prompt (fresh query = fresh turn budget). Part of the always-on-runtime capability (NORTH_STAR §4): explorations are never lost to process or turn boundaries.
 
 ## 2026-07-05 failed turns leave zero artifacts — breaking
 - Attempted: audit the failed phoenix ask above.
