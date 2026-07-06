@@ -68,7 +68,15 @@ you can `ls` and `jq`:
     logs.jsonl                # GenAI-convention message-content records
     metrics.jsonl             # duration, token, report-size metrics
     tier-decisions.jsonl      # escalation policy evaluation per turn (which tier, why)
+    live.jsonl                # realtime turn activity, appended as it happens
 ```
+
+The OTLP artifacts are written when a question completes; `live.jsonl` streams
+turn activity in realtime — turn start/end, text and thought chunks, every tool
+call and update as the agent works — so
+`tail -f ~/.ghx/sessions/<name>/live.jsonl` watches a running question instead
+of waiting minutes for the final report
+(see [ADR-0022.1](docs/adr/0022.1-live-turn-log.md)).
 
 Sessions persist, so follow-up questions on the same repo are cheaper and
 context-aware. The traces are **official OpenTelemetry** (OTLP/JSON, GenAI

@@ -56,6 +56,9 @@ func TestAskDefaultsCwdToSessionWorkspace(t *testing.T) {
 	if opts.AgentStderrPath != AgentStderrLogPath(dir, "s") {
 		t.Errorf("AgentStderrPath = %q, want %q", opts.AgentStderrPath, AgentStderrLogPath(dir, "s"))
 	}
+	if opts.LiveLogPath != LiveLogPath(dir, "s") {
+		t.Errorf("LiveLogPath = %q, want %q", opts.LiveLogPath, LiveLogPath(dir, "s"))
+	}
 	meta, err := ReadMeta(dir, "s")
 	if err != nil {
 		t.Fatal(err)
