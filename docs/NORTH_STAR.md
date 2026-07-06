@@ -187,6 +187,16 @@ modular, and reused across both.
   build decisions, then marketing material and bragging rights when
   promoting ghx, then possibly a product of their own (see Consequence
   Products).
+- **Trust in the measurement is a tracked workstream, never an assumed
+  property** (Goga, 2026-07-06). The evals framework — deterministic
+  metrics, judges, scores, traces — is itself a primary north-star goal,
+  and its trustworthiness is engineered like the product: every claim has
+  a named verifier and evidence; every hole is on the record until an
+  audit closes it. The living ledger is `docs/evals/TRUST.md`; the
+  frontier rows live in workstream C below. **Every loop iteration should
+  advance or re-verify trust** — mining eval results for what they reveal,
+  auditing a layer, closing a ledger hole, or hardening the framework —
+  the same way dogfooding is a standing obligation.
 - **The main agent's context is sacred.** Every design choice is judged by
   what it removes from the customer agent's context.
 - **Evidence, not vibes.** Every sidecar answer carries files, commands,
@@ -317,6 +327,8 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | C4 | Judge layer: offline machinery + cross-family client done; gold-set labeling + κ ≥ 0.6 calibration pending (ADR-0023.1) | ← frontier — founder labeling session unlocks it |
 | C5 | Discovery-class eval tasks (ADR-0019.1 D5) | Future (ADR before build) |
 | C6 | Continuous evaluation: judged production sessions, self-reflective improvement loop (observability tenet) | Future (gated on C4 calibration) |
+| C7 | **Trust ledger driven to green** (`docs/evals/TRUST.md`): memorization-confound audit (H2, closed-book probe), trace-capture completeness (H3, raw-SDK diff), judge κ calibration (H1), real token accounting (H5), corpus ceiling refresh (H7) | ← standing frontier — every loop advances or re-verifies a row; audits for H2/H3 in flight 2026-07-06 |
+| C8 | Combined-objective host-task evals: prove the NORTH_STAR "both, not one" rebuttal with two-agent episodes | Research done (ADR-0032); decision ADR next |
 
 The P4 training track (M9/M10) stays a single sequential ladder on top —
 it consumes all three streams (A's tools, B's trajectories, C's labels)
