@@ -274,6 +274,54 @@ frontier milestone is not starved by it.
 | M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Unblocked by M4 (SUPPORTED); export design decided (ADR-0017.1: TRL JSONL, KTO-first); still gated on the calibrated judge (ADR-0023.1 D5) for trajectory-quality labels |
 | M10 | Trained `ghx-sidecar` model behind the same boundary; re-run the same suite | P4 | Blocked on M9 |
 
+### Parallel workstreams (founder, 2026-07-06)
+
+The single milestone ladder above stays the citation anchor (ADRs
+reference M-numbers), but work proceeds as **three parallel workstreams**
+— each independently improvable, each with its own sub-milestones, all
+feeding one product. A loop iteration may advance any stream; the
+frontier is per-stream, not global.
+
+**A. ghx CLI (the tool layer)** — the sharper the tool, the better every
+profile above it, including baselines (honesty: CLI gains lift `ghx` and
+`ghx-sidecar` alike; the eval isolates the sidecar's *additional* value).
+
+| # | Sub-milestone | Status |
+|---|---|---|
+| A1 | Evidence engine: explore/read/search/map/codemode (= M1) | Shipped |
+| A2 | Agent-usage mining → CLI ergonomics batch: mine eval/production traces for failed invocations, wasteful outputs, missing flags; fix the top findings | ← frontier (two GPT-5.5 miners ran 2026-07-06; findings → pre-registered batch) |
+| A3 | Tier-2 structural tools absorbed under the CLI: codemap, ast-grep, repomap ranking (= M7 tooling half) | Future (ADR-0024 research done) |
+| A4 | Error messages as agent affordances: every CLI error tells the agent the correct next invocation | Future (feeds from A2 findings) |
+
+**B. Sidecar Agent Framework (SAF)** — the runtime product.
+
+| # | Sub-milestone | Status |
+|---|---|---|
+| B1 | Go-native runtime over ACP (= M2) | Shipped |
+| B2 | Zero-CLI adoption surface: recon skill, single MCP tool, one-command setup (= M5) | ← frontier — dogfood week active; breaking items fixed 2026-07-06 |
+| B3 | Shared visibility substrate, ~/.ghx artifacts, view command (= M6) | Done |
+| B4 | Runtime resilience: wrap-up recovery, liveness watchdog, artifacts-on-failure, evidence-required reports (ADR-0027) | Done 2026-07-06 |
+| B5 | Discovery tier: repo optional, GitHub-wide reconnaissance (ADR-0019.1) | Done 2026-07-06 |
+| B6 | Always-on runtime: warm daemon shared across entrypoints, no cold starts (§4) | Future |
+| B7 | Session routing: sidecar routes questions to the right active session; main agent never sees sessions (§4 end state) | Future (after B6) |
+| B8 | Persona proficiency: mining-driven persona revisions, each pre-registered before the next gate run | Standing (miner findings 2026-07-06 → first batch) |
+| B9 | Escalation tiers sidecar-decided (= M7 brain half); eager anticipation (= M8) | Future (B6 prerequisite for M8) |
+
+**C. SAF Evals (SAFE)** — the proof machinery.
+
+| # | Sub-milestone | Status |
+|---|---|---|
+| C1 | Eval kernel, gates, validity hardening (= M3, M4) | Done — M4 THESIS SUPPORTED |
+| C2 | Run economics: sequential stopping + bounded parallelism (ADR-0025 D1/D3) | Done; D2 baseline reuse + D4 haiku arm pending (pre-register before build) |
+| C3 | Measurement fidelity: union scoring, contamination guard, sufficiency honesty (ADR-0016.8) | Done 2026-07-06 — first measured verdict in flight |
+| C4 | Judge layer: offline machinery + cross-family client done; gold-set labeling + κ ≥ 0.6 calibration pending (ADR-0023.1) | ← frontier — founder labeling session unlocks it |
+| C5 | Discovery-class eval tasks (ADR-0019.1 D5) | Future (ADR before build) |
+| C6 | Continuous evaluation: judged production sessions, self-reflective improvement loop (observability tenet) | Future (gated on C4 calibration) |
+
+The P4 training track (M9/M10) stays a single sequential ladder on top —
+it consumes all three streams (A's tools, B's trajectories, C's labels)
+and cannot be parallelized ahead of them.
+
 M4's verdict gates the investment: G1 (correctness) or G3 (compression)
 failing means the sidecar thesis is not supported and P3/P4 spending pauses.
 The north star includes the possibility of learning the boundary is wrong —
