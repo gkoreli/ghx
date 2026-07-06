@@ -48,6 +48,25 @@ func startEpisodeLiveness(task Task, profile Profile) (stop func()) {
 	return func() { close(done) }
 }
 
+func startDiscoveryEpisodeLiveness(task DiscoveryTask, profile Profile) (stop func()) {
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		ticker := time.NewTicker(episodeLivenessInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Fprintf(os.Stderr, "discovery eval episode live task=%s profile=%s elapsed=%s (still running)\n",
+					task.ID, profile, time.Since(start).Round(time.Second))
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // ProbeAgentIdentity starts the configured ACP adapter, performs initialize,
 // and returns the same run identity fields recorded on episodes. Baseline reuse
 // needs this before deciding whether direct profiles may be skipped
@@ -127,6 +146,103 @@ func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) 
 	ep.Anomalies = DetectAnomalies(ep)
 	logEpisodeProgress(task, ep)
 	return ep, err
+}
+
+// RunDiscoveryEpisode executes one ADR-0019.2 discovery task under one
+// profile and returns the episode scored with discovery rewards. It keeps
+// repo-scoped RewardBreakdown untouched except for safety/context fields
+// needed by shared artifact consumers.
+func RunDiscoveryEpisode(ctx context.Context, cfg RunConfig, task DiscoveryTask, profile Profile) (*Episode, error) {
+	rt, rtErr := prepareEpisodeRuntime(cfg, profile)
+	if rtErr != nil {
+		return nil, rtErr
+	}
+	defer rt.Cleanup()
+
+	stopLiveness := startDiscoveryEpisodeLiveness(task, profile)
+	defer stopLiveness()
+
+	ep := &Episode{
+		ID:              fmt.Sprintf("%s_%s_%d", task.ID, profile, time.Now().UnixMilli()),
+		TaskID:          task.ID,
+		Profile:         profile,
+		DiscoveryChecks: &task.Checks,
+		StartedAt:       time.Now().UTC(),
+		Identity:        agentIdentity(cfg, nil),
+	}
+
+	var err error
+	if profile == ProfileSidecar {
+		err = runDiscoverySidecarEpisode(ctx, cfg, task, ep, rt)
+	} else {
+		err = runDirectDiscoveryEpisode(ctx, cfg, task, profile, ep, rt)
+	}
+
+	ep.EndedAt = time.Now().UTC()
+	finalizeContext(ep)
+	rewards := ComputeDiscoveryRewards(task, ep)
+	ep.DiscoveryRewards = &rewards
+	ep.Rewards = RewardBreakdown{
+		Evidence:    rewards.Evidence,
+		Compression: rewards.Compression,
+		Safety:      rewards.Safety,
+		Overall:     mean([]float64{rewards.VerifiedRecall, rewards.VerifiedPrecision, rewards.Evidence, rewards.InferenceHonesty, rewards.Compression, rewards.Safety}),
+	}
+	ep.Anomalies = DetectAnomalies(ep)
+	logDiscoveryEpisodeProgress(task, ep)
+	return ep, err
+}
+
+func runDiscoverySidecarEpisode(ctx context.Context, cfg RunConfig, task DiscoveryTask, ep *Episode, rt episodeRuntime) error {
+	scfg := sidecar.Config{
+		AgentCmd:    cfg.AgentCmd,
+		SessionsDir: cfg.SessionsDir,
+		Cwd:         rt.Cwd,
+		Env:         rt.Env,
+		Model:       resolveSubjectModel(cfg.AgentCmd),
+		EvalMode:    true,
+	}
+	session := ep.ID
+
+	for i, q := range task.Turns {
+		rec := TurnRecord{Turn: i, Question: q}
+		start := time.Now()
+		if i > 0 {
+			meta, metaErr := sidecar.ReadMeta(cfg.SessionsDir, session)
+			rec.Resumed = metaErr == nil && meta != nil && meta.ACPSessionID != ""
+		}
+		report, turn, err := sidecar.Ask(ctx, scfg, sidecar.AskRequest{
+			Session:  session,
+			Question: q,
+			Depth:    "normal",
+		})
+		rec.DurationMs = time.Since(start).Milliseconds()
+		if turn != nil {
+			populateTurnRecord(&rec, turn)
+		}
+		if err != nil {
+			rec.Error = err.Error()
+			rec.Resumed = false
+			ep.Turns = append(ep.Turns, rec)
+			appendTraceProjections(ep, rec)
+			return fmt.Errorf("sidecar discovery turn %d: %w", i, err)
+		}
+		rec.Report = report
+		ep.Turns = append(ep.Turns, rec)
+		appendTraceProjections(ep, rec)
+		ep.Report = report
+		if turn.AgentInfo != nil {
+			ep.Identity.AdapterName = turn.AgentInfo.Name
+			ep.Identity.AdapterVersion = turn.AgentInfo.Version
+			ep.Identity.AdapterSubjectModel = modelFromMeta(turn.AgentInfo.Meta)
+		}
+	}
+	return nil
+}
+
+func runDirectDiscoveryEpisode(ctx context.Context, cfg RunConfig, task DiscoveryTask, profile Profile, ep *Episode, rt episodeRuntime) error {
+	repoScoped := Task{ID: task.ID, Turns: task.Turns}
+	return runDirectEpisode(ctx, cfg, repoScoped, profile, ep, rt)
 }
 
 // runSidecarEpisode drives the production sidecar path: one sidecar.Ask per
@@ -291,6 +407,15 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 func logEpisodeProgress(task Task, ep *Episode) {
 	fmt.Fprintf(os.Stderr, "eval episode complete task=%s profile=%s turns=%d overall=%.3f mainAgentChars=%d duration=%s\n",
 		task.ID, ep.Profile, len(ep.Turns), ep.Rewards.Overall, ep.Context.MainAgentChars, ep.EndedAt.Sub(ep.StartedAt).Round(time.Millisecond))
+}
+
+func logDiscoveryEpisodeProgress(task DiscoveryTask, ep *Episode) {
+	verifiedRecall := 0.0
+	if ep.DiscoveryRewards != nil {
+		verifiedRecall = ep.DiscoveryRewards.VerifiedRecall
+	}
+	fmt.Fprintf(os.Stderr, "discovery eval episode complete task=%s profile=%s turns=%d verifiedRecall=%.3f mainAgentChars=%d duration=%s\n",
+		task.ID, ep.Profile, len(ep.Turns), verifiedRecall, ep.Context.MainAgentChars, ep.EndedAt.Sub(ep.StartedAt).Round(time.Millisecond))
 }
 
 func modelFromMeta(meta map[string]any) string {
