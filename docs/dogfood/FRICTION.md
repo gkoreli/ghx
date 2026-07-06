@@ -36,7 +36,7 @@ Entry format:
 - Attempted: "find open-source prior art similar to our agent sidecar framework and evals" — a discovery question spanning unknown repos.
 - Ground: `sidecar ask` is repo-scoped (`--repo` required); the candidate list had to come from the operator's own knowledge/web search first. The sidecar can answer "how does X work in repo Y" but not "which repos do X" — reconnaissance starts one step before the sidecar can.
 - Trace: n/a (question never reached the sidecar).
-- Disposition: open — candidate product surface: a discovery tier (ghx search/explore across GitHub) inside the sidecar brain.
+- Disposition: fixed 8bc21e5 — ADR-0019.1 discovery tier: `--repo` is now optional scope; without it the sidecar runs discovery reconnaissance (question-derived session slug, discovery persona doctrine, repo-level `owner/repo` citations).
 
 ## 2026-07-05 ACP agent setup is the hardest step — soft
 - Attempted: first-time production setup (`~/.ghx/config.json`).
