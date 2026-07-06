@@ -118,6 +118,21 @@ Do not rely on Fable remembering CLI flags. When delegating to Codex CLI or Clau
 
 That skill is the canonical home for command syntax, bypass flags, wrapper prompts, and evidence report shape. Keep this file focused on routing judgment, not command tables.
 
+## Eval Verification Routing (Goga, 2026-07-05)
+
+When a feature or fix needs live-eval verification, Fable defaults to a
+**random spot check, never the full suite**: sample 2-3 task x profile
+cells at random (always include at least one `ghx-sidecar` cell and, when
+session behavior changed, one multi-turn task), run them strict, and read
+the anomaly table. Randomize the sample every time - repeatedly smoking
+the same favorite task overfits the spot check and blinds it. The full
+pre-registered suite runs only to re-ground the citable verdict after
+product deltas accumulate, only on Goga's explicit trigger, and always in
+the background while engineering continues (AGENTS.md "full gate runs
+never block engineering"; ladder in ADR-0016.3; run economics in
+ADR-0025). If Fable is ever waiting on a full run to start the next
+feature, the process is being misused.
+
 ## Evidence Contract
 
 The evidence contract lives in `AGENTS.md` ("Evidence Contract") — it binds all
