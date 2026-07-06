@@ -63,6 +63,25 @@ var sidecarAskCmd = &cobra.Command{
 	},
 }
 
+// sidecarReportSinkCmd is a hidden, internal command: it serves the
+// report-sink MCP server over stdio, exposing exactly the submit_report tool
+// (ADR-0021 D1). The sidecar runtime spawns it as a session-scoped MCP server
+// (via ACP NewSessionRequest.McpServers) so the agent submits its final report
+// through a strictly-validated tool call instead of a free-text block. It is
+// not meant to be run by hand.
+var sidecarReportSinkCmd = &cobra.Command{
+	Use:    "report-sink --out <path>",
+	Short:  "Internal: serve the submit_report MCP tool over stdio",
+	Hidden: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out, _ := cmd.Flags().GetString("out")
+		if out == "" {
+			return fmt.Errorf("--out is required")
+		}
+		return sidecar.RunReportSink(out)
+	},
+}
+
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -216,9 +235,11 @@ func init() {
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 
+	sidecarReportSinkCmd.Flags().String("out", "", "Path to write the accepted report JSON (required)")
+
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
-	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarSessionsCmd, sidecarConfigCmd)
+	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarSessionsCmd, sidecarConfigCmd)
 }
 
 func defaultReconSession(repo string) string {

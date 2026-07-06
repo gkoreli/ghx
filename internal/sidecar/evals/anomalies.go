@@ -39,6 +39,13 @@ const (
 	// the one-shot corrective follow-up. Recovered, but the first attempt
 	// failed — a soft reliability signal.
 	AnomalySidecarReportRetried = "sidecar_report_retried"
+	// AnomalySidecarReportCoerced: the final report was obtained only via the
+	// lenient <ghx-report> coercion fallback (ADR-0021 D3) — the producer's JSON
+	// did not fit the schema and had to be normalized. Recovered, but a soft
+	// signal that the producer drifted; strict submit_report submissions never
+	// set this. Counted so drift stays visible instead of silently absorbed
+	// (Visibility and Truthfulness).
+	AnomalySidecarReportCoerced = "sidecar_report_coerced"
 	// AnomalyDirectGhxNoncompliance: a ghx-profile episode recorded zero
 	// ghx invocations — the subject agent ignored the injected skill, which
 	// weakens the ghx baseline that gates compare against.
@@ -70,7 +77,13 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 			if turn.ReportRetried {
 				out = append(out, Anomaly{
 					Kind: AnomalySidecarReportRetried, Severity: SeveritySoft, Turn: turn.Turn,
-					Detail: "report obtained only after the one-shot corrective retry",
+					Detail: "report obtained only after a corrective retry",
+				})
+			}
+			if turn.ReportCoerced {
+				out = append(out, Anomaly{
+					Kind: AnomalySidecarReportCoerced, Severity: SeveritySoft, Turn: turn.Turn,
+					Detail: "report obtained only via lenient <ghx-report> coercion (schema drift on the fallback path)",
 				})
 			}
 			if turn.Report == nil {
@@ -124,6 +137,7 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalySidecarReportMissing, SeverityBreaking},
 		{AnomalySidecarReportUnparsed, SeveritySoft},
 		{AnomalySidecarReportRetried, SeveritySoft},
+		{AnomalySidecarReportCoerced, SeveritySoft},
 		{AnomalyDirectGhxNoncompliance, SeveritySoft},
 	}
 	counts := map[string]int{}

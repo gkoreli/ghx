@@ -8,6 +8,8 @@ package sidecar
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -48,34 +50,76 @@ type Report struct {
 
 var ghxReportRE = regexp.MustCompile(`(?s)<ghx-report>(.*?)</ghx-report>`)
 
+// ErrNoReportBlock is returned by ExtractReportErr when the text contains no
+// <ghx-report>…</ghx-report> block at all.
+var ErrNoReportBlock = errors.New("no <ghx-report>…</ghx-report> block found in output")
+
+// ErrEmptyAnswer is returned when a report parses but its answer field is empty.
+var ErrEmptyAnswer = errors.New("report has an empty \"answer\" field")
+
 // ExtractReport parses the first <ghx-report>…</ghx-report> block from text.
 // Returns nil when no valid block is present.
 //
-// Parsing is lenient (ADR-0016.7 RC2): models under the report compactness
-// bound routinely emit a bare string or a single object where the schema
-// wants an array. Rejecting the whole report over such a shape mismatch
-// throws away completed, auditable work, so near-conformant shapes are
-// coerced before unmarshaling.
+// It is a thin, compatibility-preserving wrapper over ExtractReportErr: callers
+// that only care about success/failure keep the original signature, while the
+// runtime uses ExtractReportErr to learn WHY extraction failed (ADR-0021 D3).
 func ExtractReport(text string) *Report {
+	r, _, err := ExtractReportErr(text)
+	if err != nil {
+		return nil
+	}
+	return r
+}
+
+// ExtractReportErr is the diagnostic variant of ExtractReport (ADR-0021 D3).
+//
+// It returns the parsed report, whether lenient coercion had to be applied to
+// obtain it, and a concrete error describing the failure category:
+//
+//   - ErrNoReportBlock       — no <ghx-report> block in the text
+//   - invalid JSON           — the block is not JSON (wraps the json syntax error)
+//   - schema mismatch        — the JSON does not fit the Report schema even
+//     after coercion (wraps the typed unmarshal error)
+//   - ErrEmptyAnswer         — the report parsed but has no answer
+//
+// The coerced flag is true only when the strict unmarshal failed and the
+// lenient coercion path (ADR-0016.7 RC2) produced a usable report. Coercion
+// stays confined to this fallback path; the MCP submit_report tool (ADR-0021
+// D1) validates strictly with no coercion. Every coercion is surfaced so drift
+// stays visible instead of silently absorbed (Visibility and Truthfulness).
+func ExtractReportErr(text string) (report *Report, coerced bool, err error) {
 	m := ghxReportRE.FindStringSubmatch(text)
 	if m == nil {
-		return nil
+		return nil, false, ErrNoReportBlock
 	}
 	body := []byte(strings.TrimSpace(m[1]))
+
 	var r Report
-	if err := json.Unmarshal(body, &r); err != nil {
-		coerced, cerr := coerceReportJSON(body)
+	strictErr := json.Unmarshal(body, &r)
+	if strictErr != nil {
+		// Distinguish "not JSON at all" from "JSON but wrong shape": a JSON
+		// syntax error means the block is not machine-readable; a type error
+		// means the producer emitted a near-conformant shape we may coerce.
+		var syntaxErr *json.SyntaxError
+		if errors.As(strictErr, &syntaxErr) {
+			// Confirm it is genuinely not valid JSON before reporting so.
+			if !json.Valid(body) {
+				return nil, false, fmt.Errorf("invalid JSON in <ghx-report> block: %w", strictErr)
+			}
+		}
+		coercedBody, cerr := coerceReportJSON(body)
 		if cerr != nil {
-			return nil
+			return nil, false, fmt.Errorf("invalid JSON in <ghx-report> block: %w", cerr)
 		}
-		if err := json.Unmarshal(coerced, &r); err != nil {
-			return nil
+		if cerr := json.Unmarshal(coercedBody, &r); cerr != nil {
+			return nil, false, fmt.Errorf("<ghx-report> JSON does not fit the report schema: %w", cerr)
 		}
+		coerced = true
 	}
 	if r.Answer == "" {
-		return nil
+		return nil, coerced, ErrEmptyAnswer
 	}
-	return &r
+	return &r, coerced, nil
 }
 
 // claimFields want []Claim; string items become Claim{Summary: s}.

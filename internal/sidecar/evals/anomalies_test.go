@@ -53,6 +53,40 @@ func TestDetectAnomaliesTaxonomyKinds(t *testing.T) {
 	}
 }
 
+// TestDetectAnomaliesReportCoerced pins ADR-0021 D3: a turn whose report was
+// obtained only via lenient coercion emits the soft sidecar_report_coerced
+// anomaly so drift stays counted.
+func TestDetectAnomaliesReportCoerced(t *testing.T) {
+	ep := &Episode{
+		Profile: ProfileSidecar,
+		Turns: []TurnRecord{
+			{
+				Turn:          0,
+				ReportCoerced: true,
+				Report:        &sidecar.Report{Answer: "Recovered via coercion."},
+			},
+		},
+	}
+	a, ok := anomalyByKind(DetectAnomalies(ep), AnomalySidecarReportCoerced)
+	if !ok {
+		t.Fatalf("missing %s anomaly", AnomalySidecarReportCoerced)
+	}
+	if a.Severity != SeveritySoft {
+		t.Fatalf("severity = %s, want soft", a.Severity)
+	}
+	// It must also be aggregated by CountAnomalies in taxonomy order.
+	counts := CountAnomalies([]*Episode{ep})
+	found := false
+	for _, c := range counts {
+		if c.Kind == AnomalySidecarReportCoerced && c.Count == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("CountAnomalies did not aggregate %s: %+v", AnomalySidecarReportCoerced, counts)
+	}
+}
+
 func TestDetectAnomaliesDirectGhxNoncompliance(t *testing.T) {
 	ep := &Episode{
 		Profile: ProfileGhx,

@@ -107,6 +107,10 @@ type TurnRecord struct {
 	// ReportRetried records whether sidecar report extraction needed the
 	// one-shot corrective retry before producing the final report.
 	ReportRetried bool `json:"reportRetried,omitempty"`
+	// ReportCoerced records whether the final report was obtained only via the
+	// lenient <ghx-report> coercion fallback (ADR-0021 D3) rather than a strict
+	// submit_report submission. Surfaced so evals count every coercion.
+	ReportCoerced bool `json:"reportCoerced,omitempty"`
 	// Resumed reports whether this turn continued prior agent context
 	// (ACP LoadSession for the sidecar profile; same live session for
 	// direct profiles). Always false on turn 0.

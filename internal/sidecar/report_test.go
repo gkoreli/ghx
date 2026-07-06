@@ -1,9 +1,48 @@
 package sidecar
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
+
+// TestExtractReportErrDiagnostics pins ADR-0021 D3: the error-returning variant
+// reports WHY extraction failed, so the corrective retry can name the defect.
+func TestExtractReportErrDiagnostics(t *testing.T) {
+	t.Run("no block", func(t *testing.T) {
+		_, coerced, err := ExtractReportErr("plain prose, no block")
+		if !errors.Is(err, ErrNoReportBlock) || coerced {
+			t.Fatalf("err=%v coerced=%v, want ErrNoReportBlock", err, coerced)
+		}
+	})
+	t.Run("invalid json", func(t *testing.T) {
+		_, _, err := ExtractReportErr("<ghx-report>{not json at all}</ghx-report>")
+		if err == nil || !strings.Contains(err.Error(), "invalid JSON") {
+			t.Fatalf("err=%v, want invalid JSON diagnostic", err)
+		}
+	})
+	t.Run("empty answer", func(t *testing.T) {
+		_, _, err := ExtractReportErr(`<ghx-report>{"answer":""}</ghx-report>`)
+		if !errors.Is(err, ErrEmptyAnswer) {
+			t.Fatalf("err=%v, want ErrEmptyAnswer", err)
+		}
+	})
+	t.Run("valid strict", func(t *testing.T) {
+		r, coerced, err := ExtractReportErr(`<ghx-report>{"answer":"ok"}</ghx-report>`)
+		if err != nil || r == nil || coerced {
+			t.Fatalf("r=%v coerced=%v err=%v, want clean strict parse", r, coerced, err)
+		}
+	})
+	t.Run("coerced flag set", func(t *testing.T) {
+		r, coerced, err := ExtractReportErr(`<ghx-report>{"answer":"ok","verified":"one claim"}</ghx-report>`)
+		if err != nil || r == nil || !coerced {
+			t.Fatalf("r=%v coerced=%v err=%v, want coerced parse", r, coerced, err)
+		}
+		if len(r.Verified) != 1 {
+			t.Fatalf("verified = %+v, want coerced single claim", r.Verified)
+		}
+	})
+}
 
 func TestExtractReportValid(t *testing.T) {
 	text := `Some exploration narration.

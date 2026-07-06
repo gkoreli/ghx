@@ -46,6 +46,28 @@ type SessionOptions struct {
 	// Source: ADR-0020 addendum + claude-agent-sdk AgentDefinition.tools.
 	Tools []string `json:"tools,omitempty"`
 
+	// AllowedTools is the SDK auto-approve list: tools named here execute
+	// WITHOUT going through the permission callback (claude-agent-sdk
+	// sdk.d.ts:1305 "auto-allowed without prompting for permission"). We use it
+	// for its documented purpose (NOT as a built-in allowlist — see Tools): the
+	// session-scoped report-sink submit_report MCP tool (ADR-0021 D1).
+	//
+	// Why it is required, from the shipped sources:
+	//   - The Tools allowlist above scopes only BUILT-IN tools (sdk.d.ts:1367
+	//     "base set of available built-in tools"); MCP tools are a separate
+	//     category delivered via mcpServers, so ["Bash","Read"] does not hide
+	//     submit_report.
+	//   - But the adapter classifies every MCP tool call as ACP kind "other"
+	//     (claude-agent-acp dist/tools.js toolInfoFromToolUse default case),
+	//     and the sidecar denyClient treats "other" as write-shaped and rejects
+	//     it. Auto-approving submit_report here bypasses that permission path.
+	//   - The adapter forwards this field verbatim to the SDK via
+	//     `...userProvidedOptions` (dist/acp-agent.js:2800).
+	//
+	// It does NOT widen write access: submit_report only persists the report to
+	// the runtime-owned sink file.
+	AllowedTools []string `json:"allowedTools,omitempty"`
+
 	// MaxTurns caps the number of agentic turns the adapter will execute.
 	// Maps to depth budget (see DepthBudget). Nil means adapter default.
 	MaxTurns *int `json:"maxTurns,omitempty"`
@@ -158,9 +180,15 @@ func BuildSessionMeta(persona, depth, model string, emitRaw bool) map[string]any
 		SettingSources:  []string{}, // explicitly [] — disables host settings inheritance
 		StrictMcpConfig: true,
 		Tools:           sidecarToolsAllowlist,
-		MaxTurns:        budget.maxTurns,
-		Effort:          budget.effort,
-		Model:           model,
+		// Auto-approve the report-sink submit_report MCP tool (ADR-0021 D1).
+		// strictMcpConfig:true does NOT block it: the adapter always merges
+		// servers passed via the ACP mcpServers option into the SDK's
+		// mcpServers (dist/acp-agent.js:2822); strictMcpConfig only ignores
+		// OTHER config sources (sdk.d.ts:1889-1895).
+		AllowedTools: []string{SubmitReportToolID},
+		MaxTurns:     budget.maxTurns,
+		Effort:       budget.effort,
+		Model:        model,
 	}
 	if budget.thinking != nil {
 		opts.Thinking = thinkingConfigForBudget(*budget.thinking)

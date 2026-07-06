@@ -41,10 +41,17 @@ type TurnResult struct {
 	// events). Produced text alone understates context burden; this is the
 	// other half.
 	ToolOutputChars int
-	// ReportRetried is true when the turn needed the one-shot corrective
-	// follow-up (ADR-0016.7) to obtain a <ghx-report> block. Recorded so
-	// evals can count retries honestly instead of hiding them.
+	// ReportRetried is true when the turn needed at least one corrective
+	// follow-up (ADR-0016.7 / ADR-0021 D2) to obtain a usable report. Recorded
+	// so evals can count retries honestly instead of hiding them.
 	ReportRetried bool
+	// ReportCoerced is true when the final report was obtained only via the
+	// lenient <ghx-report> coercion fallback (ADR-0021 D3), i.e. the producer's
+	// JSON did not fit the schema and had to be normalized. Surfaced so evals
+	// count every coercion as a soft anomaly instead of silently absorbing
+	// producer drift (Visibility and Truthfulness). Always false when the report
+	// came from the strict submit_report sink.
+	ReportCoerced bool
 }
 
 // ImplementationInfo records the ACP adapter identity returned by initialize.
@@ -239,6 +246,18 @@ func isWriteToolKind(k *acp.ToolKind) bool {
 	return true
 }
 
+// isSubmitReportTool reports whether a permission request is for the sidecar's
+// own report-sink submit_report tool. The adapter titles MCP tool calls with
+// the fully-qualified name (mcp__<server>__<tool>) in its default tool-info
+// branch, so a title match identifies our tool.
+func isSubmitReportTool(tc acp.ToolCallUpdate) bool {
+	if tc.Title == nil {
+		return false
+	}
+	t := *tc.Title
+	return t == SubmitReportToolID || strings.HasSuffix(t, "__"+SubmitReportToolName)
+}
+
 // RequestPermission approves read/search/execute/fetch tool permissions and
 // rejects everything write-shaped (edit, delete, move, unknown).
 //
@@ -253,7 +272,16 @@ func isWriteToolKind(k *acp.ToolKind) bool {
 // persona contract and acceptable for a reconnaissance harness.
 func (c *denyClient) RequestPermission(_ context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	var wantOnce, wantAlways acp.PermissionOptionKind
-	if isWriteToolKind(params.ToolCall.Kind) {
+	// The report-sink submit_report tool is a session-scoped, sidecar-owned MCP
+	// tool (ADR-0021 D1). The adapter classifies all MCP tools as kind "other"
+	// (claude-agent-acp tools.js default case), which isWriteToolKind treats as
+	// write-shaped and would reject. It is auto-approved via allowedTools so this
+	// path is normally never hit; approving it here too is defense-in-depth for
+	// adapters that still route it through permission. It writes only to the
+	// runtime-owned sink file, never to the repo.
+	if isSubmitReportTool(params.ToolCall) {
+		wantOnce, wantAlways = acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways
+	} else if isWriteToolKind(params.ToolCall.Kind) {
 		wantOnce, wantAlways = acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways
 	} else {
 		wantOnce, wantAlways = acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways
@@ -415,6 +443,38 @@ type RunTurnOptions struct {
 	// session). Nil means no steering options. Populated by Ask via
 	// BuildSessionMeta (ADR-0020.1 D2).
 	SessionMeta map[string]any
+	// ReportSinkPath, when non-empty, registers the session-scoped report-sink
+	// MCP server (ADR-0021 D1). The adapter spawns `<this executable> sidecar
+	// report-sink --out <ReportSinkPath>` and exposes its submit_report tool to
+	// the model; the runtime reads the accepted report back from this path after
+	// the turn. Registered on both NewSession and LoadSession so resumed turns
+	// keep the tool.
+	ReportSinkPath string
+}
+
+// reportSinkMcpServers returns the ACP McpServer list to register for a turn.
+// When a report-sink path is set it registers the ghx-report-sink stdio server,
+// pointing the adapter at this same executable (os.Executable). If the
+// executable path cannot be resolved the list is empty and the runtime falls
+// back to the <ghx-report> text path (ADR-0021 D3) — the feature degrades, it
+// does not break.
+func reportSinkMcpServers(sinkPath string) []acp.McpServer {
+	if sinkPath == "" {
+		return []acp.McpServer{}
+	}
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		fmt.Fprintf(os.Stderr, "warning: report-sink disabled (cannot resolve executable: %v)\n", err)
+		return []acp.McpServer{}
+	}
+	return []acp.McpServer{{
+		Stdio: &acp.McpServerStdio{
+			Name:    ReportSinkServerName,
+			Command: exe,
+			Args:    []string{"sidecar", "report-sink", "--out", sinkPath},
+			Env:     []acp.EnvVariable{},
+		},
+	}}
 }
 
 // RunTurn spawns the agent binary, establishes an ACP session (new or resumed),
@@ -479,7 +539,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		// The _meta bag is adapter-specific; the ACP spec treats it as opaque.
 		req := acp.NewSessionRequest{
 			Cwd:        cwd,
-			McpServers: []acp.McpServer{},
+			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
 		}
 		if opts.SessionMeta != nil {
 			req.Meta = opts.SessionMeta
@@ -493,7 +553,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		_, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
 			SessionId:  acp.SessionId(opts.ACPSessionID),
 			Cwd:        cwd,
-			McpServers: []acp.McpServer{},
+			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
 		})
 		if err != nil {
 			return result, "", fmt.Errorf("acp load session: %w", err)

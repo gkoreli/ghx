@@ -59,11 +59,11 @@ command.
 
 ## submit_report
 
-Call exactly once when your investigation is complete. Output the report as
-a JSON object inside <ghx-report> XML tags, then stop. No text after the
-closing tag.
+submit_report is a real registered tool (it WILL appear in your tool list,
+unlike ghx which is a shell command). When your investigation is complete,
+call the submit_report tool exactly once, passing the report as the tool's
+arguments (the report object fields ARE the arguments):
 
-<ghx-report>
 {
   "answer": "...",
   "verified": [{"summary": "...", "evidence": "..."}],
@@ -76,10 +76,20 @@ closing tag.
   "uncertainty": [],
   "nextReads": []
 }
-</ghx-report>
 
-Do not call it until you have gathered enough evidence to answer confidently
-(or have exhausted your budget).
+Your turn is complete only after submit_report returns "report accepted". The
+report is validated strictly, with no auto-correction: if the tool returns a
+validation error, read it, fix exactly what it names (a missing "answer", a
+list field that must be a JSON array, an unknown field, a wrong item shape),
+and call submit_report again. Only "answer" is strictly required; still fill
+the other fields when you have the evidence.
+
+Do not call submit_report until you have gathered enough evidence to answer
+confidently (or have exhausted your budget).
+
+Fallback (only if submit_report is not in your tool list): output the same
+report object as JSON inside <ghx-report></ghx-report> XML tags and then stop,
+with no text after the closing tag.
 
 ## Operating loop
 

@@ -129,9 +129,10 @@ func TestAskRetriesOnceWhenReportMissing(t *testing.T) {
 	}
 }
 
-// TestAskFallsBackToWarnWhenRetryAlsoFails: the WARN placeholder remains
-// the honest last resort, and only one retry is ever attempted.
-func TestAskFallsBackToWarnWhenRetryAlsoFails(t *testing.T) {
+// TestAskFallsBackToWarnWhenRetriesExhausted: the WARN placeholder remains
+// the honest last resort, and retries are bounded at maxReportRetries (two),
+// so the total number of turns never exceeds 1 + maxReportRetries (ADR-0021 D2).
+func TestAskFallsBackToWarnWhenRetriesExhausted(t *testing.T) {
 	stubHandshake(t)
 	dir := t.TempDir()
 
@@ -149,14 +150,123 @@ func TestAskFallsBackToWarnWhenRetryAlsoFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 {
-		t.Fatalf("turn calls = %d, want exactly 2 (never more than one retry)", calls)
+	if want := 1 + maxReportRetries; calls != want {
+		t.Fatalf("turn calls = %d, want exactly %d (initial + %d retries)", calls, want, maxReportRetries)
 	}
 	if !strings.HasPrefix(report.Answer, "WARN: sidecar did not emit") {
 		t.Fatalf("answer = %q, want WARN placeholder", report.Answer)
 	}
 	if !result.ReportRetried {
-		t.Fatal("ReportRetried should be recorded even when the retry fails")
+		t.Fatal("ReportRetried should be recorded even when the retries fail")
+	}
+}
+
+// TestAskPrefersSinkReport pins ADR-0021 D2: when the agent submits an
+// accepted report through the report-sink (simulated by the stub writing to
+// opts.ReportSinkPath), the runtime uses that report and prefers it over any
+// <ghx-report> text block, with no corrective retry.
+func TestAskPrefersSinkReport(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	var calls int
+	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		calls++
+		if opts.ReportSinkPath == "" {
+			t.Fatal("Ask must pass a report sink path to the turn")
+		}
+		// Simulate a successful submit_report tool call writing the sink.
+		if err := writeSinkReport(opts.ReportSinkPath, &Report{Answer: "from sink"}); err != nil {
+			t.Fatal(err)
+		}
+		// A conflicting text block must be ignored in favour of the sink.
+		return TurnResult{FullText: `<ghx-report>{"answer":"from text block"}</ghx-report>`}, "sess-1", nil
+	}
+
+	report, result, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("turn calls = %d, want 1 (no retry when the sink is accepted)", calls)
+	}
+	if report.Answer != "from sink" {
+		t.Fatalf("answer = %q, want the sink report preferred over the text block", report.Answer)
+	}
+	if result.ReportRetried {
+		t.Fatal("no retry expected when the sink report is present")
+	}
+	if result.ReportCoerced {
+		t.Fatal("sink reports are strictly validated, ReportCoerced must be false")
+	}
+}
+
+// TestAskRetryPromptCarriesConcreteError pins ADR-0021 D2/D3: when extraction
+// fails, the corrective follow-up embeds the CONCRETE reason (here, an invalid
+// JSON error), not a generic nudge.
+func TestAskRetryPromptCarriesConcreteError(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	var calls []RunTurnOptions
+	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		calls = append(calls, opts)
+		if len(calls) == 1 {
+			// A <ghx-report> block that is not valid JSON.
+			return TurnResult{FullText: "<ghx-report>{not json at all}</ghx-report>"}, "sess-1", nil
+		}
+		return TurnResult{FullText: `<ghx-report>{"answer":"recovered"}</ghx-report>`}, "sess-1", nil
+	}
+
+	report, _, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) < 2 {
+		t.Fatalf("expected at least one retry, got %d calls", len(calls))
+	}
+	if !strings.Contains(calls[1].Prompt, "invalid JSON") {
+		t.Fatalf("retry prompt should embed the concrete reason, got:\n%s", calls[1].Prompt)
+	}
+	if report.Answer != "recovered" {
+		t.Fatalf("answer = %q, want recovered", report.Answer)
+	}
+}
+
+// TestAskFlagsCoercedReport pins ADR-0021 D3: a report obtained only through
+// lenient coercion on the text fallback path is flagged as coerced so evals
+// count the drift.
+func TestAskFlagsCoercedReport(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		// "verified" is a bare string where an array of claims is required —
+		// coercible by coerceReportJSON.
+		return TurnResult{FullText: `<ghx-report>{"answer":"ok","verified":"a single claim"}</ghx-report>`}, "sess-1", nil
+	}
+
+	report, result, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Answer != "ok" || len(report.Verified) != 1 {
+		t.Fatalf("coerced report = %+v", report)
+	}
+	if !result.ReportCoerced {
+		t.Fatal("ReportCoerced should be set when the report needed coercion")
 	}
 }
 

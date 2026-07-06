@@ -108,6 +108,7 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		rec.ToolCalls = turn.ToolCalls
 		rec.ToolOutputChars = turn.ToolOutputChars
 		rec.ReportRetried = turn.ReportRetried
+		rec.ReportCoerced = turn.ReportCoerced
 		for _, tr := range turn.ToolTraces {
 			rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
 		}

@@ -4,18 +4,82 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 var runTurnWithOptions = RunTurnWithOptions
 var checkACPHandshake = CheckACPHandshake
 
-// reportRetryPrompt is the one-shot corrective follow-up sent when a turn
-// produced no extractable <ghx-report> block (ADR-0016.7 RC3).
-const reportRetryPrompt = `Your previous reply did not include a valid <ghx-report> block.
-Emit it now based on the work you already did: output ONLY the report JSON
-inside <ghx-report></ghx-report> tags, following the schema from your
-instructions exactly (all list fields must be JSON arrays). Do not run any
-more commands. No text before or after the tags.`
+// maxReportRetries bounds the corrective follow-ups after the initial turn
+// (ADR-0021 D2). Two retries balance closing the loop on a recoverable
+// producer mistake against runaway token cost on a fundamentally confused
+// model; when they are exhausted the WARN fallback ships and evals count it as
+// a breaking anomaly, keeping the failure loud.
+const maxReportRetries = 2
+
+// reportRetryPromptWithError is the corrective follow-up sent when a turn did
+// not yield a valid report. Unlike the old static nudge (ADR-0016.7 RC3), it
+// embeds the CONCRETE validation reason (ADR-0021 D2/D3) so the producer can
+// fix the specific defect.
+func reportRetryPromptWithError(reason string) string {
+	if reason == "" {
+		reason = "no valid report was produced"
+	}
+	return fmt.Sprintf(`Your previous reply did not produce a valid report.
+
+Reason: %s
+
+Fix it now based on the work you already did. If the submit_report tool is
+available, call it again with a corrected report object — the turn is complete
+only after submit_report accepts it. If that tool is unavailable, output ONLY
+the report JSON inside <ghx-report></ghx-report> tags, following the schema from
+your instructions exactly: all list fields must be JSON arrays and "answer" must
+be a non-empty string. Do not run any more commands. No text before or after.`, reason)
+}
+
+// newReportSinkPath creates a runtime-owned sink path for one Ask invocation
+// (ADR-0021 D1). The returned cleanup removes the temp dir. On failure it
+// returns an empty path and a no-op cleanup; the runtime then simply falls back
+// to the <ghx-report> text path.
+func newReportSinkPath() (path string, cleanup func()) {
+	dir, err := os.MkdirTemp("", "ghx-report-sink-")
+	if err != nil {
+		return "", func() {}
+	}
+	return filepath.Join(dir, "report.json"), func() { _ = os.RemoveAll(dir) }
+}
+
+// resolveTurnReport determines the turn's report, preferring a strictly-validated
+// submit_report sink over the lenient <ghx-report> text block (ADR-0021 D2). It
+// returns the report (nil if none), whether coercion was applied on the text
+// path, and a concrete failure reason to feed the corrective retry.
+func resolveTurnReport(sinkPath, text string) (report *Report, coerced bool, reason string) {
+	if sinkPath != "" {
+		r, err := ReadSinkReport(sinkPath)
+		if err != nil {
+			// The sink is only ever written canonical, so a read error is
+			// unexpected; note it but still try the text path.
+			reason = err.Error()
+		} else if r != nil {
+			return r, false, ""
+		}
+	}
+	r, coerced, err := ExtractReportErr(text)
+	if err != nil {
+		return nil, false, err.Error()
+	}
+	return r, coerced, ""
+}
+
+// mergeRetryTurn folds a corrective retry's telemetry into the primary turn
+// result so eval accounting stays honest across the whole Ask.
+func mergeRetryTurn(dst *TurnResult, src TurnResult) {
+	dst.ReportRetried = true
+	dst.FullText += src.FullText
+	dst.ToolCalls = append(dst.ToolCalls, src.ToolCalls...)
+	dst.ToolTraces = append(dst.ToolTraces, src.ToolTraces...)
+	dst.ToolOutputChars += src.ToolOutputChars
+}
 
 // AskRequest is the input for a single sidecar investigation.
 type AskRequest struct {
@@ -105,51 +169,67 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		cfg.EvalMode,
 	)
 
+	// Runtime-owned sink for the strict submit_report path (ADR-0021 D1). When
+	// the executable/temp dir is available, the report-sink MCP server is
+	// registered on the session and its accepted report is preferred over any
+	// text block. On failure sinkPath is "" and the loop degrades to the
+	// <ghx-report> text path.
+	sinkPath, cleanupSink := newReportSinkPath()
+	defer cleanupSink()
+
 	turnResult, newSessionID, err := runTurnWithOptions(ctx, RunTurnOptions{
-		AgentCmd:     cfg.AgentCmd,
-		ACPSessionID: acpSessionID,
-		Prompt:       prompt,
-		Cwd:          cfg.Cwd,
-		Env:          cfg.Env,
-		SessionMeta:  sessionMeta,
+		AgentCmd:       cfg.AgentCmd,
+		ACPSessionID:   acpSessionID,
+		Prompt:         prompt,
+		Cwd:            cfg.Cwd,
+		Env:            cfg.Env,
+		SessionMeta:    sessionMeta,
+		ReportSinkPath: sinkPath,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("run turn: %w", err)
 	}
 
-	report := ExtractReport(turnResult.FullText)
-	if report == nil {
-		// One-shot corrective follow-up in the same ACP session before
-		// giving up (ADR-0016.7 RC3): the exploration is done and paid
-		// for; a missing report block should cost one nudge, not the
-		// whole turn's evidence. The retry is recorded on the result so
-		// eval accounting stays honest.
+	// Completion gate (ADR-0021 D2): prefer the strictly-validated sink report,
+	// else the lenient text block. If neither yields a report, send a corrective
+	// follow-up carrying the CONCRETE reason, bounded at maxReportRetries. The
+	// exploration is done and paid for; a missing report should cost a bounded
+	// number of nudges, not the whole turn's evidence.
+	// Evaluate the report against the most recent turn's own text (plus the
+	// cumulative sink), not the concatenated FullText: a stale invalid block
+	// from an earlier attempt must not shadow a corrected block emitted by a
+	// retry (the <ghx-report> regex takes the first block it finds).
+	latestText := turnResult.FullText
+	report, coerced, reason := resolveTurnReport(sinkPath, latestText)
+	for retries := 0; report == nil && retries < maxReportRetries; retries++ {
 		retrySessionID := newSessionID
 		if retrySessionID == "" {
 			retrySessionID = acpSessionID
 		}
-		if retrySessionID != "" {
-			retryResult, retryNewID, retryErr := runTurnWithOptions(ctx, RunTurnOptions{
-				AgentCmd:     cfg.AgentCmd,
-				ACPSessionID: retrySessionID,
-				Prompt:       reportRetryPrompt,
-				Cwd:          cfg.Cwd,
-				Env:          cfg.Env,
-			})
-			if retryErr == nil {
-				report = ExtractReport(retryResult.FullText)
-				turnResult.ReportRetried = true
-				turnResult.FullText += retryResult.FullText
-				turnResult.ToolCalls = append(turnResult.ToolCalls, retryResult.ToolCalls...)
-				turnResult.ToolTraces = append(turnResult.ToolTraces, retryResult.ToolTraces...)
-				turnResult.ToolOutputChars += retryResult.ToolOutputChars
-				if retryNewID != "" {
-					newSessionID = retryNewID
-				}
-			}
+		if retrySessionID == "" {
+			break
 		}
+		retryResult, retryNewID, retryErr := runTurnWithOptions(ctx, RunTurnOptions{
+			AgentCmd:       cfg.AgentCmd,
+			ACPSessionID:   retrySessionID,
+			Prompt:         reportRetryPromptWithError(reason),
+			Cwd:            cfg.Cwd,
+			Env:            cfg.Env,
+			ReportSinkPath: sinkPath,
+		})
+		if retryErr != nil {
+			break
+		}
+		mergeRetryTurn(&turnResult, retryResult)
+		latestText = retryResult.FullText
+		if retryNewID != "" {
+			newSessionID = retryNewID
+		}
+		report, coerced, reason = resolveTurnReport(sinkPath, latestText)
 	}
-	if report == nil {
+	if report != nil {
+		turnResult.ReportCoerced = coerced
+	} else {
 		report = &Report{
 			Answer: "WARN: sidecar did not emit a <ghx-report> block — raw output was produced but no structured report was found.",
 		}
