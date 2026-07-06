@@ -140,20 +140,24 @@ Do not rely on Fable remembering CLI flags. When delegating to Codex CLI or Clau
 
 That skill is the canonical home for command syntax, bypass flags, wrapper prompts, and evidence report shape. Keep this file focused on routing judgment, not command tables.
 
-## Eval Verification Routing (Goga, 2026-07-05)
+## Eval Cadence (Goga, 2026-07-05/06 — binding)
 
-When a feature or fix needs live-eval verification, Fable defaults to a
-**random spot check, never the full suite**: sample 2-3 task x profile
-cells at random (always include at least one `ghx-sidecar` cell and, when
-session behavior changed, one multi-turn task), run them strict, and read
-the anomaly table. Randomize the sample every time - repeatedly smoking
-the same favorite task overfits the spot check and blinds it. The full
-pre-registered suite runs only to re-ground the citable verdict after
-product deltas accumulate, only on Goga's explicit trigger, and always in
-the background while engineering continues (AGENTS.md "full gate runs
-never block engineering"; ladder in ADR-0016.3; run economics in
-ADR-0025). If Fable is ever waiting on a full run to start the next
-feature, the process is being misused.
+Most changes need NO live eval at all — unit tests and one live smoke of
+the touched path suffice. When a change plausibly shifts agent behavior,
+run a **random spot check** (2-9 episodes: 2-3 task×profile cells,
+include a `ghx-sidecar` cell; sidecar-only deltas like persona/report
+contract get sidecar-only cells), read the anomaly table, move on.
+
+Full-rigor citable runs are **rare, event-driven, and Goga-triggered**:
+a milestone verdict, numbers to quote externally, or a measurement-stack
+change that must re-ground the record. There is no "product deltas
+accumulated, time to re-run" treadmill — that rule never existed and is
+explicitly rejected (Goga, 2026-07-06, after a night that burned two
+full runs plus aborted attempts). When a citable run does happen: use
+baseline reuse (~30 episodes; ADR-0025.1) once a seeded source exists,
+run it in the background, and never let it block engineering
+(AGENTS.md; ladder ADR-0016.3; economics ADR-0025). "Loop towards the
+north star" is never by itself a trigger for a full run.
 
 ## Evidence Contract
 
@@ -193,12 +197,3 @@ Before handing work back:
 - release/version rules followed, following `AGENTS.md`
 - delegated outputs were verified, not blindly trusted
 
-## Eval Run Shapes (Goga, 2026-07-06 — binding)
-
-The 90-episode full-matrix run is a **seeding shape, now retired**: after
-the first run that records `identityHashes` (gate-run-2026-07-06-persona),
-confirmatory runs reuse baselines and cost ~30 sidecar episodes; anything
-larger needs Goga's explicit sign-off with a reason reuse cannot serve.
-Sidecar-only deltas (persona, report contract) get sidecar-only spot
-checks (2-9 episodes) for direction before any confirmatory run. Never
-launch a full-matrix run to demonstrate momentum.
