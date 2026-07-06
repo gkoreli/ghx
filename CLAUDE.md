@@ -144,7 +144,7 @@ That skill is the canonical home for command syntax, bypass flags, wrapper promp
 
 Most changes need NO live eval at all — unit tests and one live smoke of
 the touched path suffice. When a change plausibly shifts agent behavior,
-run a **random spot check** (2-9 episodes: 2-3 task×profile cells,
+run a **random spot check** (2-5 episodes MAX — hard cap, Goga 2026-07-06: 2-3 task×profile cells,
 include a `ghx-sidecar` cell; sidecar-only deltas like persona/report
 contract get sidecar-only cells), read the anomaly table, move on.
 
