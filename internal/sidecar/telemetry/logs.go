@@ -2,8 +2,6 @@ package telemetry
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -50,16 +48,9 @@ func WriteLogs(path string, resourceAttrs []attribute.KeyValue, scopeName, scope
 	}
 	line = append(line, '\n')
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(line)
-	return err
+	// Shared append; the per-path mutex in AppendJSONLine serializes concurrent
+	// writers under episode-level parallelism (ADR-0025 D3, jsonl_writer.go).
+	return AppendJSONLine(path, line)
 }
 
 // scope is the shared instrumentation-scope shape (name + version only) used by

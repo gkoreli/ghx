@@ -21,9 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
-	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -55,9 +53,14 @@ func NewTraceExporter(dir string) sdktrace.SpanExporter {
 
 // otlpJSONFileExporter writes OTLP JSON File records: one TracesData JSON
 // object per line, appended for each SDK export batch.
+//
+// Concurrency (ADR-0025 D3): each episode/session builds a fresh TracerProvider
+// — and therefore a fresh exporter instance — all pointed at the same
+// <dir>/traces.jsonl. A per-instance mutex would NOT serialize two concurrent
+// exporters writing the same file, so appends go through the shared per-path
+// lock in AppendJSONLine instead.
 type otlpJSONFileExporter struct {
 	path string
-	mu   sync.Mutex
 }
 
 func newOTLPJSONFileExporter(runDir string) *otlpJSONFileExporter {
@@ -88,18 +91,7 @@ func (e *otlpJSONFileExporter) ExportSpans(ctx context.Context, spans []sdktrace
 	}
 	line = append(line, '\n')
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(e.path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(e.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(line)
-	return err
+	return AppendJSONLine(e.path, line)
 }
 
 func (e *otlpJSONFileExporter) Shutdown(ctx context.Context) error {

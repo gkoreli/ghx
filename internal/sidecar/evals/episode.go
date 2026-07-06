@@ -35,7 +35,10 @@ type Task struct {
 	Repo   string     `json:"repo"`
 	Turns  []string   `json:"turns"`
 	Checks TaskChecks `json:"checks"`
-	Tags   []string   `json:"tags,omitempty"`
+	// Judge holds the task author's optional task-specific judge criteria
+	// (ADR-0023.1 D3). Combined with the fixed core rubric at eval time.
+	Judge *JudgeRubric `json:"judge,omitempty"`
+	Tags  []string     `json:"tags,omitempty"`
 }
 
 // Validate reports whether the task is well-formed enough to score, and
@@ -78,6 +81,9 @@ func (t Task) Validate() error {
 				}
 			}
 		}
+	}
+	if err := t.Judge.validate(t.ID); err != nil {
+		return err
 	}
 	return nil
 }
@@ -222,4 +228,9 @@ type Episode struct {
 	Rewards    RewardBreakdown   `json:"rewards"`
 	StartedAt  time.Time         `json:"startedAt"`
 	EndedAt    time.Time         `json:"endedAt"`
+	// Parallel marks an episode that ran concurrently with other episodes
+	// under GHX_EVAL_PARALLEL > 1 (ADR-0025 D3). Its wall-clock duration is
+	// contended and must be excluded from latency claims; the same marker is
+	// mirrored onto duration metrics as ghx.eval.parallel=true.
+	Parallel bool `json:"parallel,omitempty"`
 }

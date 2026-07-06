@@ -47,6 +47,14 @@ func episodeMetrics(ep *Episode) []*metricspb.Metric {
 		attribute.String("ghx.eval.task_id", ep.TaskID),
 		attribute.String("ghx.eval.profile", string(ep.Profile)),
 	}
+	// Duration honesty (ADR-0025 D3): an episode that ran concurrently with
+	// others carries ghx.eval.parallel=true so latency analysis can exclude
+	// it — wall-clock duration under parallelism is contended, not a clean
+	// per-episode latency. The marker rides on every metric point, including
+	// gen_ai.client.operation.duration.
+	if ep.Parallel {
+		base = telemetry.AppendAttrs(base, attribute.Bool(ghxEvalParallelAttr, true))
+	}
 
 	var durationPoints []*metricspb.HistogramDataPoint
 	var tokenPoints []*metricspb.NumberDataPoint

@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,43 +57,74 @@ func TestEpisodes(t *testing.T) {
 		AgentCmd:    agentCmd,
 		SessionsDir: t.TempDir(),
 	}
+	// ExpectedEpisodes defaults to one trial's worth (tasks × profiles). A
+	// multi-trial gate run accumulating into one GHX_EVAL_RUN_DIR sets
+	// GHX_EVAL_EXPECTED_EPISODES to the whole planned total so the ADR-0025 D1
+	// sequential-stopping bounds see the true remaining count.
+	expectedEpisodes := len(tasks) * len(AllProfiles())
+	if override := os.Getenv("GHX_EVAL_EXPECTED_EPISODES"); override != "" {
+		if n, convErr := strconv.Atoi(override); convErr == nil && n > 0 {
+			expectedEpisodes = n
+		}
+	}
 	if err := SaveRunManifest(runDir, RunManifest{
-		ExpectedEpisodes: len(tasks) * len(AllProfiles()),
+		ExpectedEpisodes: expectedEpisodes,
 		Identity:         agentIdentity(cfg, nil),
 	}); err != nil {
 		t.Fatalf("save run manifest: %v", err)
 	}
 
-	for _, task := range tasks {
-		for _, profile := range AllProfiles() {
-			t.Run(task.ID+"/"+string(profile), func(t *testing.T) {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-				defer cancel()
-
-				ep, err := RunEpisode(ctx, cfg, task, profile)
-				if ep != nil {
-					if path, saveErr := SaveEpisode(runDir, ep); saveErr != nil {
-						t.Errorf("save episode: %v", saveErr)
-					} else {
-						t.Logf("artifact: %s", path)
+	// ADR-0025 D3: bound episode-level parallelism. Each task × profile cell is
+	// a distinct subtest, so trials of the same cell never overlap within one
+	// invocation; the gate only caps total fan-out. t.Parallel() subtests run
+	// once their parent returns, so the whole matrix is nested under one parent
+	// subtest that blocks until every episode is saved before the verdict runs.
+	gate := newParallelGate(EvalParallelism())
+	t.Logf("episode parallelism: %d (GHX_EVAL_PARALLEL, 1 = sequential)", gate.limit)
+	t.Run("episodes", func(t *testing.T) {
+		for _, task := range tasks {
+			for _, profile := range AllProfiles() {
+				t.Run(task.ID+"/"+string(profile), func(t *testing.T) {
+					if gate.enabled() {
+						t.Parallel()
 					}
-					t.Logf("rewards: %+v", ep.Rewards)
-					t.Logf("context: %+v", ep.Context)
-					// ADR-0016.7 harness alarm: all declarative anomalies are
-					// logged; strict smoke runs fail only breaking severities.
-					for _, anomaly := range DetectAnomalies(ep) {
-						t.Logf("ANOMALY — investigate before further rounds: %s", anomaly.String())
-						if os.Getenv("GHX_EVAL_STRICT") == "1" && anomaly.Severity == SeverityBreaking {
-							t.Errorf("ANOMALY (strict): %s", anomaly.String())
+					gate.acquire()
+					defer gate.release()
+
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+					defer cancel()
+
+					ep, err := RunEpisode(ctx, cfg, task, profile)
+					if ep != nil {
+						// Duration honesty (ADR-0025 D3): mark episodes that
+						// could have run concurrently so latency claims exclude
+						// them. Set before SaveEpisode so the marker reaches the
+						// episode JSON and the emitted duration metrics.
+						ep.Parallel = gate.enabled()
+						ep.Anomalies = DetectAnomalies(ep)
+						if path, saveErr := SaveEpisode(runDir, ep); saveErr != nil {
+							t.Errorf("save episode: %v", saveErr)
+						} else {
+							t.Logf("artifact: %s", path)
+						}
+						t.Logf("rewards: %+v", ep.Rewards)
+						t.Logf("context: %+v", ep.Context)
+						// ADR-0016.7 harness alarm: all declarative anomalies are
+						// logged; strict smoke runs fail only breaking severities.
+						for _, anomaly := range ep.Anomalies {
+							t.Logf("ANOMALY — investigate before further rounds: %s", anomaly.String())
+							if os.Getenv("GHX_EVAL_STRICT") == "1" && anomaly.Severity == SeverityBreaking {
+								t.Errorf("ANOMALY (strict): %s", anomaly.String())
+							}
 						}
 					}
-				}
-				if err != nil {
-					t.Fatalf("episode failed: %v", err)
-				}
-			})
+					if err != nil {
+						t.Fatalf("episode failed: %v", err)
+					}
+				})
+			}
 		}
-	}
+	})
 
 	// Evaluate the pre-registered ADR-0016.1 gates over everything this run
 	// produced and write verdict.json + verdict.md next to the episodes.
@@ -107,12 +139,16 @@ func TestEpisodes(t *testing.T) {
 		manifestIdentity = eps[0].Identity
 	}
 	if err := SaveRunManifest(runDir, RunManifest{
-		ExpectedEpisodes: len(tasks) * len(AllProfiles()),
+		ExpectedEpisodes: expectedEpisodes,
 		Identity:         manifestIdentity,
 	}); err != nil {
 		t.Fatalf("save final run manifest: %v", err)
 	}
 	verdict := EvaluateGates(eps)
+	// ADR-0025 D1: record the sequential-stopping recommendation next to the
+	// verdict. The runner never auto-stops — a human ends the loop.
+	stopping := ComputeStoppingBounds(eps, expectedEpisodes)
+	verdict.Stopping = &stopping
 	mdPath, err := SaveVerdict(runDir, verdict)
 	if err != nil {
 		t.Fatalf("save verdict: %v", err)

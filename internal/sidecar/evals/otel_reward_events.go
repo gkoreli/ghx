@@ -23,6 +23,64 @@ func addRewardExplanationEvents(span trace.Span, ep *Episode) {
 	addSafetyEvents(span, ep)
 }
 
+// judgeEvent is one gen_ai.evaluation.result event's name and attributes,
+// factored out so emission is unit-testable without a span (ADR-0023.1 D6).
+type judgeEvent struct {
+	Name  string
+	Attrs []attribute.KeyValue
+}
+
+// judgeEvaluationEvents builds the gen_ai.evaluation.result events for a
+// JudgeResult — one per core-rubric dimension plus an overall — reusing the
+// SAME event shape as the deterministic reward events (constraint 3: extend,
+// never fork). Skipped or nil results emit nothing. The judge's per-dimension
+// median score rides as gen_ai.evaluation.score.value, its reasoning as
+// gen_ai.evaluation.explanation, and the judge model id / prompt version /
+// disagreement as sibling attributes.
+func judgeEvaluationEvents(res *JudgeResult) []judgeEvent {
+	if res == nil || res.Skipped {
+		return nil
+	}
+	base := func() []attribute.KeyValue {
+		return []attribute.KeyValue{
+			attribute.String(genAIRequestModelAttribute, res.JudgeModelID),
+			attribute.String("ghx.judge.prompt_version", res.PromptVersion),
+			attribute.String("ghx.judge.rubric_version", res.RubricVersion),
+			attribute.Int("ghx.judge.samples", res.Samples),
+			attribute.Bool("ghx.judge.calibrated", res.Calibrated),
+		}
+	}
+	var events []judgeEvent
+	for _, d := range res.Dimensions {
+		attrs := append(base(),
+			attribute.String(genAIEvaluationNameAttribute, "judge."+d.Dimension),
+			attribute.Float64(genAIEvaluationScoreValueAttribute, d.MedianScore),
+			attribute.String(genAIEvaluationExplanationAttribute, boundedString(d.Explanation, 1024)),
+			attribute.Int("ghx.judge.disagreement", d.Disagreement),
+		)
+		events = append(events, judgeEvent{Name: genAIEvaluationResultEvent, Attrs: attrs})
+	}
+	overallExplanation := ""
+	if len(res.Verdicts) > 0 {
+		overallExplanation = res.Verdicts[0].Explanation
+	}
+	events = append(events, judgeEvent{Name: genAIEvaluationResultEvent, Attrs: append(base(),
+		attribute.String(genAIEvaluationNameAttribute, "judge.overall"),
+		attribute.Float64(genAIEvaluationScoreValueAttribute, res.Overall),
+		attribute.String(genAIEvaluationExplanationAttribute, boundedString(overallExplanation, 1024)),
+		attribute.Int("ghx.judge.disagreement", res.MaxDisagreement),
+	)})
+	return events
+}
+
+// addJudgeEvaluationEvents adds a JudgeResult's evaluation events to a span,
+// alongside (and identically shaped to) the deterministic reward events.
+func addJudgeEvaluationEvents(span trace.Span, res *JudgeResult) {
+	for _, e := range judgeEvaluationEvents(res) {
+		span.AddEvent(e.Name, trace.WithAttributes(e.Attrs...))
+	}
+}
+
 func addEvaluationResultEvents(span trace.Span, ep *Episode) {
 	r := ep.Rewards
 	components := []struct {

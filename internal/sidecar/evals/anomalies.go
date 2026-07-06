@@ -50,6 +50,12 @@ const (
 	// ghx invocations — the subject agent ignored the injected skill, which
 	// weakens the ghx baseline that gates compare against.
 	AnomalyDirectGhxNoncompliance = "direct_ghx_noncompliance"
+	// AnomalyParallelRateLimited: an episode that ran under GHX_EVAL_PARALLEL
+	// > 1 failed a turn with a provider rate-limit / back-pressure error
+	// (ADR-0025 D3). Soft and purely declarative: the harness does NOT
+	// auto-degrade parallelism mid-run — the signal is surfaced so a human
+	// decides whether to lower GHX_EVAL_PARALLEL and re-run the affected cell.
+	AnomalyParallelRateLimited = "eval_parallel_rate_limited"
 )
 
 // Anomaly is one declaratively-detected failure pattern on an episode.
@@ -115,6 +121,19 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 			Detail: "ghx profile episode recorded zero ghx invocations — baseline weakened",
 		})
 	}
+	// Rate-limit fallback (ADR-0025 D3): only meaningful when the episode ran
+	// concurrently — a rate-limit under parallelism is the visible cost of
+	// fanning out, and the signal a human uses to dial GHX_EVAL_PARALLEL back.
+	if ep.Parallel {
+		for _, turn := range ep.Turns {
+			if looksRateLimited(turn.Error) {
+				out = append(out, Anomaly{
+					Kind: AnomalyParallelRateLimited, Severity: SeveritySoft, Turn: turn.Turn,
+					Detail: fmt.Sprintf("turn failed with a rate-limit-shaped error under GHX_EVAL_PARALLEL>1: %s", boundedString(turn.Error, 256)),
+				})
+			}
+		}
+	}
 	return out
 }
 
@@ -139,6 +158,7 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalySidecarReportRetried, SeveritySoft},
 		{AnomalySidecarReportCoerced, SeveritySoft},
 		{AnomalyDirectGhxNoncompliance, SeveritySoft},
+		{AnomalyParallelRateLimited, SeveritySoft},
 	}
 	counts := map[string]int{}
 	episodesWith := map[string]int{}
