@@ -245,8 +245,15 @@ func ConfigDigest(cfg Config) string {
 		Cwd      string   `json:"cwd,omitempty"`
 		Env      []string `json:"env,omitempty"`
 		Model    string   `json:"model,omitempty"`
+		// ReportSinkExe is the caller-resolved submit_report server binary.
+		// Without it a warm daemon keeps serving a previously overridden
+		// GHX_REPORT_SINK_EXE until idle restart (integration audit
+		// 2026-07-06 F1) — a version-skewed sink is exactly the silent
+		// degradation the doctor check exists to prevent.
+		ReportSinkExe string `json:"reportSinkExe,omitempty"`
 	}
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model})
+	sinkExe, _, _ := ResolveReportSinkExe()
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: sinkExe})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
