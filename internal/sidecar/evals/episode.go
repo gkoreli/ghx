@@ -84,15 +84,20 @@ func (t Task) Validate() error {
 
 // TurnRecord captures what happened during one episode turn.
 type TurnRecord struct {
-	Turn      int      `json:"turn"`
-	Question  string   `json:"question"`
-	Text      string   `json:"text"`
+	Turn     int    `json:"turn"`
+	Question string `json:"question"`
+	Text     string `json:"text"`
+	// Thinking captures ACP agent_thought_chunk reasoning for this turn.
+	Thinking  string   `json:"thinking,omitempty"`
 	ToolCalls []string `json:"toolCalls"`
 	// ToolTraces carries full ACP tool-call audit data for this turn.
 	ToolTraces []ToolCallTrace `json:"toolTraces,omitempty"`
 	// ReplayedText is message text replayed before this turn's prompt was sent.
 	// It is audit-only and excluded from turn output/accounting.
 	ReplayedText string `json:"replayedText,omitempty"`
+	// ReplayedThinking is reasoning replayed before this turn's prompt was sent.
+	// It is audit-only and excluded from live turn telemetry.
+	ReplayedThinking string `json:"replayedThinking,omitempty"`
 	// ReplayedToolTraces carries ACP tool-call history replayed before this
 	// turn's prompt was sent. It is excluded from actions, observations,
 	// memory/repeat-read scoring, ledger derivation, and char accounting.
@@ -188,10 +193,13 @@ type AgentIdentity struct {
 // Episode is the durable record of one task × profile run. Serialized JSON
 // is the canonical artifact (ADR-0016: local artifacts are the source of truth).
 type Episode struct {
-	ID      string       `json:"id"`
-	TaskID  string       `json:"taskId"`
-	Repo    string       `json:"repo"`
-	Profile Profile      `json:"profile"`
+	ID      string  `json:"id"`
+	TaskID  string  `json:"taskId"`
+	Repo    string  `json:"repo"`
+	Profile Profile `json:"profile"`
+	// Checks snapshots the task's deterministic scoring contract so trace
+	// score explanations remain recomputable from the episode artifact.
+	Checks  TaskChecks   `json:"checks,omitempty"`
 	Turns   []TurnRecord `json:"turns"`
 	Actions []Action     `json:"actions,omitempty"`
 	// Observations captures bounded tool outputs; OutputSize is exact even

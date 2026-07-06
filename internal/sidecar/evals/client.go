@@ -99,6 +99,14 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 			}
 			c.current.Text += u.AgentMessageChunk.Content.Text.Text
 		}
+	case u.AgentThoughtChunk != nil:
+		if u.AgentThoughtChunk.Content.Text != nil {
+			if replayed {
+				c.current.ReplayedThinking += u.AgentThoughtChunk.Content.Text.Text
+				return nil
+			}
+			c.current.Thinking += u.AgentThoughtChunk.Content.Text.Text
+		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
 		tr := c.upsertTrace(string(tc.ToolCallId), replayed)

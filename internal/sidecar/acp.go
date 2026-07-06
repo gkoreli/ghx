@@ -18,9 +18,15 @@ import (
 type TurnResult struct {
 	// FullText is the complete text emitted by the agent.
 	FullText string
+	// Thinking is the internal reasoning streamed by ACP agent_thought_chunk
+	// updates during this prompt turn.
+	Thinking string
 	// ReplayedText is message text replayed before this turn's prompt was sent.
 	// It is retained for audit and excluded from turn output/accounting.
 	ReplayedText string
+	// ReplayedThinking is reasoning replayed before this turn's prompt was sent.
+	// It is retained for audit and excluded from live turn telemetry.
+	ReplayedThinking string
 	// ToolCalls lists the tool calls observed during the turn (kind: command + status).
 	ToolCalls []string
 	// ToolTraces records full per-call audit data for eval/training artifacts.
@@ -281,6 +287,15 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 			}
 			os.Stdout.WriteString(text)
 			c.result.FullText += text
+		}
+	case u.AgentThoughtChunk != nil:
+		if u.AgentThoughtChunk.Content.Text != nil {
+			text := u.AgentThoughtChunk.Content.Text.Text
+			if replayed {
+				c.result.ReplayedThinking += text
+				return nil
+			}
+			c.result.Thinking += text
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall

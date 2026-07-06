@@ -27,6 +27,9 @@ func SaveEpisode(runDir string, ep *Episode) (string, error) {
 	if err := EmitEpisodeTraces(context.TODO(), runDir, ep); err != nil {
 		return "", err
 	}
+	if err := EmitEpisodeMetrics(runDir, ep); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 

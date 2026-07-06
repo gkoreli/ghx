@@ -37,6 +37,7 @@ func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) 
 		TaskID:    task.ID,
 		Repo:      task.Repo,
 		Profile:   profile,
+		Checks:    task.Checks,
 		StartedAt: time.Now().UTC(),
 		Identity:  agentIdentity(cfg, nil),
 	}
@@ -89,7 +90,9 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		}
 
 		rec.Text = turn.FullText
+		rec.Thinking = turn.Thinking
 		rec.ReplayedText = turn.ReplayedText
+		rec.ReplayedThinking = turn.ReplayedThinking
 		rec.ToolCalls = turn.ToolCalls
 		rec.ToolOutputChars = turn.ToolOutputChars
 		rec.ReportRetried = turn.ReportRetried
