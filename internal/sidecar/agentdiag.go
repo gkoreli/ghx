@@ -328,6 +328,10 @@ const agentStderrTailBytes = 4096
 // that matters (founder feedback 2026-07-06: three repeated
 // CLAUDE_SDK_CAN_USE_TOOL_SHADOWED blocks drowned an auth failure).
 var benignStderrMarkers = []string{
+	// Adapter's unhandled-SDK-message notice for the post-turn summary
+	// message type — informational, printed on healthy turns (seen in every
+	// doctor --live since adapter 0.55).
+	"Unexpected case: post_turn_summary",
 	// The SDK notes our allowedTools entry auto-approves submit_report before
 	// canUseTool runs — intentional sidecar wiring (ADR-0021), printed by
 	// every spawned agent process.

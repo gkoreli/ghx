@@ -244,12 +244,13 @@ func TestAgentStderrTailFiltersBenignNoise(t *testing.T) {
 	path := filepath.Join(dir, "agent-stderr.log")
 	noisy := "(node:73016) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__ghx-report-sink__submit_report.\n" +
 		"(Use `node --trace-warnings ...` to show where the warning was created)\n" +
+		"Unexpected case: post_turn_summary\n" +
 		"Session abc: query stream error: ACP connection closed\n"
 	if err := os.WriteFile(path, []byte(noisy), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tail := AgentStderrTail(path)
-	if strings.Contains(tail, "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED") || strings.Contains(tail, "trace-warnings") {
+	if strings.Contains(tail, "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED") || strings.Contains(tail, "trace-warnings") || strings.Contains(tail, "post_turn_summary") {
 		t.Fatalf("benign boilerplate not filtered:\n%s", tail)
 	}
 	if !strings.Contains(tail, "query stream error") {
