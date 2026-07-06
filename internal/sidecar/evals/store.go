@@ -87,10 +87,17 @@ type RunManifest struct {
 	ExpectedEpisodes int `json:"expectedEpisodes,omitempty"`
 	// ExpectedEpisodesOverride records the GHX_EVAL_EXPECTED_EPISODES manual
 	// escape hatch when it was used for this run.
-	ExpectedEpisodesOverride int            `json:"expectedEpisodesOverride,omitempty"`
-	Identity                 AgentIdentity  `json:"identity,omitempty"`
-	CreatedAt                time.Time      `json:"createdAt"`
-	BaselineReuse            *BaselineReuse `json:"baselineReuse,omitempty"`
+	ExpectedEpisodesOverride int           `json:"expectedEpisodesOverride,omitempty"`
+	Identity                 AgentIdentity `json:"identity,omitempty"`
+	// IdentityHashes is the run's five-hash baseline identity inventory. It is
+	// written at run start for every eligible run so any completed run can later
+	// serve as a baseline-reuse source.
+	IdentityHashes []BaselineReuseHashRecord `json:"identityHashes,omitempty"`
+	CreatedAt      time.Time                 `json:"createdAt"`
+	BaselineReuse  *BaselineReuse            `json:"baselineReuse,omitempty"`
+	// BaselineFallback records an explicit fresh-baseline fallback after a
+	// requested baseline-reuse source was refused.
+	BaselineFallback *BaselineFallback `json:"baselineFallback,omitempty"`
 }
 
 // BaselineReuse records the provenance for a run that copied plain/ghx
@@ -127,6 +134,25 @@ type BaselineReusedEpisodeRecord struct {
 	SHA256     string  `json:"sha256"`
 }
 
+// BaselineFallback records an explicit operator override that allows fresh
+// baselines after a requested reuse source failed an eligibility check.
+type BaselineFallback struct {
+	// Mode is the explicit fallback behavior; currently only "fresh" is valid.
+	Mode string `json:"mode"`
+	// RequestedRunDir is the reuse source that failed eligibility.
+	RequestedRunDir string `json:"requestedRunDir,omitempty"`
+	// RefusalReason is the exact first eligibility check that failed.
+	RefusalReason string `json:"refusalReason"`
+	// Remediation is the emitted operator-facing refusal message.
+	Remediation string `json:"remediation"`
+	// RecordedAt is when the fallback was accepted, in UTC.
+	RecordedAt time.Time `json:"recordedAt"`
+	// ControllingEnv is the environment variable that authorized fallback.
+	ControllingEnv string `json:"controllingEnv"`
+	// ControllingValue is the exact environment value that authorized fallback.
+	ControllingValue string `json:"controllingValue"`
+}
+
 func SaveRunManifest(runDir string, m RunManifest) error {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", runDir, err)
@@ -142,6 +168,38 @@ func SaveRunManifest(runDir string, m RunManifest) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runDir, "manifest.json"), data, 0o644)
+}
+
+// RecordManifestIdentityHashes writes the run's reusable baseline identity
+// inventory to the manifest. The inventory is stored outside baselineReuse so
+// a normal fresh-baseline run can be a future reuse source.
+func RecordManifestIdentityHashes(runDir string, hashes []BaselineReuseHashRecord) (*RunManifest, error) {
+	m, err := LoadRunManifest(runDir)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = &RunManifest{RunDir: runDir}
+	}
+	m.IdentityHashes = hashes
+	return m, SaveRunManifest(runDir, *m)
+}
+
+// RecordBaselineFallback stores the explicit fresh-baseline fallback used
+// after requested reuse was refused.
+func RecordBaselineFallback(runDir string, fallback BaselineFallback) (*RunManifest, error) {
+	m, err := LoadRunManifest(runDir)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = &RunManifest{RunDir: runDir}
+	}
+	if fallback.RecordedAt.IsZero() {
+		fallback.RecordedAt = time.Now().UTC()
+	}
+	m.BaselineFallback = &fallback
+	return m, SaveRunManifest(runDir, *m)
 }
 
 // RecordManifestRound appends one planned round to the run manifest

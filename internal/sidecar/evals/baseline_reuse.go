@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -16,6 +17,12 @@ const (
 	// ghx episodes may be copied into the current run when ADR-0025.1 identity
 	// checks pass.
 	BaselineReuseEnv = "GHX_EVAL_BASELINE_REUSE_RUN_DIR"
+	// BaselineFallbackEnv permits an explicit fresh-baseline fallback when a
+	// requested baseline-reuse source fails an eligibility check.
+	BaselineFallbackEnv = "GHX_EVAL_BASELINE_FALLBACK"
+	// BaselineFallbackFresh is the only fallback mode that allows fresh
+	// baselines after a requested reuse source is refused.
+	BaselineFallbackFresh = "fresh"
 	// BaselineReuseLabel is the verdict/manifest label for a run whose
 	// baseline episodes were copied from a prior run.
 	BaselineReuseLabel = "BASELINE-REUSED"
@@ -32,11 +39,11 @@ type episodeFile struct {
 // TryReuseBaselines validates a prior run against ADR-0025.1 and, on success,
 // copies its plain and ghx episode JSONs byte-for-byte into runDir. A mismatch
 // returns ok=false with a first reason and no baselineReuse manifest block.
-func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, taskDir string, trials int, identity AgentIdentity, now time.Time) (*BaselineReuse, bool, string, error) {
+func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, taskDir string, plannedTrials int, identity AgentIdentity, now time.Time) (*BaselineReuse, bool, string, error) {
 	if strings.TrimSpace(priorRunDir) == "" {
 		return nil, false, "baseline reuse disabled: no prior run directory configured", nil
 	}
-	if trials <= 0 {
+	if plannedTrials <= 0 {
 		return nil, false, "baseline reuse disabled: planned trial count must be positive", nil
 	}
 	currentHashes, reason, err := BaselineReuseHashes(cfg, tasks, taskDir, identity)
@@ -63,13 +70,13 @@ func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, 
 	if now.UTC().Sub(prior.CreatedAt.UTC()) > BaselineReuseMaxAgeDays*24*time.Hour {
 		return nil, false, "baseline reuse disabled: prior run older than 7 days", nil
 	}
-	if prior.BaselineReuse == nil || len(prior.BaselineReuse.Hashes) == 0 {
-		return nil, false, "baseline reuse disabled: prior run lacks baselineReuse hash inventory", nil
+	if len(prior.IdentityHashes) == 0 {
+		return nil, false, "baseline reuse disabled: prior run lacks manifest identity hash inventory; rerun the source after 2026-07-06 baseline-reuse fix so manifest.identityHashes is written at run start", nil
 	}
 	if prior.Identity.AdapterVersion != identity.AdapterVersion {
 		return nil, false, "baseline reuse disabled: prior manifest adapterVersion mismatch", nil
 	}
-	if mismatch := compareHashInventory(currentHashes, prior.BaselineReuse.Hashes); mismatch != "" {
+	if mismatch := compareHashInventory(currentHashes, prior.IdentityHashes); mismatch != "" {
 		return nil, false, "baseline reuse disabled: " + mismatch, nil
 	}
 
@@ -110,14 +117,16 @@ func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, 
 			return nil, false, fmt.Sprintf("baseline reuse disabled: prior episode %s subjectModel mismatch", ep.ID), nil
 		}
 		if ep.Invalid || len(ep.ExclusionReasons) > 0 {
-			return nil, false, fmt.Sprintf("baseline reuse disabled: prior episode %s is invalid or excluded", ep.ID), nil
+			continue
 		}
 		target := filepath.Join(runDir, filepath.Base(f.Path))
 		if seenTarget[target] {
 			return nil, false, fmt.Sprintf("baseline reuse disabled: target filename collision for %s", filepath.Base(f.Path)), nil
 		}
-		if _, err := os.Stat(target); err == nil {
-			return nil, false, fmt.Sprintf("baseline reuse disabled: target filename already exists: %s", target), nil
+		if existing, err := os.ReadFile(target); err == nil {
+			if !bytes.Equal(existing, f.Data) {
+				return nil, false, fmt.Sprintf("baseline reuse disabled: target filename already exists with different bytes: %s", target), nil
+			}
 		} else if err != nil && !os.IsNotExist(err) {
 			return nil, false, "baseline reuse disabled: target filename stat failed", err
 		}
@@ -129,9 +138,23 @@ func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, 
 	for _, task := range tasks {
 		for _, profile := range []Profile{ProfilePlain, ProfileGhx} {
 			key := task.ID + "\x00" + string(profile)
-			if got := len(matrix[key]); got != trials {
-				return nil, false, fmt.Sprintf("baseline reuse disabled: incomplete baseline matrix task=%s profile=%s got=%d want=%d", task.ID, profile, got, trials), nil
+			if got := len(matrix[key]); got < plannedTrials {
+				return nil, false, fmt.Sprintf("baseline reuse disabled: source cell has too few valid trials task=%s profile=%s got=%d want>=%d; add valid non-excluded baseline trials to the source run or lower the planned run total", task.ID, profile, got, plannedTrials), nil
 			}
+			sort.Slice(matrix[key], func(i, j int) bool {
+				left, right := matrix[key][i].Ep.StartedAt, matrix[key][j].Ep.StartedAt
+				if left.Equal(right) {
+					return filepath.Base(matrix[key][i].Path) < filepath.Base(matrix[key][j].Path)
+				}
+				if left.IsZero() {
+					return false
+				}
+				if right.IsZero() {
+					return true
+				}
+				return left.Before(right)
+			})
+			matrix[key] = matrix[key][:plannedTrials]
 		}
 	}
 
@@ -155,8 +178,16 @@ func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, 
 	})
 	for _, f := range toCopy {
 		target := filepath.Join(runDir, filepath.Base(f.Path))
-		if err := os.WriteFile(target, f.Data, 0o644); err != nil {
-			return nil, false, "", fmt.Errorf("copy reused baseline %s: %w", f.Path, err)
+		if existing, err := os.ReadFile(target); err == nil {
+			if !bytes.Equal(existing, f.Data) {
+				return nil, false, fmt.Sprintf("baseline reuse disabled: target filename already exists with different bytes: %s", target), nil
+			}
+		} else if os.IsNotExist(err) {
+			if err := os.WriteFile(target, f.Data, 0o644); err != nil {
+				return nil, false, "", fmt.Errorf("copy reused baseline %s: %w", f.Path, err)
+			}
+		} else {
+			return nil, false, "", fmt.Errorf("read copied baseline %s: %w", target, err)
 		}
 		copied, err := os.ReadFile(target)
 		if err != nil {
@@ -171,6 +202,34 @@ func TryReuseBaselines(runDir, priorRunDir string, cfg RunConfig, tasks []Task, 
 		})
 	}
 	return reuse, true, "", nil
+}
+
+// PlannedBaselineTrials returns the manifest's planned valid trial count per
+// baseline task/profile cell. Gate runs append one round per invocation, so
+// reuse eligibility must compare against the accumulated planned total.
+func PlannedBaselineTrials(m *RunManifest) int {
+	if m == nil {
+		return 0
+	}
+	total := 0
+	for _, round := range m.Rounds {
+		if round.Trials > 0 {
+			total += round.Trials
+		}
+	}
+	return total
+}
+
+// BaselineReuseRefusalMessage is the loud, actionable error emitted when a
+// caller requested reuse and the source failed an eligibility check.
+func BaselineReuseRefusalMessage(priorRunDir, reason string) string {
+	return fmt.Sprintf("baseline reuse requested from %s but refused: %s\nremediation: use a source run whose manifest.identityHashes match and whose plain/ghx cells contain at least the planned valid trial count, or set %s=%s to explicitly run fresh baselines", priorRunDir, reason, BaselineFallbackEnv, BaselineFallbackFresh)
+}
+
+// BaselineFreshFallbackAllowed reports whether the operator explicitly allowed
+// fresh baselines after a requested baseline-reuse source was refused.
+func BaselineFreshFallbackAllowed() bool {
+	return os.Getenv(BaselineFallbackEnv) == BaselineFallbackFresh
 }
 
 // BaselineReuseHashes builds the five ADR-0025.1 D1 hash records for the
