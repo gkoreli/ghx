@@ -42,6 +42,13 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 		"command-line binary already installed on PATH",
 		"NOT an MCP tool",
 		"ghx version",
+		// nextReads concrete-paths contract (ADR-0031.2): nextReads is the
+		// next turn's read forecast, one concrete repo-relative path per
+		// entry, empty when nothing is anticipated.
+		"\"nextReads\" means the files the NEXT turn will most likely need read",
+		"ONE concrete repo-relative file path",
+		"no prose, no descriptions, no line ranges,\nno directory areas",
+		"Leave \"nextReads\" empty when you genuinely anticipate\nnothing",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("persona system prompt missing %q", want)
@@ -64,11 +71,11 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
 // accidental drift is caught: discovery mode must not perturb the persona used
 // when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
-// the golden hash in the same commit as their ADR (current bytes: ADR-0029.2
-// persona revision 3, tier-2 doctrine + discovery citation discipline).
+// the golden hash in the same commit as their ADR (current bytes: ADR-0031.2
+// nextReads concrete-paths contract).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "400ecd3da93343475f3148321b710e50c5b8b2ca9c842158e5f5381d2240287b"
+	const wantSHA = "b529891c814dd39d9ac3be9fca49f3edaae64e235e4b00419a263a87f2771eff"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}
@@ -89,8 +96,8 @@ func TestDiscoveryPersonaExtendsBase(t *testing.T) {
 		"## Discovery mode",
 		"several distinct query formulations", // broad sweep, multiple queries
 		"real usage in code",                  // triangulation signals
-		"ranked comparison", // ranked candidate output
-		"unverified tail",   // honesty about the unswept rest
+		"ranked comparison",                   // ranked candidate output
+		"unverified tail",                     // honesty about the unswept rest
 		// Discovery citation discipline (ADR-0029.2 D2): read-then-cite with
 		// the owner/repo:path form mandatory on every verified claim; a repo
 		// seen only in search results is INFERRED, never verified.

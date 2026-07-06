@@ -303,3 +303,48 @@ func TestExtractReportCoercionRejectsGarbage(t *testing.T) {
 		t.Errorf("numeric claim list should stay rejected, got %+v", r)
 	}
 }
+
+// TestNormalizeNextReads covers the lenient ADR-0031.2 nextReads normalizer:
+// path-shaped entries are cleaned toward the concrete-path contract, prose
+// entries pass through trimmed, and nothing is ever rejected.
+func TestNormalizeNextReads(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "nil stays nil", in: nil, want: nil},
+		{name: "concrete paths pass through", in: []string{"src/compose.ts", "owner/repo:internal/cli/root.go"}, want: []string{"src/compose.ts", "owner/repo:internal/cli/root.go"}},
+		{name: "wrapping backticks and quotes are unwrapped", in: []string{"`tree.go`", "\"src/router.ts\""}, want: []string{"tree.go", "src/router.ts"}},
+		{name: "line suffixes stripped from single path tokens", in: []string{"tree.go:418-670", "gin.go:364", "src/compose.ts#L15-L71"}, want: []string{"tree.go", "gin.go", "src/compose.ts"}},
+		{name: "blank entries dropped", in: []string{"", "  ", "src/index.ts"}, want: []string{"src/index.ts"}},
+		{name: "prose kept verbatim after trimming", in: []string{"  tree.go lines 135-400 for insertion logic "}, want: []string{"tree.go lines 135-400 for insertion logic"}},
+		{name: "owner/repo:path keeps its repo prefix", in: []string{"gin-gonic/gin:tree.go:135"}, want: []string{"gin-gonic/gin:tree.go"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &Report{Answer: "a", NextReads: append([]string(nil), tt.in...)}
+			r.NormalizeNextReads()
+			if len(r.NextReads) != len(tt.want) {
+				t.Fatalf("NextReads = %q, want %q", r.NextReads, tt.want)
+			}
+			for i := range tt.want {
+				if r.NextReads[i] != tt.want[i] {
+					t.Errorf("NextReads[%d] = %q, want %q", i, r.NextReads[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestExtractReportNormalizesNextReads: the fallback <ghx-report> path applies
+// the same lenient normalizer as the strict submit_report path (ADR-0031.2).
+func TestExtractReportNormalizesNextReads(t *testing.T) {
+	r := ExtractReport(`<ghx-report>{"answer":"ok","nextReads":["` + "`tree.go:135-400`" + `", "still prose entry kept"]}</ghx-report>`)
+	if r == nil {
+		t.Fatal("report rejected, want accepted")
+	}
+	if len(r.NextReads) != 2 || r.NextReads[0] != "tree.go" || r.NextReads[1] != "still prose entry kept" {
+		t.Errorf("NextReads = %q, want [tree.go, still prose entry kept]", r.NextReads)
+	}
+}

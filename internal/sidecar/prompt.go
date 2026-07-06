@@ -108,6 +108,12 @@ field-level errors. The only exception is a BLOCKED report: if you cannot
 investigate at all, set answer to "BLOCKED: <why>" (you must state why) and
 the evidence requirement is skipped.
 
+"nextReads" means the files the NEXT turn will most likely need read. Each
+entry must be ONE concrete repo-relative file path — "path/to/file.go" or
+"owner/repo:path/to/file.go" — no prose, no descriptions, no line ranges,
+no directory areas. Leave "nextReads" empty when you genuinely anticipate
+nothing.
+
 Do not call submit_report until you have gathered enough evidence to answer
 confidently (or have exhausted your budget).
 
@@ -147,7 +153,7 @@ tag.
    Every Tier-2 claim must cite the exact ghx tier2 command in its evidence,
    list the local:* backend in backendsUsed, and set tierUsed to "tier2".
 8. If a deeper backend is needed but not allowed, name it in
-   uncertainty/nextReads and do not fake the answer.
+   uncertainty and do not fake the answer.
 
 ## Constraints
 
