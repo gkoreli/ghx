@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,5 +127,66 @@ func TestRunTurnReturnsSessionIDOnPromptError(t *testing.T) {
 	}
 	if sessionID != "mock-sess-1" {
 		t.Fatalf("sessionID = %q, want the established session returned on failure (D1 resume depends on it)", sessionID)
+	}
+}
+
+func TestAskRecreatesStaleACPSessionWithMockAgent(t *testing.T) {
+	bin := buildScriptedAgent(t, []map[string]any{
+		{"text": `<ghx-report>{"answer":"fresh session succeeded"}</ghx-report>`},
+	})
+	t.Setenv("MOCKAGENT_REJECT_UNKNOWN_LOAD", "1")
+
+	dir := t.TempDir()
+	promptLog := filepath.Join(dir, "prompts.log")
+	t.Setenv("MOCKAGENT_PROMPT_LOG", promptLog)
+
+	if err := sidecar.InitSession(dir, "s", "o/r", "scope"); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := sidecar.ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.ACPSessionID = "stale-session"
+	if err := sidecar.SaveMeta(dir, *meta); err != nil {
+		t.Fatal(err)
+	}
+
+	report, result, err := sidecar.Ask(context.Background(), sidecar.Config{SessionsDir: dir, AgentCmd: bin}, sidecar.AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err != nil {
+		t.Fatalf("Ask must recreate a stale ACP session instead of failing: %v", err)
+	}
+	if report.Answer != "fresh session succeeded" {
+		t.Fatalf("answer = %q, want fresh session succeeded", report.Answer)
+	}
+	if !result.SessionRecreated {
+		t.Fatal("SessionRecreated not recorded")
+	}
+
+	updated, err := sidecar.ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ACPSessionID != "mock-sess-1" {
+		t.Fatalf("persisted ACP session = %q, want mock-sess-1", updated.ACPSessionID)
+	}
+
+	logData, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "LOAD stale-session") || !strings.Contains(string(logData), "PROMPT ") {
+		t.Fatalf("mockagent did not exercise stale LoadSession then fresh prompt:\n%s", logData)
+	}
+
+	sessionLog, err := os.ReadFile(filepath.Join(dir, "s", "logs.jsonl"))
+	if err != nil {
+		t.Fatalf("read logs.jsonl: %v", err)
+	}
+	if !strings.Contains(string(sessionLog), "sidecar.session.recreated") ||
+		!strings.Contains(string(sessionLog), "acp_load_session_resource_not_found") {
+		t.Fatalf("logs.jsonl missing session recreation downgrade:\n%s", sessionLog)
 	}
 }

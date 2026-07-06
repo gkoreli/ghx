@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 func stubHandshake(t *testing.T) {
@@ -78,6 +80,59 @@ func TestAskFallbackPromptCarriesLedger(t *testing.T) {
 	}
 	if updated.ACPSessionID != "fresh-session" || updated.TurnCount != 2 {
 		t.Fatalf("session metadata not updated after fallback turn: %+v", updated)
+	}
+}
+
+func TestAskRecreatesStaleACPSessionOnce(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+	if err := InitSession(dir, "s", "o/r", "scope"); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.ACPSessionID = "stale-session"
+	if err := SaveMeta(dir, *meta); err != nil {
+		t.Fatal(err)
+	}
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	var calls []RunTurnOptions
+	runTurnWithOptions = func(_ context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		calls = append(calls, opts)
+		if len(calls) == 1 {
+			return TurnResult{}, "", fmt.Errorf("acp load session: %w", &acp.RequestError{Code: -32002, Message: "Resource not found"})
+		}
+		if opts.ACPSessionID != "" {
+			t.Fatalf("fresh retry must use NewSession, got ACPSessionID=%q", opts.ACPSessionID)
+		}
+		return TurnResult{FullText: `<ghx-report>{"answer":"ok"}</ghx-report>`}, "fresh-session", nil
+	}
+
+	_, result, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("turn calls = %d, want stale LoadSession + one NewSession retry", len(calls))
+	}
+	if calls[0].ACPSessionID != "stale-session" {
+		t.Fatalf("first call session = %q, want stale-session", calls[0].ACPSessionID)
+	}
+	if !result.SessionRecreated {
+		t.Fatal("SessionRecreated not recorded")
+	}
+	updated, err := ReadMeta(dir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ACPSessionID != "fresh-session" {
+		t.Fatalf("persisted session id = %q, want fresh-session", updated.ACPSessionID)
 	}
 }
 

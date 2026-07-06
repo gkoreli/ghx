@@ -152,6 +152,10 @@ type TurnRecord struct {
 	// wrap-up prompt (ADR-0027 D1). Counted as the soft anomaly
 	// turn_cap_wrapup so runs show how often the net fires.
 	WrapUpRecovered bool `json:"wrapUpRecovered,omitempty"`
+	// SessionRecreated records that a persisted ACP session ID was stale and
+	// the runtime created a fresh transport session while preserving ledger
+	// context in the prompt. Evals can count this soft downgrade later.
+	SessionRecreated bool `json:"sessionRecreated,omitempty"`
 	// Resumed reports whether this turn continued prior agent context
 	// (ACP LoadSession for the sidecar profile; same live session for
 	// direct profiles). Always false on turn 0.

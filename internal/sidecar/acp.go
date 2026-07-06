@@ -59,6 +59,10 @@ type TurnResult struct {
 	// prompt (ADR-0027 D1). Recorded on the eval turn record and counted as the
 	// soft anomaly turn_cap_wrapup so evals can see how often the net fires.
 	WrapUpRecovered bool
+	// SessionRecreated is true when a persisted ACP session ID was stale and
+	// LoadSession returned Resource not found; Ask created one fresh ACP session
+	// and continued the turn using the durable ledger context in the prompt.
+	SessionRecreated bool
 	// Artifacts points at the session's persisted audit trail for the ask this
 	// turn belongs to (session dir + root trace ID). Populated by Ask after
 	// artifact emission; zero for a bare RunTurnWithOptions result.
@@ -113,6 +117,9 @@ const (
 	// peerClosedMarker matches the ACP SDK's dead-peer cause ("peer connection
 	// closed", connection.go) — "peer disconnected" is its request-level twin.
 	peerClosedMarker = "peer connection closed"
+	// resourceNotFoundCode is the JSON-RPC/ACP code adapters use when
+	// LoadSession cannot find the persisted transport session ID.
+	resourceNotFoundCode = -32002
 )
 
 // ErrLivenessTimeout is the sentinel for a turn cancelled by the D2 liveness
@@ -135,6 +142,22 @@ func IsPeerClosedError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, peerClosedMarker) || strings.Contains(msg, "peer disconnected")
+}
+
+// IsLoadSessionResourceNotFound reports whether err is the stale-session miss
+// that may be downgraded to a fresh ACP NewSession. It deliberately requires
+// both the JSON-RPC resource-not-found code and the human message so unrelated
+// LoadSession failures still fail loudly.
+func IsLoadSessionResourceNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		return reqErr.Code == resourceNotFoundCode && strings.Contains(strings.ToLower(reqErr.Message), "resource not found")
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, fmt.Sprintf("%d", resourceNotFoundCode)) && strings.Contains(msg, "resource not found")
 }
 
 // resolveLivenessTimeout resolves the D2 watchdog window: an explicit option

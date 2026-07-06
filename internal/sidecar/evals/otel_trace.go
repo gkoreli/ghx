@@ -192,6 +192,7 @@ func turnAttributes(ep *Episode, turn TurnRecord) []attribute.KeyValue {
 		attribute.Int("ghx.eval.tool_output_chars", turn.ToolOutputChars),
 		attribute.Int("ghx.eval.tool_call_count", len(turn.ToolTraces)),
 		attribute.Bool("ghx.eval.resumed", turn.Resumed),
+		attribute.Bool("ghx.eval.session_recreated", turn.SessionRecreated),
 	}
 	if turn.Error != "" {
 		attrs = append(attrs, attribute.String("error.message", boundedString(turn.Error, 512)))

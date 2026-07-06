@@ -17,6 +17,9 @@
 //	                       appended as "LOAD <sessionId>" / "PROMPT <text>"
 //	                       lines so tests can assert what the runtime sent
 //	                       (ADR-0027 D1 wrap-up assertions).
+//	MOCKAGENT_REJECT_UNKNOWN_LOAD — when "1", LoadSession rejects any session
+//	                       ID that was not created in this process with
+//	                       Resource not found (-32002).
 package main
 
 import (
@@ -148,12 +151,18 @@ func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) 
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
 }
 
-// LoadSession accepts any session ID — resumption always succeeds. Scripted
-// replay updates simulate ACP adapters that emit prior session history before
-// the follow-up prompt request is sent.
+// LoadSession accepts any session ID by default. When
+// MOCKAGENT_REJECT_UNKNOWN_LOAD=1, it rejects stale IDs with the ACP
+// Resource-not-found code, matching real adapters that do not know a persisted
+// transport session from a previous process/binary. Scripted replay updates
+// simulate ACP adapters that emit prior session history before the follow-up
+// prompt request is sent.
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	m.captureSink(params.McpServers)
 	logEvent("LOAD", string(params.SessionId))
+	if os.Getenv("MOCKAGENT_REJECT_UNKNOWN_LOAD") == "1" && string(params.SessionId) != "mock-sess-1" {
+		return acp.LoadSessionResponse{}, &acp.RequestError{Code: -32002, Message: "Resource not found"}
+	}
 	idx := m.currentIndex()
 	if idx >= len(m.replies) {
 		idx = len(m.replies) - 1
