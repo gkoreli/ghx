@@ -259,6 +259,13 @@ Rules for any delegated worker (background agent, worktree agent, Codex):
 
 - Work on your own branch/worktree. Commit at checkpoints; **never merge to
   mainline, never push** — the orchestrator reviews and merges.
+- **Every git command runs inside YOUR worktree.** Shell tools may start in
+  the shared checkout — run `git rev-parse --show-toplevel` before any
+  commit and cd to your worktree if it prints the main repo. If you ever
+  contaminate the shared checkout: **STOP and report it — never repair with
+  reset/rebase/checkout on mainline** (incident 2026-07-06: a worker's
+  "cleanup" rebase silently dropped a concurrent agent's merge; recovered
+  from reflog).
 - Never end your turn while work is pending. Long-running commands (live
   sidecar asks, eval rounds) run in the foreground with an explicit generous
   timeout; a completion report on unfinished work is a false report.
