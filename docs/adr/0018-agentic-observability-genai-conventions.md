@@ -185,12 +185,46 @@ Implemented eval/SAFE slice:
   and log trace/span IDs are rewritten to the OTLP JSON file spec's required
   lowercase hex representation, mirroring the existing trace exporter fix.
 
+Live validation (2026-07-05, one strict smoke episode
+`ghx-mapengine/ghx-sidecar`, run `20260706-020002`, post-merge mainline):
+
+- All three artifact files were produced (`traces.jsonl` 8 spans,
+  `logs.jsonl` 1 content record, `metrics.jsonl` 4 metrics / 12 data
+  points) and replayed into `otel-desktop-viewer` with 100% OTLP
+  acceptance; the viewer's `getStats` RPC confirmed ingestion of every
+  span, log, and data point. Replay recipe (viewer UI on :8000, OTLP
+  ingest on :4318):
+
+  ```sh
+  otel-desktop-viewer --open-browser=false &
+  cd internal/sidecar/evals/.ghx-evals/runs/<run-id>
+  for kind in traces logs metrics; do
+    while IFS= read -r line; do
+      curl -s -X POST -H 'Content-Type: application/json' \
+        -d "$line" "http://localhost:4318/v1/$kind" > /dev/null
+    done < "$kind.jsonl"
+  done
+  ```
+
+- Content capture verified live: `gen_ai.client.inference.operation.details`
+  with `gen_ai.input.messages`/`gen_ai.output.messages` present and
+  trace-correlated.
+- Known gap: this episode's output parts were all `{"type":"text"}` — the
+  adapter emitted zero `agent_thought_chunk` even with
+  `MAX_THINKING_TOKENS=4096` exported by the eval wrapper. The capture
+  path is unit-proven (mock agent), so the miss is on the emission side;
+  the expected fix is ADR-0020.1 D2's session-level `thinking` option
+  wiring. Re-verify reasoning parts on the D2 branch smoke.
+- This smoke also exposed and fixed a preflight regression from the
+  ADR-0019 merge: the handshake probe checked the host-configured agent
+  instead of `GHX_EVAL_AGENT` and skipped live episodes
+  (`RunPreflightForAgent`, commit a843e40).
+
 Follow-up:
 
 - Extend the same telemetry surface to long-lived production sidecar
   sessions under `~/.ghx`, not only eval episode saves.
-- Add live viewer documentation once logs/metrics rendering has been checked
-  against otel-desktop-viewer and Phoenix with real artifacts.
+- Phoenix rendering still unchecked (otel-desktop-viewer validated above).
 - Judge scorer ADR/work should reuse `gen_ai.evaluation.result` and emit its
   prompt/model calibration alongside deterministic reward events rather than
   inventing another score format.
