@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "judge-result-v1",
+  "episodeId": "ghx-mapengine_ghx_1783296377537",
+  "taskId": "ghx-mapengine",
+  "skipped": false,
+  "judgeModelId": "claude-opus-4-8/claude-cli-sweep (SAME-FAMILY, PRELIMINARY, k=1)",
+  "promptVersion": "judge-prompt-v1",
+  "rubricVersion": "core-rubric-v1",
+  "samples": 1,
+  "dimensions": [
+    {
+      "dimension": "evidence_groundedness",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Every substantive claim is anchored: the four files in internal/mapengine are named with their key symbols, the selection logic is quoted verbatim from types.go:143 (mapAuto), the top-level dispatch cited at types.go:125, and the end-to-end wiring is pinned to ghx.go:211/112 and read.go:187-191. Grounding is in mapengine source, not README prose."
+    },
+    {
+      "dimension": "exploration_efficiency",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Six purposeful steps: explore → tree of internal/mapengine → --map skim of all four files → full read of types.go 1-230 for the dispatch → two targeted greps to confirm CLI/MCP wiring. Went straight to the right package; the second types.go read (full source after the signature map) is justified to quote the switch, not flailing."
+    },
+    {
+      "dimension": "uncertainty_honesty",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "A dedicated 'What I did not verify' section honestly flags that the gotreesitter grammars registry internals were not inspected, that findings come from static ghx read rather than executing the binary/tests, and that engine-specific filtering edge cases were not exhaustively checked. Verified vs unverified is cleanly separated."
+    }
+  ],
+  "overall": 5,
+  "verdicts": [
+    {
+      "dimensions": [
+        {
+          "dimension": "evidence_groundedness",
+          "score": 5,
+          "explanation": "Every substantive claim is anchored: the four files in internal/mapengine are named with their key symbols, the selection logic is quoted verbatim from types.go:143 (mapAuto), the top-level dispatch cited at types.go:125, and the end-to-end wiring is pinned to ghx.go:211/112 and read.go:187-191. Grounding is in mapengine source, not README prose."
+        },
+        {
+          "dimension": "exploration_efficiency",
+          "score": 5,
+          "explanation": "Six purposeful steps: explore → tree of internal/mapengine → --map skim of all four files → full read of types.go 1-230 for the dispatch → two targeted greps to confirm CLI/MCP wiring. Went straight to the right package; the second types.go read (full source after the signature map) is justified to quote the switch, not flailing."
+        },
+        {
+          "dimension": "uncertainty_honesty",
+          "score": 5,
+          "explanation": "A dedicated 'What I did not verify' section honestly flags that the gotreesitter grammars registry internals were not inspected, that findings come from static ghx read rather than executing the binary/tests, and that engine-specific filtering edge cases were not exhaustively checked. Verified vs unverified is cleanly separated."
+        }
+      ],
+      "overall": 5,
+      "explanation": "A tight, well-grounded investigation that correctly locates the engine in internal/mapengine, distinguishes the Go AST and tree-sitter backends (plus the regex fallback) rather than treating the engine as monolithic, and explains per-file selection via the EngineAuto/mapAuto extension switch with the actual quoted code rather than a plausible guess. It goes further to trace the CLI --map-engine flag and MCP knob to the real call site, and closes with an honest ledger of what was not verified. Nothing meaningful floats free of evidence."
+    }
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "ghx-mapengine",
+    "repo": "gkoreli/ghx",
+    "questions": [
+      "Where is the structural map engine implemented, and how is the parser engine selected per file?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where is the structural map engine implemented, and how is the parser engine selected per file?",
+        "agentText": "I'll explore the repo structure first, then dig into the map/parser engine code.The README already gives strong hints. Let me look at `internal/mapengine/` directly to confirm implementation details.Good, that confirms the file layout. Now let's read these files to find the engine-selection logic and map function signatures.Now let's read the actual selection logic in `types.go` (lines 1-230) to see the `Map`/`mapAuto`/`normalizeEngine` functions in full.I now have full end-to-end confirmation of the call chain, from CLI flag through to the mapper dispatch. Here's the answer.\n\n## Structural map engine implementation\n\nLocated in **`internal/mapengine/`** (Go package `mapengine`), with four files:\n\n- **`internal/mapengine/types.go`** — shared types (`Engine`, `Level`, `Kind`, `Symbol`, `Result`, `Mapper` interface) and the **dispatch logic**: `Map()`, `mapAuto()`, `mapTreeSitterWithFallback()`, plus `buildResultFromSymbols()` which sorts/dedupes/filters symbols and renders output lines per `Level`.\n- **`internal/mapengine/goast.go`** — `GoASTMapper`, using Go's standard `go/ast` + `go/token` to extract top-level declarations (`goASTSymbols`, `goGenDeclSymbols`, `goFuncDeclSymbol`, `goTypeSymbol`).\n- **`internal/mapengine/treesitter.go`** — `TreeSitterMapper`, backed by the external `gotreesitter` library (`github.com/odvcencio/gotreesitter` + its `grammars` package) using tag queries (`newTagger`, `symbolFromTag`, `computeTreeSitterParents` for methods like `UserService.GetUser`).\n- **`internal/mapengine/regex.go`** — `RegexMapper`, a per-language table of regex rules (`regexRules`, `rulesForPath`, `matchLine`) used as the universal fallback.\n\n## How the engine is selected per file\n\nSelection happens in `internal/mapengine/types.go:143` (`mapAuto`), driven by the file extension (`filepath.Ext(path)`):\n\n```go\nfunc mapAuto(path string, content []byte, opts Options) (Result, error) {\n\tswitch strings.ToLower(filepath.Ext(path)) {\n\tcase \".go\":\n\t\tresult, err := GoASTMapper{}.Map(path, content, opts)\n\t\tif err == nil { return result, nil }\n\t\tfallback, _ := RegexMapper{}.Map(path, content, opts)\n\t\tfallback.Fallback = true\n\t\treturn fallback, nil\n\tcase \".ts\", \".tsx\", \".js\", \".jsx\", \".py\", \".rs\":\n\t\treturn mapTreeSitterWithFallback(path, content, opts, false)\n\tdefault:\n\t\treturn RegexMapper{}.Map(path, content, opts)\n\t}\n}\n```\n\n- `.go` files → `GoASTMapper` (falls back to `RegexMapper` silently on parse error).\n- `.ts`/`.tsx`/`.js`/`.jsx`/`.py`/`.rs` → `TreeSitterMapper` via `mapTreeSitterWithFallback`, which itself falls back to `RegexMapper` (with a warning appended to `Result.Warnings`) if tree-sitter errors or the language is unsupported.\n- Everything else → `RegexMapper` directly.\n\nThis auto-routing is only used when `Options.Engine == EngineAuto`. The top-level `Map()` function (`types.go:125`) normalizes the requested engine via `normalizeEngine()` and dispatches:\n- `EngineRegex` → forces `RegexMapper`\n- `EngineTreeSitter` → forces `TreeSitterMapper` (with fallback, warnings enabled)\n- `EngineAuto` (default, or anything unrecognized) → `mapAuto()`\n\n**End-to-end wiring** (confirmed by grep):\n- CLI flag `--map-engine` (default `\"auto\"`) is registered in `internal/cli/ghx.go:211` and read at `ghx.go:112`, threaded into `ghxlib.ReadOpts.MapEngine`.\n- MCP tool exposes the same knob as `mapEngine` in `internal/cli/serve.go` and `internal/ghx/register.go`.\n- `internal/ghx/read.go:187-191` is the actual call site: `mapengine.Map(path, []byte(text), mapengine.Options{Engine: mapengine.Engine(opts.MapEngine), ...})`, and it records which engine actually ran back onto the result (`result.MapEngine = string(mapResult.Engine)`), which `internal/ghx/read_test.go` asserts against (e.g. expecting `\"tree-sitter\"` for a JS/TS file, and `\"regex\"` as the fallback when forced tree-sitter fails on an unsupported file like `README.md`).\n\n## What I did not verify\n- The exact list of extensions/grammars supported inside `gotreesitter`'s `grammars` package (I only confirmed the dispatch in `treesitter.go` calls `m.treesitterEntry(path)` / `grammars.LangEntry`, not the grammar registry's internal contents).\n- Runtime behavior — I read source via `ghx read --map` (static analysis of the map/signatures), not by executing the binary or its test suite.\n- Whether `--kind`/`--level` filtering (`buildResultFromSymbols`) has any engine-specific edge cases beyond what's visible in the signature map.",
+        "toolCalls": [
+          {
+            "title": "ghx explore gkoreli/ghx",
+            "outputSummary": "```console description: Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go. branch: mainline files: .claude-plugin/ .claude/ .envrc.example .github/ ",
+            "outputChars": 16837
+          },
+          {
+            "title": "ghx tree gkoreli/ghx internal/mapengine --depth 3",
+            "outputSummary": "```console goast.go regex.go regex_test.go treesitter.go types.go ```goast.go regex.go regex_test.go treesitter.go types.go",
+            "outputChars": 123
+          },
+          {
+            "title": "ghx read gkoreli/ghx internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go --map",
+            "outputSummary": "```console === internal/mapengine/types.go (5583 bytes) === 1: package mapengine 3: import ( 11: type Engine string 13: const ( 20: type Level string 22: const ( 29: type Kind string 31: const ( 41: type Options struct { 47: type Mapper interface { 51: type Result struct { 61: ty",
+            "outputChars": 9083
+          },
+          {
+            "title": "ghx read gkoreli/ghx --lines 1-230 internal/mapengine/types.go",
+            "outputSummary": "```console === internal/mapengine/types.go (5583 bytes) === package mapengine import ( \"errors\" \"fmt\" \"path/filepath\" \"sort\" \"strings\" ) type Engine string const ( EngineAuto Engine = \"auto\" EngineGoAST Engine = \"go-ast\" EngineRegex Engine = \"regex\" EngineTreeSitter Engine = \"tre",
+            "outputChars": 11041
+          },
+          {
+            "title": "ghx read gkoreli/ghx --grep \"mapengine\\.|map-engine|MapEngine\" internal/cli internal/ghx",
+            "outputSummary": "```console === internal/cli (directory, 4 entries) === code.go ghx.go serve.go sidecar.go → use: ghx read gkoreli/ghx \"internal/cli/*\" --map === internal/ghx (directory, 9 entries) === explore.go glob.go glob_test.go read.go read_test.go register.go repos.go search.go tree.go \ufffd",
+            "outputChars": 709
+          },
+          {
+            "title": "ghx read gkoreli/ghx --grep \"mapengine\\.|map-engine|MapEngine\" \"internal/cli/*.go\" \"internal/ghx/*.go\"",
+            "outputSummary": "```console === internal/cli/ghx.go (8253 bytes, via internal/cli/*.go) === 110: mapLevel, _ := cmd.Flags().GetString(\"level\") 111: mapKind, _ := cmd.Flags().GetString(\"kind\") \u003e 112: mapEngine, _ := cmd.Flags().GetString(\"map-engine\") 113: 114: opts := \u0026ghxlib.ReadOpts{ -- 118: Ma",
+            "outputChars": 9845
+          }
+        ]
+      }
+    ]
+  },
+  "calibrated": false,
+  "scoredAt": "2026-07-06T16:34:06.396606Z"
+}
