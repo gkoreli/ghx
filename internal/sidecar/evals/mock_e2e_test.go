@@ -480,6 +480,10 @@ func TestEvalReportRendersMockRun(t *testing.T) {
 // turn text, with no missing-report anomaly and no retry.
 func TestMockSidecarEpisodeSubmitReportSink(t *testing.T) {
 	t.Setenv("GHX_EVAL_SUBJECT_MODEL", "mock-sonnet-subject")
+	// Under go test the sink server is disabled unless an explicit binary is
+	// named (mirrors live eval runs); the mock adapter never spawns it, it
+	// only reads the --out path from the registration.
+	t.Setenv("GHX_REPORT_SINK_EXE", "/usr/local/bin/ghx")
 	bin := buildMockAgent(t)
 	sinkReport0 := map[string]any{
 		"answer":        "Middleware composition is implemented in src/compose.ts (submitted via the report sink).",

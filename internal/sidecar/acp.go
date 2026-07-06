@@ -454,18 +454,34 @@ type RunTurnOptions struct {
 
 // reportSinkMcpServers returns the ACP McpServer list to register for a turn.
 // When a report-sink path is set it registers the ghx-report-sink stdio server,
-// pointing the adapter at this same executable (os.Executable). If the
-// executable path cannot be resolved the list is empty and the runtime falls
-// back to the <ghx-report> text path (ADR-0021 D3) — the feature degrades, it
-// does not break.
+// pointing the adapter at this same executable (os.Executable), or at
+// GHX_REPORT_SINK_EXE when set. If no usable executable can be resolved the
+// list is empty and the runtime falls back to the <ghx-report> text path
+// (ADR-0021 D3) — the feature degrades, it does not break.
+//
+// GHX_REPORT_SINK_EXE exists because os.Executable is only correct when the
+// runtime runs inside a real ghx binary. Under `go test` (live eval episodes,
+// tags=agent_e2e) it resolves to the compiled test binary, which cannot serve
+// `sidecar report-sink` — and the PATH ghx may be an older release without the
+// command. Eval runs must build a fresh ghx and point this env var at it, or
+// live episodes silently degrade to the text fallback and never exercise the
+// submit_report contract.
 func reportSinkMcpServers(sinkPath string) []acp.McpServer {
 	if sinkPath == "" {
 		return []acp.McpServer{}
 	}
-	exe, err := os.Executable()
-	if err != nil || exe == "" {
-		fmt.Fprintf(os.Stderr, "warning: report-sink disabled (cannot resolve executable: %v)\n", err)
-		return []acp.McpServer{}
+	exe := os.Getenv("GHX_REPORT_SINK_EXE")
+	if exe == "" {
+		var err error
+		exe, err = os.Executable()
+		if err != nil || exe == "" {
+			fmt.Fprintf(os.Stderr, "warning: report-sink disabled (cannot resolve executable: %v)\n", err)
+			return []acp.McpServer{}
+		}
+		if strings.HasSuffix(exe, ".test") {
+			fmt.Fprintf(os.Stderr, "warning: report-sink disabled (running under go test: %s); set GHX_REPORT_SINK_EXE to a built ghx binary\n", exe)
+			return []acp.McpServer{}
+		}
 	}
 	return []acp.McpServer{{
 		Stdio: &acp.McpServerStdio{

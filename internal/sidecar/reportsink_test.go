@@ -251,6 +251,10 @@ func toolResultText(t *testing.T, res *mcp.CallToolResult) string {
 // sink path registers the ghx-report-sink stdio server pointing at this
 // executable with the hidden report-sink args; an empty path registers nothing.
 func TestReportSinkMcpServers_Registration(t *testing.T) {
+	// Under go test os.Executable is the test binary, which the runtime
+	// refuses; point at an explicit binary the way eval runs do.
+	t.Setenv("GHX_REPORT_SINK_EXE", "/usr/local/bin/ghx")
+
 	if got := reportSinkMcpServers(""); len(got) != 0 {
 		t.Fatalf("empty sink path: want no servers, got %+v", got)
 	}
