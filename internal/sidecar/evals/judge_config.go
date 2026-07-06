@@ -23,8 +23,26 @@ const (
 	judgeProviderAnthropic = "anthropic"
 )
 
+// Judge transport identifiers accepted in the committed config.
+const (
+	judgeTransportCLI  = "cli"
+	judgeTransportHTTP = "http"
+)
+
 //go:embed judgeconfig/judge-config-v1.json
 var defaultJudgeConfigJSON []byte
+
+// JudgeCommandConfig describes the subscription-CLI rail for one judge model.
+// Args may contain {model} and {output_file}; the rendered prompt is passed on
+// stdin. VersionArgs are run against Command and recorded on JudgeResult
+// artifacts so CLI-based scores carry the weaker-but-auditable version pin.
+type JudgeCommandConfig struct {
+	Command               string   `json:"command"`
+	Args                  []string `json:"args"`
+	VersionArgs           []string `json:"versionArgs"`
+	ExtractLastCodexEvent bool     `json:"extractLastCodexEvent,omitempty"`
+	OutputLastMessage     bool     `json:"outputLastMessage,omitempty"`
+}
 
 // JudgeModelConfig is one judge model's committed identity and parameters.
 // It holds NO secrets — API keys come from the environment only (OPENAI_API_KEY
@@ -42,6 +60,8 @@ type JudgeModelConfig struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	// MaxOutputTokens is the hard per-call output cap sent to the provider.
 	MaxOutputTokens int `json:"maxOutputTokens"`
+	// CLI is the command template used when JudgeConfig.Transport is "cli".
+	CLI JudgeCommandConfig `json:"cli"`
 }
 
 // JudgeThresholds are the committed decision thresholds (D4).
@@ -62,6 +82,10 @@ type JudgeThresholds struct {
 // the binary always carries the committed version.
 type JudgeConfig struct {
 	SchemaVersion string `json:"schemaVersion"`
+	// Transport selects the default JudgeClient implementation. "cli" uses the
+	// subscription CLIs already used for delegation; "http" keeps the API
+	// clients available as alternate implementations behind the same seam.
+	Transport string `json:"transport"`
 	// PromptVersion / RubricVersion must match the code constants
 	// (judgePromptVersion / rubricVersion); validation fails on drift so a
 	// prompt change cannot silently ship under an old config.
@@ -118,6 +142,12 @@ func (c *JudgeConfig) Validate() error {
 	if c.SchemaVersion != judgeConfigSchemaVersion {
 		return fmt.Errorf("schemaVersion %q, want %q", c.SchemaVersion, judgeConfigSchemaVersion)
 	}
+	if c.Transport == "" {
+		c.Transport = judgeTransportCLI
+	}
+	if c.Transport != judgeTransportCLI && c.Transport != judgeTransportHTTP {
+		return fmt.Errorf("transport %q, want %q or %q", c.Transport, judgeTransportCLI, judgeTransportHTTP)
+	}
 	if c.PromptVersion != judgePromptVersion {
 		return fmt.Errorf("promptVersion %q does not match code judgePromptVersion %q — prompt and config must change in one committed diff",
 			c.PromptVersion, judgePromptVersion)
@@ -160,6 +190,41 @@ func (m *JudgeModelConfig) validate(slot, wantProvider string) error {
 	}
 	if m.Temperature != nil && (*m.Temperature < 0 || *m.Temperature > 2) {
 		return fmt.Errorf("%s.temperature %v out of range [0,2]", slot, *m.Temperature)
+	}
+	if err := m.CLI.validate(slot + ".cli"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c JudgeCommandConfig) validate(slot string) error {
+	if strings.TrimSpace(c.Command) == "" {
+		return fmt.Errorf("%s.command is blank", slot)
+	}
+	if len(c.VersionArgs) == 0 {
+		return fmt.Errorf("%s.versionArgs is empty", slot)
+	}
+	for i, arg := range c.Args {
+		if strings.TrimSpace(arg) == "" {
+			return fmt.Errorf("%s.args[%d] is blank", slot, i)
+		}
+	}
+	for i, arg := range c.VersionArgs {
+		if strings.TrimSpace(arg) == "" {
+			return fmt.Errorf("%s.versionArgs[%d] is blank", slot, i)
+		}
+	}
+	if c.OutputLastMessage {
+		found := false
+		for _, arg := range c.Args {
+			if strings.Contains(arg, "{output_file}") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s.outputLastMessage requires an args entry containing {output_file}", slot)
+		}
 	}
 	return nil
 }
