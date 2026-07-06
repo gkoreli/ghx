@@ -27,14 +27,17 @@ import (
 func TestEpisodes(t *testing.T) {
 	t.Setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
 
-	pf := sidecar.RunPreflight(context.Background())
-	if !pf.Passed {
-		t.Skipf("preflight failed — environment not ready for live episodes:\n%s", sidecar.FormatPreflight(pf))
-	}
-
 	agentCmd := os.Getenv("GHX_EVAL_AGENT")
 	if agentCmd == "" {
 		agentCmd = sidecar.LoadConfig().AgentCmd
+	}
+
+	// Preflight must probe the agent this run will exec, not the host's
+	// configured agent — GHX_EVAL_AGENT usually points at the pinned
+	// eval wrapper (scripts/eval-agent-acp.sh).
+	pf := sidecar.RunPreflightForAgent(context.Background(), agentCmd)
+	if !pf.Passed {
+		t.Skipf("preflight failed — environment not ready for live episodes:\n%s", sidecar.FormatPreflight(pf))
 	}
 
 	tasks, err := LoadTasks("testdata/tasks")

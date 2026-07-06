@@ -48,6 +48,15 @@ func TestCheckACPHandshakeTimesOutWithActionableMessage(t *testing.T) {
 	}
 }
 
+func TestPreflightAgentConfigOverrideWins(t *testing.T) {
+	if got := preflightAgentConfig("custom-agent").AgentCmd; got != "custom-agent" {
+		t.Fatalf("AgentCmd = %q, want custom-agent", got)
+	}
+	if got := preflightAgentConfig("").AgentCmd; got != LoadConfig().AgentCmd {
+		t.Fatalf("empty override changed AgentCmd to %q", got)
+	}
+}
+
 func TestDetectAgentsRequiresACPHandshake(t *testing.T) {
 	dir := t.TempDir()
 	writeFakeAgent(t, dir, "ok-agent", fakeACPAgentScript())

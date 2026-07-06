@@ -24,10 +24,19 @@ type PreflightResult struct {
 	Checks []PreflightCheck
 }
 
-// RunPreflight executes all standard checks in parallel.
+// RunPreflight executes all standard checks in parallel against the
+// configured agent.
 func RunPreflight(ctx context.Context) PreflightResult {
+	return RunPreflightForAgent(ctx, "")
+}
+
+// RunPreflightForAgent runs the same checks but probes agentCmd instead of
+// the configured agent when agentCmd is non-empty. Eval runs pass
+// GHX_EVAL_AGENT here so the handshake checks the agent actually under
+// test, not whatever ~/.ghx-sidecar/config.json points at.
+func RunPreflightForAgent(ctx context.Context, agentCmd string) PreflightResult {
 	type fn func(context.Context) PreflightCheck
-	cfg := LoadConfig()
+	cfg := preflightAgentConfig(agentCmd)
 	checks := []fn{checkGHToken, checkNetwork, checkGhxBinary, func(ctx context.Context) PreflightCheck {
 		return checkACPAgent(ctx, cfg)
 	}}
@@ -54,6 +63,14 @@ func RunPreflight(ctx context.Context) PreflightResult {
 		}
 	}
 	return PreflightResult{Passed: passed, Checks: results}
+}
+
+func preflightAgentConfig(agentCmd string) Config {
+	cfg := LoadConfig()
+	if agentCmd != "" {
+		cfg.AgentCmd = agentCmd
+	}
+	return cfg
 }
 
 func checkACPAgent(ctx context.Context, cfg Config) PreflightCheck {
