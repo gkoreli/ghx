@@ -66,9 +66,21 @@ type VisibilityConfig struct {
 	CaptureContent *bool `json:"captureContent,omitempty"`
 }
 
+// ClaudeACPAgentCmd is the pinned Claude Code ACP adapter command line that
+// `ghx sidecar config init --claude-acp` writes. It mirrors the eval wrapper
+// scripts/eval-agent-acp.sh (same adapter, same version pin — bump them
+// together, deliberately) minus the eval-only env (model pin, subject-model
+// label, thinking budget). npx makes first-time setup a single command: the
+// user needs Node and a Claude Code login, not a hand-written wrapper script
+// (dogfood friction 2026-07-05 "ACP agent setup is the hardest step").
+const ClaudeACPAgentCmd = "npx -y @agentclientprotocol/claude-agent-acp@0.55.0"
+
 // Config holds ghx-sidecar user configuration.
 type Config struct {
-	// AgentCmd is the ACP agent binary name or full command (e.g. "claude", "codex").
+	// AgentCmd is the ACP agent binary name or a whitespace-separated command
+	// line (e.g. "claude", "codex", or ClaudeACPAgentCmd). Multi-word values
+	// are split into argv by splitAgentCmd — plain field splitting, no shell
+	// quoting.
 	AgentCmd string `json:"agent"`
 	// SessionsDir is where named session artifacts are stored.
 	// Defaults to ~/.ghx/sessions.
@@ -149,6 +161,43 @@ func LoadConfig() Config {
 		c.SessionsDir = def.SessionsDir
 	}
 	return c
+}
+
+// ConfigFileExists reports whether a config file already exists at the active
+// read root (including the legacy ~/.ghx-sidecar location), returning its
+// path. `config init --claude-acp` uses it to refuse overwriting an existing
+// config without --force.
+func ConfigFileExists() (path string, exists bool) {
+	root, _ := activeRoot()
+	path = configFilePath(root)
+	_, err := os.Stat(path)
+	return path, err == nil
+}
+
+// DiffConfigs returns human-readable "field: old -> new" lines for the
+// persisted fields that differ between two configs. An empty result means
+// writing newCfg would change nothing. `config init --claude-acp` shows this
+// diff before requiring --force, so the user sees exactly what would be
+// overwritten.
+func DiffConfigs(oldCfg, newCfg Config) []string {
+	var diff []string
+	add := func(field, o, n string) {
+		if o != n {
+			diff = append(diff, fmt.Sprintf("  %s: %s -> %s", field, o, n))
+		}
+	}
+	add("agent", fmt.Sprintf("%q", oldCfg.AgentCmd), fmt.Sprintf("%q", newCfg.AgentCmd))
+	add("sessionsDir", fmt.Sprintf("%q", oldCfg.SessionsDir), fmt.Sprintf("%q", newCfg.SessionsDir))
+	add("model", fmt.Sprintf("%q", oldCfg.Model), fmt.Sprintf("%q", newCfg.Model))
+	add("visibility.captureContent", formatBoolPtr(oldCfg.Visibility.CaptureContent), formatBoolPtr(newCfg.Visibility.CaptureContent))
+	return diff
+}
+
+func formatBoolPtr(b *bool) string {
+	if b == nil {
+		return "(unset)"
+	}
+	return fmt.Sprintf("%t", *b)
 }
 
 // SaveConfig writes cfg to the new root (~/.ghx or $GHX_HOME), creating the

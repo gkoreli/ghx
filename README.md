@@ -121,6 +121,39 @@ ghx serve --http :8080                       # HTTP transport
 
 7 tools: `explore`, `read`, `search`, `repos`, `tree`, `code` (meta-tool), `search_tools`.
 
+## Sidecar
+
+`ghx sidecar` runs a specialist reconnaissance agent that turns English repo
+questions into bounded ghx evidence exploration and returns compact, auditable
+reports. First-time setup (after installing ghx, see Install above):
+
+```bash
+# 1. Write the agent config — pins the Claude Code ACP adapter, run via npx
+#    (needs Node and a Claude Code login; no wrapper script to hand-write)
+ghx sidecar config init --claude-acp
+
+# 2. Verify the setup end to end
+ghx sidecar doctor
+
+# 3. Ask
+ghx sidecar ask --repo vercel/next.js "how does the app router cache work?"
+```
+
+`config init --claude-acp` writes `~/.ghx/config.json` (or `$GHX_HOME/config.json`)
+with the pinned `npx @agentclientprotocol/claude-agent-acp` command. Re-running
+it against an existing config shows a field diff and refuses to overwrite
+without `--force`. Plain `ghx sidecar config init` still auto-detects agents
+already speaking ACP on your PATH.
+
+`ghx sidecar doctor` checks your GitHub token, network, the PATH ghx binary,
+the configured agent's ACP handshake, and that the binary serving the
+report-sink MCP server matches the running ghx version — a stale sink binary
+would silently degrade structured reports to a text fallback, so doctor fails
+loudly with fix-it text instead.
+
+Session state persists across invocations (`ghx sidecar sessions list`), so
+follow-up questions retain prior context.
+
 ## Agent Integration
 
 ```bash
