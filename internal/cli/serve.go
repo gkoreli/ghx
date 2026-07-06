@@ -159,7 +159,10 @@ func registerReconTool(s *server.MCPServer) {
 	s.AddTool(reconTool, handleRecon)
 }
 
-var askSidecar = sidecar.Ask
+var askSidecar = func(ctx context.Context, cfg sidecar.Config, req sidecar.AskRequest) (*sidecar.Report, *sidecar.TurnResult, error) {
+	report, turn, _, err := sidecar.AskViaDaemon(ctx, VERSION, cfg, req)
+	return report, turn, err
+}
 
 func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	question, err := request.RequireString("question")

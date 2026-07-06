@@ -2,6 +2,8 @@ package sidecar
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,10 @@ import (
 
 var runTurnWithOptions = RunTurnWithOptions
 var checkACPHandshake = CheckACPHandshake
+
+// TurnRunner executes one ACP prompt turn. The daemon injects a warm worker
+// implementation; daemonless calls use RunTurnWithOptions.
+type TurnRunner func(context.Context, RunTurnOptions) (TurnResult, string, error)
 
 // maxReportRetries bounds the corrective follow-ups after the initial turn
 // (ADR-0021 D2). Two retries balance closing the loop on a recoverable
@@ -86,14 +92,14 @@ func persistACPSessionID(sessionsDir string, meta *SessionMeta, newSessionID str
 // ACP session ID is stale (LoadSession Resource not found), it creates exactly
 // one fresh ACP session and continues the same prompt; the durable ledger
 // context already rides in the prompt, so ACP resume is only an optimization.
-func runTurnWithStaleSessionFallback(ctx context.Context, opts RunTurnOptions) (TurnResult, string, error) {
-	result, newSessionID, err := runTurnWithOptions(ctx, opts)
+func runTurnWithStaleSessionFallback(ctx context.Context, runner TurnRunner, opts RunTurnOptions) (TurnResult, string, error) {
+	result, newSessionID, err := runner(ctx, opts)
 	if opts.ACPSessionID == "" || err == nil || !IsLoadSessionResourceNotFound(err) {
 		return result, newSessionID, err
 	}
 	freshOpts := opts
 	freshOpts.ACPSessionID = ""
-	freshResult, freshSessionID, freshErr := runTurnWithOptions(ctx, freshOpts)
+	freshResult, freshSessionID, freshErr := runner(ctx, freshOpts)
 	freshResult.SessionRecreated = true
 	if freshErr != nil {
 		return freshResult, freshSessionID, freshErr
@@ -168,8 +174,30 @@ type AskRequest struct {
 // agent's output. If no report is found the turn still succeeds but the
 // returned report will have only an Answer field describing the failure.
 func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult, error) {
+	return askWithTurnRunner(ctx, cfg, req, runTurnWithOptions, true)
+}
+
+// AskWithTurnRunner executes one Ask using a caller-owned turn runner. It is
+// used by the daemon worker pool so durable sidecar behavior stays centralized
+// while ACP process ownership moves out of the one-shot path.
+func AskWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner) (*Report, *TurnResult, error) {
+	return askWithTurnRunner(ctx, cfg, req, runner, false)
+}
+
+func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool) (*Report, *TurnResult, error) {
 	sessionsDir := cfg.SessionsDir
-	if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
+	if preflight {
+		if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
+			return nil, nil, err
+		}
+	}
+	if runner == nil {
+		runner = runTurnWithOptions
+	}
+	if req.Session == "" {
+		req.Session = ResolveSessionName(req)
+	}
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		return nil, nil, err
 	}
 
@@ -243,7 +271,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	// than the eval path's per-turn ACP timing — see emit.go / the ADR gap note.
 	startedAt := time.Now().UTC()
 
-	turnResult, newSessionID, err := runTurnWithStaleSessionFallback(ctx, RunTurnOptions{
+	turnResult, newSessionID, err := runTurnWithStaleSessionFallback(ctx, runner, RunTurnOptions{
 		AgentCmd:       cfg.AgentCmd,
 		ACPSessionID:   acpSessionID,
 		Prompt:         prompt,
@@ -269,7 +297,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		if resumeID == "" {
 			wrapUpErr = fmt.Errorf("no ACP session id available to resume")
 		} else {
-			wrapResult, wrapSessionID, werr := runTurnWithOptions(ctx, RunTurnOptions{
+			wrapResult, wrapSessionID, werr := runner(ctx, RunTurnOptions{
 				AgentCmd:       cfg.AgentCmd,
 				ACPSessionID:   resumeID,
 				Prompt:         turnCapWrapUpPrompt,
@@ -354,7 +382,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		if retrySessionID == "" {
 			break
 		}
-		retryResult, retryNewID, retryErr := runTurnWithOptions(ctx, RunTurnOptions{
+		retryResult, retryNewID, retryErr := runner(ctx, RunTurnOptions{
 			AgentCmd:       cfg.AgentCmd,
 			ACPSessionID:   retrySessionID,
 			Prompt:         reportRetryPromptWithError(reason),
@@ -426,6 +454,53 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	})
 
 	return report, &turnResult, nil
+}
+
+// ResolveSessionName applies the daemon-owned v1 routing rule: explicit
+// session, then repo slug, then a stable question slug for discovery.
+func ResolveSessionName(req AskRequest) string {
+	if strings.TrimSpace(req.Session) != "" {
+		return req.Session
+	}
+	if strings.TrimSpace(req.Repo) != "" {
+		return Slug(req.Repo, "repo")
+	}
+	return QuestionSlug(req.Question)
+}
+
+// Slug lowercases s and collapses every non-alphanumeric run into one dash.
+func Slug(s, fallback string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return fallback
+	}
+	return out
+}
+
+// QuestionSlug derives a stable discovery session name from the question.
+func QuestionSlug(question string) string {
+	slug := Slug(question, "discovery")
+	if runes := []rune(slug); len(runes) > 40 {
+		slug = string(runes[:40])
+		if i := strings.LastIndex(slug, "-"); i > 0 {
+			slug = slug[:i]
+		}
+	}
+	sum := sha256.Sum256([]byte(question))
+	return slug + "-" + hex.EncodeToString(sum[:4])
 }
 
 func actualCommandLedger(toolCalls []string) []string {

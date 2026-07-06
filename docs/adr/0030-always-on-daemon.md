@@ -445,3 +445,70 @@ spend:
 Drafted by codex (read-only) against the mining evidence and ADR-0028 prior
 art; reviewed and accepted by Fable 2026-07-06. Build queued behind the
 judge-rails merge to serialize internal/sidecar churn.
+
+## Implementation Notes — 2026-07-06
+
+Implemented on branch `codex-daemon-b6` as the first B6 daemon slice.
+
+- **D1 lifecycle.** Added `ghx sidecar daemon` as the foreground daemon command,
+  with the hidden `--background` mode used by auto-spawn and `--stop` for the
+  graceful shutdown RPC. Runtime metadata is written to
+  `~/.ghx/runtime/daemon.json`, lifecycle logs from auto-spawn go to
+  `~/.ghx/runtime/daemon.log`, and the socket is
+  `~/.ghx/runtime/sidecar.sock` (`internal/cli/sidecar.go`,
+  `internal/sidecar/daemon.go`).
+- **D2 IPC.** Added newline-delimited JSON-RPC 2.0 over a Unix-domain socket
+  with `ghx.sidecar.Ping`, `Ask`, `ListSessions`, `ShowSession`, and
+  `Shutdown`. The daemon rejects runtime paths outside active `GHX_HOME` and
+  creates runtime files with user-private permissions (`daemon.go`).
+- **D3 clients and fallback.** `ghx sidecar ask` and `ghx serve --recon` now
+  call the shared daemon client first. If auto-spawn or the socket path fails,
+  the client prints a warning and runs the existing daemonless `sidecar.Ask`
+  path (`internal/cli/sidecar.go`, `internal/cli/serve.go`,
+  `internal/sidecar/daemon.go`).
+- **D4 warm ACP pooling.** Added `AgentPool` and `AgentWorker`, keyed by
+  resolved ghx session. A worker owns one live ACP process/connection and
+  serializes turns for that session. To keep the strict `submit_report` sink
+  fresh without respawning, warm follow-up turns call ACP `LoadSession` with
+  the new per-turn MCP server before `Prompt`; this preserves report-sink
+  semantics while skipping process spawn and initialize. Idle workers expire
+  after 30 minutes, and cross-session turns are bounded by a daemon-level
+  concurrency semaphore (`internal/sidecar/daemon_worker.go`).
+- **D5 daemon-owned registry.** Session routing moved into the sidecar domain
+  as `ResolveSessionName`: explicit session, then repo slug, then question slug.
+  CLI and MCP still compute/display the same defaults for user ergonomics, but
+  daemon requests are resolved again inside the runtime boundary
+  (`internal/sidecar/runtime.go`).
+- **D6 crash/upgrade.** The client treats failed ping, dead pid, version
+  mismatch, config digest mismatch, and out-of-root socket paths as stale. A
+  version/config mismatch sends `Shutdown`, starts the current executable, and
+  retries the request. Tests cover version-mismatch replacement with a built
+  `ghx` binary and scripted ACP agent (`internal/sidecar/daemon_test.go`).
+- **D7 artifacts unchanged.** Daemon-handled asks still call the same
+  centralized `AskWithTurnRunner` persistence path: `meta.json`, ledger,
+  reports, traces, logs, metrics, and artifact footer remain under
+  `~/.ghx/sessions/<session>/`. The daemon adds only lifecycle metadata/logs
+  under `~/.ghx/runtime/`.
+
+Verification:
+
+- Unit/integration tests added in `internal/sidecar/daemon_test.go` for socket
+  lifecycle, warm mockagent reuse, daemonless fallback, and version-mismatch
+  restart.
+- `go vet ./...` passed.
+- `go test ./...` passed.
+- `go test -race ./internal/sidecar` passed after fixing a worker shutdown
+  liveness-goroutine race found by the race detector.
+- Live smoke with a built `ghx` binary and scripted ACP mock agent:
+  foreground daemon started, two CLI asks went through it, first ask `real
+  0.41`, second ask `real 0.01`, mock agent start counter stayed `1`, prompt
+  log showed `LOAD mock-sess-1` before the second prompt, and `ghx sidecar
+  daemon --stop` removed the socket.
+
+Remaining follow-up:
+
+- The worker idle TTL and cross-session concurrency limit are fixed defaults
+  in this slice; exposing them as supported config belongs in a later runtime
+  ergonomics pass.
+- Windows named-pipe support is still out of this Unix-socket implementation;
+  Windows keeps the daemonless fallback path.
