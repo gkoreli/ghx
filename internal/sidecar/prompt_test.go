@@ -5,23 +5,16 @@ import (
 	"testing"
 )
 
-func TestBuildPromptFirstTurn(t *testing.T) {
-	p := BuildPrompt(Request{
-		Session:  "hono-middleware",
-		Repo:     "honojs/hono",
-		Question: "Where is middleware composition implemented?",
-	}, nil)
+// TestBuildPersonaSystemPromptContract verifies the stable persona system
+// prompt contains all doctrine, CLI-invocation contract, and report schema
+// required by the sidecar persona (ADR-0020.1 D1).
+func TestBuildPersonaSystemPromptContract(t *testing.T) {
+	p := BuildPersonaSystemPrompt()
 
 	for _, want := range []string{
 		"ghx-sidecar",
-		"honojs/hono",
-		"hono-middleware",
-		"Where is middleware composition implemented?",
 		"<ghx-report>",
-		"max 8 ghx commands",
 		"under\n  2000 characters", // report compactness bound (ADR-0016.1)
-		"normal",                   // default depth
-		"- remote",                 // default backend
 		// CLI-invocation contract (ADR-0016.7): the agent must know ghx is
 		// a shell command, not a registered tool, and must verify before
 		// ever reporting BLOCKED.
@@ -30,11 +23,53 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"ghx --version",
 	} {
 		if !strings.Contains(p, want) {
-			t.Errorf("first-turn prompt missing %q", want)
+			t.Errorf("persona system prompt missing %q", want)
 		}
 	}
 	if strings.Contains(p, "If ghx is unavailable, call submit_report immediately") {
 		t.Error("blind BLOCKED escape hatch must be gone (ADR-0016.7 RC1)")
+	}
+	// Per-turn fields must NOT be in the persona.
+	for _, absent := range []string{
+		"## Repo", "## Session", "## Question", "## Depth", "## Allowed backends",
+		"Prior session context",
+	} {
+		if strings.Contains(p, absent) {
+			t.Errorf("persona system prompt must not contain per-turn field %q", absent)
+		}
+	}
+}
+
+// TestBuildPromptFirstTurn verifies the per-turn prompt carries the
+// question-specific context and NOT the stable persona (ADR-0020.1 D1).
+func TestBuildPromptFirstTurn(t *testing.T) {
+	p := BuildPrompt(Request{
+		Session:  "hono-middleware",
+		Repo:     "honojs/hono",
+		Question: "Where is middleware composition implemented?",
+	}, nil)
+
+	for _, want := range []string{
+		"honojs/hono",
+		"hono-middleware",
+		"Where is middleware composition implemented?",
+		"normal",  // default depth
+		"- remote", // default backend
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("first-turn prompt missing %q", want)
+		}
+	}
+	// Persona content must NOT be duplicated in per-turn prompt (ADR-0020.1 D1).
+	for _, absent := range []string{
+		"You are ghx-sidecar",
+		"command-line binary already installed on PATH",
+		"NOT an MCP tool",
+		"ghx --version",
+	} {
+		if strings.Contains(p, absent) {
+			t.Errorf("per-turn prompt must not contain persona text %q (goes in system prompt)", absent)
+		}
 	}
 	if strings.Contains(p, "Prior session context") {
 		t.Error("first-turn prompt must not contain prior session context")
@@ -116,12 +151,16 @@ func TestBuildPromptEvidenceLedgerBoundedAndNewestFirst(t *testing.T) {
 	if start == -1 {
 		t.Fatal("missing evidence ledger")
 	}
+	// The evidence ledger is the last section in the per-turn prompt (ADR-0020.1 D1
+	// moved the persona to the system prompt, so no more ## sections follow it).
+	// Take the block from the ledger heading to end of string.
+	block := p[start:]
+	// Check there is no subsequent ## section that would indicate the persona leaked
+	// back into the per-turn prompt.
 	rest := p[start+len("## Evidence ledger"):]
-	end := strings.Index(rest, "\n## ")
-	if end == -1 {
-		t.Fatal("missing next section after ledger")
+	if idx := strings.Index(rest, "\n## "); idx != -1 {
+		t.Errorf("unexpected ## section after evidence ledger (persona leak?): %q", rest[idx:idx+40])
 	}
-	block := p[start : start+len("## Evidence ledger")+end]
 	if len(block) > 1500 {
 		t.Fatalf("ledger block length = %d, want <= 1500\n%s", len(block), block)
 	}

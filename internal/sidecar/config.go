@@ -19,10 +19,19 @@ type Config struct {
 	// SessionsDir is where named session artifacts are stored.
 	// Defaults to ~/.ghx-sidecar/sessions.
 	SessionsDir string `json:"sessionsDir"`
+	// Model pins the subject model for every session (e.g. "claude-sonnet-4-5").
+	// Empty means the adapter's default. Set per-session via ACP _meta
+	// claudeCode.options.model. Takes precedence over GHX_EVAL_SUBJECT_MODEL
+	// for session creation but does NOT override the eval identity label.
+	Model string `json:"model,omitempty"`
 	// Cwd overrides the ACP session cwd. Empty means current working directory.
 	Cwd string `json:"-"`
 	// Env overrides the spawned ACP adapter environment. Nil means inherit.
 	Env []string `json:"-"`
+	// EvalMode, when true, enables the raw SDK message audit channel
+	// (emitRawSDKMessages:true in _meta.claudeCode.options). Off by default
+	// in production. Set by the eval runner (ADR-0020.1 D5).
+	EvalMode bool `json:"-"`
 }
 
 func defaultConfig() Config {

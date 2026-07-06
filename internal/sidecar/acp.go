@@ -410,6 +410,11 @@ type RunTurnOptions struct {
 	Prompt       string
 	Cwd          string
 	Env          []string
+	// SessionMeta is the _meta map forwarded to the adapter on session creation
+	// (NewSession only — LoadSession and retry turns do not re-create the
+	// session). Nil means no steering options. Populated by Ask via
+	// BuildSessionMeta (ADR-0020.1 D2).
+	SessionMeta map[string]any
 }
 
 // RunTurn spawns the agent binary, establishes an ACP session (new or resumed),
@@ -470,10 +475,16 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 
 	var sessionID acp.SessionId
 	if opts.ACPSessionID == "" || !initResp.AgentCapabilities.LoadSession {
-		resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
+		// New session: forward the session-level steering meta (ADR-0020.1 D2).
+		// The _meta bag is adapter-specific; the ACP spec treats it as opaque.
+		req := acp.NewSessionRequest{
 			Cwd:        cwd,
 			McpServers: []acp.McpServer{},
-		})
+		}
+		if opts.SessionMeta != nil {
+			req.Meta = opts.SessionMeta
+		}
+		resp, err := conn.NewSession(ctx, req)
 		if err != nil {
 			return result, "", fmt.Errorf("acp new session: %w", err)
 		}

@@ -21,26 +21,18 @@ type Request struct {
 	AllowedBackends []string
 }
 
-// BuildPrompt constructs the full system prompt for a sidecar turn.
+// BuildPersonaSystemPrompt returns the stable persona/doctrine string for the
+// ghx-sidecar. This text is placed as the ACP session-level system prompt
+// (ADR-0020.1 D1) rather than prepended to every per-turn user prompt.
 //
-// On the first turn (meta == nil) the prompt includes the full persona, role
-// description, operating loop, and budget. On follow-up turns it prepends a
-// compact prior-context block so the agent knows what it has already found.
-func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
-	depth := req.Depth
-	if depth == "" {
-		depth = "normal"
-	}
-	backends := req.AllowedBackends
-	if len(backends) == 0 {
-		backends = []string{"remote"}
-	}
-
-	backendLines := make([]string, len(backends))
-	for i, b := range backends {
-		backendLines[i] = "- " + b
-	}
-
+// Moving the persona to the system prompt:
+//   - makes it cache-stable (single position, never shifts with turn count)
+//   - removes ~400 tokens from every user-message turn
+//   - satisfies ADR-0020.1's Trigger-2 SPT relief goal
+//
+// The returned string does NOT include per-turn context (repo, session, question,
+// depth, backends, prior context, evidence ledger). Those come from BuildPrompt.
+func BuildPersonaSystemPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("You are ghx-sidecar, a specialized GitHub repository reconnaissance agent.\n\n")
 	sb.WriteString("## Role\n\n")
@@ -51,26 +43,8 @@ func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 	sb.WriteString("ghx operations, gather evidence, and return a compact auditable report.\n")
 	sb.WriteString("The main agent should never need to know ghx flags, search gotchas, or\n")
 	sb.WriteString("exploration doctrine.\n\n")
-	fmt.Fprintf(&sb, "## Repo\n\n%s\n\n", req.Repo)
-	fmt.Fprintf(&sb, "## Session\n\n%s\n\n", req.Session)
-	fmt.Fprintf(&sb, "## Question\n\n%s\n\n", req.Question)
-	fmt.Fprintf(&sb, "## Depth\n\n%s\n\n", depth)
-	fmt.Fprintf(&sb, "## Allowed backends\n\n%s\n", strings.Join(backendLines, "\n"))
 
-	if meta != nil && meta.TurnCount > 0 {
-		sb.WriteString("\n## Prior session context\n\n")
-		if meta.Repo != "" {
-			fmt.Fprintf(&sb, "Repo: %s\n", meta.Repo)
-		}
-		fmt.Fprintf(&sb, "Turns completed: %d\n", meta.TurnCount)
-		fmt.Fprintf(&sb, "Scope: %s\n\n", meta.Scope)
-		if len(ledgers) > 0 && ledgers[0] != nil {
-			sb.WriteString(formatEvidenceLedger(ledgers[0]))
-		}
-	}
-
-	sb.WriteString(`
-## How to run ghx
+	sb.WriteString(`## How to run ghx
 
 ghx is a command-line binary already installed on PATH. Execute it with
 your shell/terminal tool (the same tool you use for any shell command),
@@ -117,7 +91,6 @@ Do not call it until you have gathered enough evidence to answer confidently
 
 ## Constraints
 
-- Budget: max 8 ghx commands per question; follow-ups may use 5 additional.
 - Do NOT inspect tests unless the question is about tests.
 - Do NOT edit files, make commits, or take any write action.
 - Keep the report compact: the entire <ghx-report> JSON must stay under
@@ -134,6 +107,58 @@ call submit_report with:
   answer: "BLOCKED: ghx is unavailable in this sidecar session."
   uncertainty: [the exact shell command you ran and the error it returned]
 `)
+	return sb.String()
+}
+
+// BuildPrompt constructs the per-turn user prompt for a sidecar turn.
+//
+// The stable persona/doctrine is NOT included here — it moves to the ACP
+// session-level system prompt via BuildPersonaSystemPrompt (ADR-0020.1 D1).
+// This function emits only the turn-specific context: repo, session, question,
+// depth, allowed backends, prior session context, and evidence ledger.
+//
+// On the first turn (meta == nil or TurnCount == 0) this is just the question
+// plus repo/session/depth/backends. On follow-up turns it prepends a compact
+// prior-context block so the agent knows what it has already found.
+//
+// Backward compatibility: callers that do NOT use session-level meta (e.g. the
+// eval direct-profile runner) may pass meta == nil and receive the full
+// per-turn prompt; the system prompt / persona split only activates when
+// BuildSessionMeta is used at session creation.
+func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
+	depth := req.Depth
+	if depth == "" {
+		depth = "normal"
+	}
+	backends := req.AllowedBackends
+	if len(backends) == 0 {
+		backends = []string{"remote"}
+	}
+
+	backendLines := make([]string, len(backends))
+	for i, b := range backends {
+		backendLines[i] = "- " + b
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "## Repo\n\n%s\n\n", req.Repo)
+	fmt.Fprintf(&sb, "## Session\n\n%s\n\n", req.Session)
+	fmt.Fprintf(&sb, "## Question\n\n%s\n\n", req.Question)
+	fmt.Fprintf(&sb, "## Depth\n\n%s\n\n", depth)
+	fmt.Fprintf(&sb, "## Allowed backends\n\n%s\n", strings.Join(backendLines, "\n"))
+
+	if meta != nil && meta.TurnCount > 0 {
+		sb.WriteString("\n## Prior session context\n\n")
+		if meta.Repo != "" {
+			fmt.Fprintf(&sb, "Repo: %s\n", meta.Repo)
+		}
+		fmt.Fprintf(&sb, "Turns completed: %d\n", meta.TurnCount)
+		fmt.Fprintf(&sb, "Scope: %s\n\n", meta.Scope)
+		if len(ledgers) > 0 && ledgers[0] != nil {
+			sb.WriteString(formatEvidenceLedger(ledgers[0]))
+		}
+	}
+
 	return sb.String()
 }
 

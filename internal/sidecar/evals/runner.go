@@ -61,7 +61,19 @@ func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) 
 // question, exactly like repeated "ghx sidecar ask" CLI invocations. Follow-up
 // turns exercise real ACP session resumption via the persisted session ID.
 func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episode, rt episodeRuntime) error {
-	scfg := sidecar.Config{AgentCmd: cfg.AgentCmd, SessionsDir: cfg.SessionsDir, Cwd: rt.Cwd, Env: rt.Env}
+	// EvalMode:true enables emitRawSDKMessages audit channel (ADR-0020.1 D5).
+	// Model is wired from GHX_EVAL_SUBJECT_MODEL so the subject model is
+	// structurally pinned at session creation (ADR-0020.1 D4). The identity
+	// label (ep.Identity.SubjectModel) is set separately from the adapter
+	// initialize response and the env var — they are independent signals.
+	scfg := sidecar.Config{
+		AgentCmd:    cfg.AgentCmd,
+		SessionsDir: cfg.SessionsDir,
+		Cwd:         rt.Cwd,
+		Env:         rt.Env,
+		Model:       resolveSubjectModel(cfg.AgentCmd), // from GHX_EVAL_SUBJECT_MODEL / wrapper
+		EvalMode:    true,
+	}
 	session := ep.ID
 
 	for i, q := range task.Turns {

@@ -91,12 +91,27 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 		acpSessionID = meta.ACPSessionID
 	}
 
+	// Build session-level steering meta (ADR-0020.1 D2). Only attached to
+	// new sessions (first turn or when the adapter does not support LoadSession).
+	// Resume turns re-use the existing session, which already has the meta.
+	depth := req.Depth
+	if depth == "" {
+		depth = "normal"
+	}
+	sessionMeta := BuildSessionMeta(
+		BuildPersonaSystemPrompt(),
+		depth,
+		cfg.Model,
+		cfg.EvalMode,
+	)
+
 	turnResult, newSessionID, err := runTurnWithOptions(ctx, RunTurnOptions{
 		AgentCmd:     cfg.AgentCmd,
 		ACPSessionID: acpSessionID,
 		Prompt:       prompt,
 		Cwd:          cfg.Cwd,
 		Env:          cfg.Env,
+		SessionMeta:  sessionMeta,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("run turn: %w", err)
