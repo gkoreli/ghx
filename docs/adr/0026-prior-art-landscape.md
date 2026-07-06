@@ -157,7 +157,7 @@ user's world:
 
 | Candidate | Absorbed as | Impact / effort | Route |
 |---|---|---|---|
-| otel-desktop-viewer | `ghx sidecar view [session]` — spawn viewer + auto-replay the session's artifacts; the ADR-0018 curl recipe becomes one command | HIGH / LOW | M6 polish; near-term |
+| otel-desktop-viewer | `ghx sidecar view [session]` — spawn viewer + auto-replay the session's artifacts; the ADR-0018 curl recipe becomes one command | HIGH / LOW | **Absorbed** (ADR-0026.1, 2026-07-05) |
 | codemap | Tier-2 internal tool: dependency graphs, importers, blast radius | HIGH / MED | M7 (ADR-0024) |
 | ast-grep | Tier-2 structural pattern search (single binary, shell-out) | MED / LOW | M7 |
 | aider repomap PageRank | algorithm absorption, no dependency: rank files by import-graph centrality to prioritize exploration | MED / LOW | persona/doctrine or M7 |
