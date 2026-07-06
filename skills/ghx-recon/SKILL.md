@@ -22,14 +22,12 @@ explore a remote repo step-by-step yourself — delegate the whole question.
 
 Give --repo when you know the repo. Omit it for discovery questions —
 "which repos/libraries do X" — and the sidecar sweeps GitHub, verifies
-top candidates, and ranks them. Normally omit --session: the daemon routes
-each ask to the right investigation session. Explicit --session wins; a
-repo or owner/repo mention routes to the repo-slug session; otherwise ghx
-checks for a warm continuation, then ledger overlap, then creates a new
-question-derived discovery session. The chosen route is printed as
-"session: <name> (routed: <rule>)". Use --session <name> only to pin a
-specific thread. Add --json for the full structured report wrapped as
-{report, artifacts}.
+top candidates, and ranks them. Normally omit --session too: the daemon
+routes each ask — explicit --session pins a thread, a repo mention routes
+to the repo-slug session, else a warm continuation, then ledger overlap,
+then a new question-derived discovery session — and prints the route as
+"session: <name> (routed: <rule>)". Add --json for the full structured
+report wrapped as {report, artifacts}.
 
 ## Asking well
 
