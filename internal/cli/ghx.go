@@ -38,7 +38,7 @@ func init() {
 	RootCmd.SilenceErrors = true
 	RootCmd.SilenceUsage = true
 	RootCmd.SetFlagErrorFunc(teachingFlagError)
-	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, grepCmd, inspectCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
+	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, grepCmd, inspectCmd, treeCmd, skillCmd, versionCmd, sidecarCmd, tier2Cmd)
 }
 
 var reposCmd = &cobra.Command{
