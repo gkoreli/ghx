@@ -22,6 +22,12 @@ type SessionMeta struct {
 	// ACPSessionID is the agent-assigned ACP session ID for resumption.
 	// Empty on the first turn; set after the first NewSession call succeeds.
 	ACPSessionID string `json:"acpSessionId,omitempty"`
+	// NamedBy records how the session got its name (ADR-0030.1):
+	// SessionNamedExplicit (caller-pinned, R1 — excluded from auto-join
+	// routing), SessionNamedRepo (repo slug, R2), or SessionNamedQuestion
+	// (question-derived discovery slug, R5). Empty on sessions created before
+	// routing shipped; sessionOrigin then infers it from the name shape.
+	NamedBy string `json:"namedBy,omitempty"`
 	// CreatedAt is the ISO-8601 timestamp of session initialization.
 	CreatedAt string `json:"createdAt"`
 	// UpdatedAt is the ISO-8601 timestamp of the most recent turn.
@@ -38,9 +44,11 @@ func IsInitialized(sessionsDir, name string) bool {
 }
 
 // InitSession creates the session directory, writes the "initialized" marker,
-// and writes the initial meta.json. Safe to call multiple times (no-op if
-// already initialized).
-func InitSession(sessionsDir, name, repo, scope string) error {
+// and writes the initial meta.json. namedBy records the naming origin
+// (SessionNamedExplicit/Repo/Question, ADR-0030.1) that routing uses to keep
+// explicitly-named sessions out of auto-join. Safe to call multiple times
+// (no-op if already initialized).
+func InitSession(sessionsDir, name, repo, scope, namedBy string) error {
 	dir := sessionDir(sessionsDir, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
@@ -53,6 +61,7 @@ func InitSession(sessionsDir, name, repo, scope string) error {
 		Name:      name,
 		Repo:      repo,
 		Scope:     scope,
+		NamedBy:   namedBy,
 		TurnCount: 0,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -125,6 +134,26 @@ const reportsSubdir = "reports"
 type ReportArtifact struct {
 	Report              *Report  `json:"report"`
 	ActualCommandLedger []string `json:"actualCommandLedger,omitempty"`
+	// TraceCommands are the bare trace-derived command strings the runtime
+	// merged into the session ledger for this turn (TraceCommandLedger). They
+	// make the artifact self-sufficient for ledger rebuild: replaying
+	// reports/ must reproduce ledger.json (ADR-0030.1 D5 invariant).
+	TraceCommands []string `json:"traceCommands,omitempty"`
+	// Rerouted records mis-route recovery provenance when this artifact was
+	// moved from another session by `ghx sidecar sessions reroute`
+	// (ADR-0030.1 D5): routing plus reroute keeps every turn's provenance
+	// intact, unlike a destructive merge.
+	Rerouted *RerouteProvenance `json:"rerouted,omitempty"`
+}
+
+// RerouteProvenance records where a rerouted turn artifact came from.
+type RerouteProvenance struct {
+	// FromSession is the session the turn was moved out of.
+	FromSession string `json:"fromSession"`
+	// FromTurn is the turn number the artifact had in the source session.
+	FromTurn int `json:"fromTurn"`
+	// At is the RFC3339 timestamp of the reroute.
+	At string `json:"at"`
 }
 
 // SaveTurnReportArtifact persists the accepted report plus runtime audit

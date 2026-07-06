@@ -50,6 +50,14 @@ type turnTelemetry struct {
 	Question    string
 	Result      TurnResult
 	Report      *Report
+	// TierDecision is the turn's recorded escalation policy evaluation
+	// (ADR-0024.2 D3), emitted as a ghx.tier.decision child span of the turn.
+	// Nil skips the span (callers outside the Ask runtime).
+	TierDecision *TierDecisionRecord
+	// Route is the session-routing decision for this ask (ADR-0030.1 D7),
+	// emitted as ghx.sidecar.route.* attributes on the ask span plus a
+	// sidecar.route log record so every route is recomputable from artifacts.
+	Route *RouteDecision
 	// Error carries the turn's failure (liveness watchdog, dead peer,
 	// unrecovered turn-cap). When set, the turn span is marked as an error and
 	// an error log record is written next to it (ADR-0027 D2/D3) — failed
@@ -129,6 +137,9 @@ func (t turnTelemetry) emitTraces(ctx context.Context, dir string) (string, erro
 	)
 	traceID := askSpan.SpanContext().TraceID().String()
 	logs := t.emitTurnSpan(askCtx, tracer, start, end)
+	if t.Route != nil {
+		logs = append(logs, t.routeLog(askSpan.SpanContext(), start))
+	}
 	askSpan.End(trace.WithTimestamp(end))
 
 	if err := tp.ForceFlush(ctx); err != nil {
@@ -146,6 +157,7 @@ func (t turnTelemetry) emitTurnSpan(parent context.Context, tracer trace.Tracer,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(t.turnAttributes()...),
 	)
+	t.emitTierDecisionSpan(turnCtx, tracer, start)
 	for _, tool := range t.Result.ToolTraces {
 		t.emitToolSpan(turnCtx, tracer, tool)
 	}
@@ -199,6 +211,51 @@ func (t turnTelemetry) sessionRecreatedLog(span trace.SpanContext, at time.Time)
 	}
 }
 
+// emitTierDecisionSpan writes the ghx.tier.decision span (ADR-0024.1
+// "Visibility Contract"; ADR-0024.2 D3), child of sidecar.turn, timestamped
+// at turn start so it precedes the tool spans in the timeline. Clone
+// attributes ride only when the decision carries parsed tier2 provenance
+// (best-effort, ADR-0024.2 D5) — an absent value is an honest gap, never a
+// guess.
+func (t turnTelemetry) emitTierDecisionSpan(parent context.Context, tracer trace.Tracer, at time.Time) {
+	if t.TierDecision == nil {
+		return
+	}
+	d := t.TierDecision
+	attrs := []attribute.KeyValue{
+		attribute.String("ghx.tier.policy.version", d.Decision.PolicyVersion),
+		attribute.String("ghx.tier.from", d.Decision.FromTier),
+		attribute.String("ghx.tier.to", d.Decision.ToTier),
+		attribute.Bool("ghx.tier.allowed", d.Decision.Allowed),
+		attribute.StringSlice("ghx.tier.signals", d.Decision.FiredSignals),
+		attribute.String("ghx.tier.reason", boundedStr(d.Decision.Reason, 512)),
+		attribute.String("ghx.tier.used", d.TierUsed),
+		attribute.String("ghx.tier.used_source", d.TierUsedSource),
+		attribute.Bool("ghx.tier.escalation_used", d.EscalationUsed),
+		attribute.String("ghx.repo.full_name", t.Repo),
+		attribute.Int("ghx.sidecar.turn", t.Turn),
+	}
+	if c := d.Clone; c != nil {
+		ref := c.Ref
+		if ref == "" {
+			ref = "HEAD"
+		}
+		attrs = append(attrs,
+			attribute.String("ghx.repo.ref", ref),
+			attribute.String("ghx.repo.sha", c.SHA),
+			attribute.String("ghx.clone.strategy", c.Strategy),
+			attribute.Bool("ghx.clone.cache_hit", c.CacheHit),
+			attribute.Int("ghx.clone.sparse_paths.count", len(c.SparsePaths)),
+		)
+	}
+	_, span := tracer.Start(parent, "ghx.tier.decision",
+		trace.WithTimestamp(at),
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+	span.End(trace.WithTimestamp(at))
+}
+
 func (t turnTelemetry) emitToolSpan(parent context.Context, tracer trace.Tracer, tool ToolCallTrace) {
 	start := firstToolTime(tool)
 	if start.IsZero() {
@@ -232,7 +289,59 @@ func (t turnTelemetry) askAttributes() []attribute.KeyValue {
 	if t.Model != "" {
 		attrs = append(attrs, semconv.GenAIRequestModel(t.Model))
 	}
+	attrs = append(attrs, t.routeAttributes()...)
 	return attrs
+}
+
+// routeAttributes renders the ADR-0030.1 D7 route provenance attributes.
+// Score/margin/candidates appear only on decisions where R4 scoring was
+// evaluated; window_hit only when the R3 marker test fired.
+func (t turnTelemetry) routeAttributes() []attribute.KeyValue {
+	d := t.Route
+	if d == nil {
+		return nil
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("ghx.sidecar.route.source", string(d.Source)),
+	}
+	if d.DetectedRepo != "" {
+		attrs = append(attrs, attribute.String("ghx.sidecar.route.detected_repo", d.DetectedRepo))
+	}
+	if d.scored() {
+		pairs := make([]string, 0, len(d.Candidates))
+		for _, c := range d.Candidates {
+			pairs = append(pairs, fmt.Sprintf("%s=%.3f", c.Session, c.Score))
+		}
+		attrs = append(attrs,
+			attribute.Float64("ghx.sidecar.route.score", d.Score),
+			attribute.Float64("ghx.sidecar.route.margin", d.Margin),
+			attribute.StringSlice("ghx.sidecar.route.candidates", pairs),
+		)
+	}
+	if d.WindowHit != "" {
+		attrs = append(attrs, attribute.String("ghx.sidecar.route.window_hit", d.WindowHit))
+	}
+	return attrs
+}
+
+// routeLog is the per-turn route record echoed into the session's logs.jsonl
+// (ADR-0030.1 D7): given this record and the session states at decision time,
+// the route must be recomputable by hand.
+func (t turnTelemetry) routeLog(span trace.SpanContext, at time.Time) telemetry.LogRecord {
+	attrs := []attribute.KeyValue{
+		attribute.String("gen_ai.system", sidecarSystem),
+		attribute.String("ghx.sidecar.session", t.Session),
+		attribute.String("ghx.sidecar.repo", t.Repo),
+		attribute.Int("ghx.sidecar.turn", t.Turn),
+		attribute.Int("ghx.sidecar.route.marker_table_version", continuationMarkerTableVersion),
+	}
+	attrs = append(attrs, t.routeAttributes()...)
+	return telemetry.LogRecord{
+		Time:       at,
+		Span:       span,
+		EventName:  "sidecar.route",
+		Attributes: attrs,
+	}
 }
 
 func (t turnTelemetry) turnAttributes() []attribute.KeyValue {

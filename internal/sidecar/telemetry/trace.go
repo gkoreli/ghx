@@ -81,6 +81,7 @@ func (e *otlpJSONFileExporter) ExportSpans(ctx context.Context, spans []sdktrace
 	if len(data.ResourceSpans) == 0 {
 		return nil
 	}
+	sanitizeProtoStrings(data)
 	line, err := protojson.MarshalOptions{EmitUnpopulated: false}.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal OTLP trace json: %w", err)
@@ -199,8 +200,8 @@ func protoSpan(span sdktrace.ReadOnlySpan) *tracepb.Span {
 	out := &tracepb.Span{
 		TraceId:                tid[:],
 		SpanId:                 sid[:],
-		TraceState:             span.SpanContext().TraceState().String(),
-		Name:                   span.Name(),
+		TraceState:             validUTF8(span.SpanContext().TraceState().String()),
+		Name:                   validUTF8(span.Name()),
 		Kind:                   spanKind(span.SpanKind()),
 		StartTimeUnixNano:      uint64(maxInt64(0, span.StartTime().UnixNano())),
 		EndTimeUnixNano:        uint64(maxInt64(0, span.EndTime().UnixNano())),
@@ -231,8 +232,8 @@ func instrumentationScope(scope instrumentation.Scope) *commonpb.Instrumentation
 		return nil
 	}
 	return &commonpb.InstrumentationScope{
-		Name:       scope.Name,
-		Version:    scope.Version,
+		Name:       validUTF8(scope.Name),
+		Version:    validUTF8(scope.Version),
 		Attributes: iteratorValues(scope.Attributes.Iter()),
 	}
 }
@@ -260,7 +261,7 @@ func iteratorValues(iter attribute.Iterator) []*commonpb.KeyValue {
 }
 
 func keyValue(attr attribute.KeyValue) *commonpb.KeyValue {
-	return &commonpb.KeyValue{Key: string(attr.Key), Value: anyValue(attr.Value)}
+	return &commonpb.KeyValue{Key: validUTF8(string(attr.Key)), Value: anyValue(attr.Value)}
 }
 
 func anyValue(v attribute.Value) *commonpb.AnyValue {
@@ -279,7 +280,7 @@ func anyValue(v attribute.Value) *commonpb.AnyValue {
 	case attribute.FLOAT64SLICE:
 		out.Value = &commonpb.AnyValue_ArrayValue{ArrayValue: &commonpb.ArrayValue{Values: float64Values(v.AsFloat64Slice())}}
 	case attribute.STRING:
-		out.Value = &commonpb.AnyValue_StringValue{StringValue: v.AsString()}
+		out.Value = &commonpb.AnyValue_StringValue{StringValue: validUTF8(v.AsString())}
 	case attribute.STRINGSLICE:
 		out.Value = &commonpb.AnyValue_ArrayValue{ArrayValue: &commonpb.ArrayValue{Values: stringValues(v.AsStringSlice())}}
 	case attribute.BYTESLICE:
@@ -318,7 +319,7 @@ func float64Values(vals []float64) []*commonpb.AnyValue {
 func stringValues(vals []string) []*commonpb.AnyValue {
 	out := make([]*commonpb.AnyValue, len(vals))
 	for i, v := range vals {
-		out[i] = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: v}}
+		out[i] = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: validUTF8(v)}}
 	}
 	return out
 }
@@ -338,7 +339,7 @@ func events(es []sdktrace.Event) []*tracepb.Span_Event {
 	out := make([]*tracepb.Span_Event, len(es))
 	for i, e := range es {
 		out[i] = &tracepb.Span_Event{
-			Name:                   e.Name,
+			Name:                   validUTF8(e.Name),
 			TimeUnixNano:           uint64(maxInt64(0, e.Time.UnixNano())),
 			Attributes:             keyValues(e.Attributes),
 			DroppedAttributesCount: clampUint32(e.DroppedAttributeCount),
@@ -367,6 +368,7 @@ func links(ls []sdktrace.Link) []*tracepb.Span_Link {
 }
 
 func status(code codes.Code, description string) *tracepb.Status {
+	description = validUTF8(description)
 	switch code {
 	case codes.Ok:
 		return &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK, Message: description}

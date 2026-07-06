@@ -67,6 +67,7 @@ you can `ls` and `jq`:
     traces.jsonl              # OTel spans: session → turn → each tool call
     logs.jsonl                # GenAI-convention message-content records
     metrics.jsonl             # duration, token, report-size metrics
+    tier-decisions.jsonl      # escalation policy evaluation per turn (which tier, why)
 ```
 
 Sessions persist, so follow-up questions on the same repo are cheaper and
@@ -188,9 +189,13 @@ ghx sidecar ask --repo hono/hono "How does Hono implement middleware chaining, a
   Without it: **discovery** — "which repos/libraries do X" — the sidecar sweeps
   GitHub for candidates and reads into the top ones before claiming anything
   (see [ADR-0019.1](docs/adr/0019.1-discovery-tier.md)).
-- `--session <name>` is optional (defaults to a repo slug like `hono-hono`, or a
-  question-derived slug for discovery asks — printed so you can resume it); use
-  it to keep parallel investigation threads apart.
+- `--session <name>` is advanced: pin a specific session; normally omit — ghx
+  routes each question to the right session for you
+  ([ADR-0030.1](docs/adr/0030.1-session-routing.md)). With `--repo` the
+  repo-slug session (like `hono-hono`) still stands; with neither flag the
+  daemon runs a deterministic cascade (explicit → repo mention in the question
+  → warm continuation → ledger overlap → new session) and reports the route it
+  chose: `session: hono-hono (routed: overlap 0.62, next 0.21)`.
 - `--json` prints an envelope — `{"report": {...}, "artifacts": {"sessionDir":
   "...", "traceId": "..."}}` — the validated report plus a pointer to the
   session's audit trail. Without it you get the answer plus compact verified /
@@ -207,6 +212,7 @@ session automatically and answer faster. A fresh question takes tens of seconds.
 ghx sidecar sessions list                 # all sessions
 ghx sidecar sessions show <session>       # details + report history
 ghx sidecar sessions ledger <session>     # the accumulated evidence ledger
+ghx sidecar sessions reroute <s> <turn> <dest>  # move a mis-routed turn; both ledgers rebuilt by replay
 ghx sidecar view [session]                # spawn a local trace UI over the session's artifacts
 ghx sidecar view --list                   # sessions with turn/report counts
 ghx sidecar view --port 9000              # viewer UI port (default 8000)
@@ -342,6 +348,14 @@ query). If a tool binary is missing, ghx prints the install hint and exits
 before any clone; answers fall back to remote Tier-1 evidence — never a
 silent or faked Tier-2 result. `astgrep` follows grep parity: exit `1` with
 `[]` means the search ran and found nothing.
+
+When the sidecar answers a question, escalation is never vibes: every turn
+gets a declarative policy evaluation
+([ADR-0024.2](docs/adr/0024.2-escalation-policy.md)) over named observables
+(question shape, exhausted searches, low-confidence remote-only reports),
+recorded as a `ghx.tier.decision` span in `traces.jsonl`, a line in the
+session's `tier-decisions.jsonl`, and `tierUsed` provenance on the report —
+so "which tier answered and why" is always recomputable from the artifacts.
 
 ### Codemode
 

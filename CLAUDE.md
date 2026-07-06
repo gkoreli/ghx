@@ -140,6 +140,34 @@ Do not rely on Fable remembering CLI flags. When delegating to Codex CLI or Clau
 
 That skill is the canonical home for command syntax, bypass flags, wrapper prompts, and evidence report shape. Keep this file focused on routing judgment, not command tables.
 
+## Remote Control (learned 2026-07-06)
+
+How to make a ghx session controllable from claude.ai/code or the Claude
+mobile app, learned the hard way after a dead session left a stale env:
+
+- Resume an existing session AND expose it remotely in one shot:
+  `claude --resume <session-id> --remote-control "ghx-remote" --dangerously-skip-permissions`.
+  Requires Claude Code ≥ 2.1.200 (`claude update` first; 2.1.169 rejects
+  the resume flags). Session ids = newest `*.jsonl` in
+  `~/.claude/projects/-Users-goga-Documents-goga-ghx/`.
+- The TUI needs a real TTY. A headless/background launch fails with
+  "provide a prompt to continue". Run it inside tmux:
+  `tmux new-session -d -s ghx-remote -x 200 -y 50 'claude --resume <id> --remote-control "ghx-remote" --dangerously-skip-permissions'`
+  then `tmux attach -t ghx-remote` to watch locally (`ctrl+b d` to detach;
+  killing the tmux session kills the remote session).
+- Resuming a large session prompts summary-vs-full: pick **resume from
+  summary** — full replay of a ~750k-token session burns a large slice of
+  usage limits, and loop state is persisted in memory files anyway.
+- Standalone host mode (`claude remote-control --permission-mode
+  bypassPermissions`) serves the current dir for NEW sessions only; it does
+  not carry existing session context.
+- Stale environments: envs listed at claude.ai/code persist server-side
+  after their host process dies — connecting then yields "bridged Claude
+  Code process stopped responding". Before debugging anything else, verify
+  a live host process exists (`pgrep -f remote-control`, or the session's
+  worker: `ps ax | grep sdk-url`). Endless spinner + 503s in the web
+  console = claude.ai outage; check status.claude.com.
+
 ## Eval Cadence (Goga, 2026-07-05/06 — binding)
 
 Most changes need NO live eval at all — unit tests and one live smoke of

@@ -112,6 +112,67 @@ func (p Provenance) Lines() []string {
 	return lines
 }
 
+// FindProvenance is the exact inverse of Provenance.Lines: it scans arbitrary
+// captured text (a shell tool's recorded output) for the first tier2
+// provenance block and reconstructs it. It lives next to Lines so the format
+// has one owner. Used by the sidecar runtime to attach clone provenance to
+// the recorded tier decision when Tier 2 ran via shell (ADR-0024.2 D5);
+// best-effort by design — ok is false when no snapshot line is visible.
+func FindProvenance(text string) (Provenance, bool) {
+	var p Provenance
+	found := false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case !found && strings.HasPrefix(line, "tier2 snapshot: "):
+			fields := provenanceFields(strings.TrimPrefix(line, "tier2 snapshot: "), "repo", "ref", "sha")
+			p.Repo, p.SHA = fields["repo"], fields["sha"]
+			if ref := fields["ref"]; ref != "HEAD" {
+				p.Ref = ref
+			}
+			found = true
+		case found && strings.HasPrefix(line, "tier2 clone: "):
+			fields := provenanceFields(strings.TrimPrefix(line, "tier2 clone: "), "strategy", "cache", "path")
+			p.Strategy, p.SnapshotPath = fields["strategy"], fields["path"]
+			p.CacheHit = fields["cache"] == "hit"
+		case found && strings.HasPrefix(line, "tier2 sparse: "):
+			for _, sp := range strings.Split(strings.TrimPrefix(line, "tier2 sparse: "), ", ") {
+				if sp = strings.TrimSpace(sp); sp != "" {
+					p.SparsePaths = append(p.SparsePaths, sp)
+				}
+			}
+		case found && line != "" && !strings.HasPrefix(line, "tier2 "):
+			// The block is contiguous; stop at the first foreign line so a
+			// later unrelated block cannot bleed into this provenance.
+			return p, true
+		}
+	}
+	return p, found
+}
+
+// provenanceFields splits "k1=v1 k2=v2 k3=v3" where only the listed keys are
+// valid, tolerating values that contain spaces (e.g. paths) by cutting each
+// value at the next known " key=" marker.
+func provenanceFields(s string, keys ...string) map[string]string {
+	out := map[string]string{}
+	for i, key := range keys {
+		marker := key + "="
+		start := strings.Index(s, marker)
+		if start < 0 {
+			continue
+		}
+		val := s[start+len(marker):]
+		end := len(val)
+		for _, next := range keys[i+1:] {
+			if idx := strings.Index(val, " "+next+"="); idx >= 0 && idx < end {
+				end = idx
+			}
+		}
+		out[key] = strings.TrimSpace(val[:end])
+	}
+	return out
+}
+
 // Service is the single owner of the Tier-2 substrate: snapshot cache, clone
 // materialization, and absorbed structural tools. The sidecar runtime and the
 // CLI both reach Tier 2 only through this type (ADR-0024.1 "Implementation

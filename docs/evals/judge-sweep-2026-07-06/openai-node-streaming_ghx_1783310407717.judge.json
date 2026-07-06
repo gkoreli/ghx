@@ -1,0 +1,217 @@
+{
+  "schemaVersion": "judge-result-v1",
+  "episodeId": "openai-node-streaming_ghx_1783310407717",
+  "taskId": "openai-node-streaming",
+  "skipped": false,
+  "judgeModelId": "claude-opus-4-8/claude-cli-sweep (SAME-FAMILY, PRELIMINARY, k=1)",
+  "promptVersion": "judge-prompt-v1",
+  "rubricVersion": "core-rubric-v1",
+  "samples": 1,
+  "dimensions": [
+    {
+      "dimension": "evidence_groundedness",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Nearly every substantive claim is anchored to an inspected file with line references: Stream class at src/core/streaming.ts:21, fromSSEResponse, the wiring in src/internal/parse.ts defaultParseResponse, and APIPromise in src/core/api-promise.ts — all of which appear as actual reads in the tool calls. The method-routing table cites concrete paths (responses.ts, chat/completions/completions.ts, beta/threads/runs/runs.ts) that were each opened and read. Approximate line numbers are flagged with '~', and the ResponseStream/AssistantStream/ChatCompletionStream wrappers were each read directly."
+    },
+    {
+      "dimension": "exploration_efficiency",
+      "medianScore": 4,
+      "scores": [
+        4
+      ],
+      "disagreement": 0,
+      "explanation": "The trajectory reached a comprehensive answer, and the agent correctly recovered when src/resources/chat/completions.ts turned out to be a 125-byte re-export by mapping to the real completions/completions.ts. But several grep attempts returned empty ('stream\\(', 'fromSSEResponse' in client.ts/api-promise.ts, 'static stream|static create') before it found fromSSEResponse in parse.ts by reading the file — some wasted probing pattern-matching rather than tracing structure first."
+    },
+    {
+      "dimension": "uncertainty_honesty",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Exemplary honesty: explicitly labels src/realtime/* WebSocket streaming as 'Not verified' because those files were never opened, flags videos.ts/containers.ts as unchecked, and states this is static-read only with no code executed. It also correctly distinguishes the raw Stream path (verified through parse.ts/api-promise.ts) from the lib/*Stream.ts convenience wrappers, following the call path rather than asserting from names."
+    }
+  ],
+  "overall": 5,
+  "verdicts": [
+    {
+      "dimensions": [
+        {
+          "dimension": "evidence_groundedness",
+          "score": 5,
+          "explanation": "Nearly every substantive claim is anchored to an inspected file with line references: Stream class at src/core/streaming.ts:21, fromSSEResponse, the wiring in src/internal/parse.ts defaultParseResponse, and APIPromise in src/core/api-promise.ts — all of which appear as actual reads in the tool calls. The method-routing table cites concrete paths (responses.ts, chat/completions/completions.ts, beta/threads/runs/runs.ts) that were each opened and read. Approximate line numbers are flagged with '~', and the ResponseStream/AssistantStream/ChatCompletionStream wrappers were each read directly."
+        },
+        {
+          "dimension": "exploration_efficiency",
+          "score": 4,
+          "explanation": "The trajectory reached a comprehensive answer, and the agent correctly recovered when src/resources/chat/completions.ts turned out to be a 125-byte re-export by mapping to the real completions/completions.ts. But several grep attempts returned empty ('stream\\(', 'fromSSEResponse' in client.ts/api-promise.ts, 'static stream|static create') before it found fromSSEResponse in parse.ts by reading the file — some wasted probing pattern-matching rather than tracing structure first."
+        },
+        {
+          "dimension": "uncertainty_honesty",
+          "score": 5,
+          "explanation": "Exemplary honesty: explicitly labels src/realtime/* WebSocket streaming as 'Not verified' because those files were never opened, flags videos.ts/containers.ts as unchecked, and states this is static-read only with no code executed. It also correctly distinguishes the raw Stream path (verified through parse.ts/api-promise.ts) from the lib/*Stream.ts convenience wrappers, following the call path rather than asserting from names."
+        }
+      ],
+      "overall": 5,
+      "explanation": "A strong, well-grounded reconnaissance answer that nails the task: it locates the core SSE engine in src/core/streaming.ts, identifies the true wiring point in defaultParseResponse (src/internal/parse.ts) via APIPromise rather than guessing, enumerates the higher-level ResponseStream/AssistantStream/ChatCompletionStream wrappers from files it actually read, and produces a precise method-routing table for chat, responses, completions, and beta threads/runs. It shows how all paths bottom out at Stream.fromSSEResponse. Honesty is its standout strength — the Realtime WebSocket path and a couple of other resources are cleanly marked unverified. A few empty grep probes cost some efficiency, but the answer is complete, traceable, and appropriately hedged."
+    }
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "openai-node-streaming",
+    "repo": "openai/openai-node",
+    "questions": [
+      "Where are streaming responses implemented, and which public API methods route into the streaming implementation?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where are streaming responses implemented, and which public API methods route into the streaming implementation?",
+        "agentText": "Now let's check the responses.ts `stream()` method and the Responses API's ResponseStream, plus beta threads/runs streaming and how `_client.post` with `stream:true` routes into `Stream.fromSSEResponse` inside the core client.I now have enough to give a complete, well-evidenced answer.\n\n## Streaming implementation\n\n**Core SSE engine — `src/core/streaming.ts`**\n- `Stream\u003cItem\u003e` class (line 21): wraps a `fetch` `Response` as an `AsyncIterable\u003cItem\u003e`.\n- `Stream.fromSSEResponse()` (line ~24): parses Server-Sent Events, JSON-decodes each `data:` payload, stops at `data: [DONE]`, throws `APIError` on `{error: ...}` payloads.\n- `Stream.fromReadableStream()`: alternate constructor for newline-delimited JSON streams (used for browser/backend passthrough, e.g. `ChatCompletionStream.fromReadableStream`).\n- `_iterSSEMessages()` / `SSEDecoder` / `iterSSEChunks()`: low-level SSE line/byte parsing shared by all resources.\n\n**Wiring point — `src/internal/parse.ts`, `defaultParseResponse()`**\nThis is where *every* streaming request actually gets turned into a `Stream`: if `props.options.stream` is true, it calls `Stream.fromSSEResponse(...)` (or a custom `options.__streamClass` if set) instead of doing a normal `response.json()`. `APIPromise` (`src/core/api-promise.ts`) uses `defaultParseResponse` as its default parser, so any resource method that does `this._client.post(url, { ...body, stream: true })` transparently resolves to `Stream\u003cItem\u003e`.\n\n**Higher-level streaming wrappers (event-driven helpers), all built on `Stream`:**\n- `src/lib/EventStream.ts` — generic base class (`EventStream\u003cEvents\u003e`) providing `.on()`, async iteration plumbing, abort handling.\n- `src/lib/ChatCompletionStream.ts` — `ChatCompletionStream` (extends `AbstractChatCompletionRunner`), accumulates `ChatCompletionChunk`s into a snapshot, emits `content`, `content.delta`, `chunk`, tool-call events, etc. Static entry: `ChatCompletionStream.createChatCompletion()`.\n- `src/lib/responses/ResponseStream.ts` — `ResponseStream`, accumulates Responses API events via `accumulateResponse()` (`src/lib/responses/ResponseAccumulator.ts`). Static entry: `ResponseStream.createResponse()`.\n- `src/lib/AssistantStream.ts` — `AssistantStream` for the (deprecated) Assistants/Threads/Runs API, emits `messageDelta`, `runStepDelta`, `toolCallDelta`, etc. Static entries: `AssistantStream.createAssistantStream()`, `createToolAssistantStream()`.\n- `src/lib/ChatCompletionStreamingRunner.ts` — streaming variant of the tool-calling \"Runner\" (auto function-calling loop over a stream).\n\n## Public API methods that route into streaming\n\n| Method | File | Mechanism |\n|---|---|---|\n| `client.responses.create(body /* stream:true */)` | `src/resources/responses/responses.ts:96-123` | `this._client.post('/responses', { stream: body.stream })` → raw `Stream\u003cResponseStreamEvent\u003e` |\n| `client.responses.retrieve(id, { stream: true })` | same file, ~135-165 | same mechanism, GET `/responses/{id}` |\n| `client.responses.stream(params)` | same file, `stream()` method | delegates to `ResponseStream.createResponse()` (event-driven wrapper) |\n| `client.chat.completions.create(body /* stream:true */)` | `src/resources/chat/completions/completions.ts:~62-78` | `this._client.post('/chat/completions', { stream: body.stream })` → raw `Stream\u003cChatCompletionChunk\u003e` |\n| `client.chat.completions.stream(params)` | same file, `stream()` method | delegates to `ChatCompletionStream.createChatCompletion()` |\n| `client.chat.completions.runTools(body)` when `body.stream` | same file, `runTools()` | delegates to `ChatCompletionStreamingRunner.runTools()` |\n| `client.completions.create(body /* stream:true */)` (legacy Completions API) | `src/resources/completions.ts` | same `post(..., { stream: true })` pattern → `Stream\u003cCompletion\u003e` |\n| `client.beta.threads.runs.create(threadId, params /* stream:true */)` | `src/resources/beta/threads/runs/runs.ts:~15-33` | `post(..., { stream: params.stream, __synthesizeEventData: true })` → raw `Stream\u003cAssistantStreamEvent\u003e` |\n| `client.beta.threads.runs.stream(threadId, body)` / `.createAndStream(...)` | same file | delegates to `AssistantStream.createAssistantStream()` |\n| `client.beta.threads.runs.submitToolOutputs(runId, params /* stream:true */)` | same file | raw `Stream\u003cAssistantStreamEvent\u003e` |\n| `client.beta.threads.runs.submitToolOutputsStream(...)` | same file | delegates to `AssistantStream.createToolAssistantStream()` |\n\nAll of these bottom out at the same place: `_client.post/get(...)` sets `options.stream = true` in the request options → `APIPromise` resolves via `defaultParseResponse` (`src/internal/parse.ts`) → `Stream.fromSSEResponse()` (`src/core/streaming.ts`). The `lib/*Stream.ts` classes are convenience wrappers around that raw `Stream`, not separate transports.\n\n**Not verified:** `src/realtime/*` (WebSocket-based streaming for the Realtime API) — I did not open `realtime/index.ts`, `realtime/websocket.ts`, or `realtime/ws.ts`, so I can't confirm whether/how they reuse `core/streaming.ts` vs. an entirely separate WS event-emitter path. Also did not verify `src/resources/videos.ts`/`containers.ts` for any additional streaming endpoints, and did not run/execute any code — this is a static-read analysis only.",
+        "toolCalls": [
+          {
+            "title": "ghx explore openai/openai-node 2\u003e\u00261 | head -100",
+            "outputSummary": "```console description: Official JavaScript / TypeScript library for the OpenAI API branch: main files: .devcontainer/ .github/ .gitignore .prettierignore .prettierrc.json .release-please-manifest.json .stats.yml Brewfile CHANGELOG.md CONTRIBUTING.md LICENSE MIGRATION.md README.m",
+            "outputChars": 5773
+          },
+          {
+            "title": "ghx tree openai/openai-node src --depth 2 2\u003e\u00261 | head -150",
+            "outputSummary": "```console _vendor/ _vendor/partial-json-parser/ _vendor/zod-to-json-schema/ api-promise.ts auth/ auth/index.ts auth/subject-token-providers.ts auth/types.ts auth/workload-identity-auth.ts azure.ts bedrock.ts beta/ beta/realtime/ client.ts core/ core/EventEmitter.ts core/README.m",
+            "outputChars": 4705
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/streaming.ts --map 2\u003e\u00261 | head -100",
+            "outputSummary": "```console === src/core/streaming.ts (9758 bytes) === 1: import { OpenAIError } from './error'; 2: import { type ReadableStream } from '../internal/shim-types'; 3: import { makeReadableStream } from '../internal/shims'; 4: import { findDoubleNewlineIndex, LineDecoder } from '../i",
+            "outputChars": 2003
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/responses --map 2\u003e\u00261 | head -100",
+            "outputSummary": "```console === src/lib/responses (directory, 4 entries) === EventTypes.ts ResponseAccumulator.ts ResponseInputItems.ts ResponseStream.ts → use: ghx read openai/openai-node \"src/lib/responses/*\" --map ```=== src/lib/responses (directory, 4 entries) === EventTypes.ts ResponseAccu",
+            "outputChars": 411
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/responses/responses.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "```console === src/resources/responses/responses.ts (221553 bytes) === 7: addOutputText, 8: } from '../../lib/ResponsesParser'; \u003e 9: import { ResponseStream, ResponseStreamParams } from '../../lib/responses/ResponseStream'; 10: import { APIResource } from '../../core/resource'; 1",
+            "outputChars": 5863
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/streaming.ts 2\u003e\u00261",
+            "outputSummary": "```console === src/core/streaming.ts (9758 bytes) === import { OpenAIError } from './error'; import { type ReadableStream } from '../internal/shim-types'; import { makeReadableStream } from '../internal/shims'; import { findDoubleNewlineIndex, LineDecoder } from '../internal/deco",
+            "outputChars": 19615
+          },
+          {
+            "title": "ghx read openai/openai-node \"src/lib/responses/*\" --map 2\u003e\u00261 | head -150",
+            "outputSummary": "```console === src/lib/responses/EventTypes.ts (2545 bytes, via src/lib/responses/*) === 1: import { 35: export type ResponseFunctionCallArgumentsDeltaEvent = RawResponseFunctionCallArgumentsDeltaEvent \u0026 { 39: export type ResponseTextDeltaEvent = RawResponseTextDeltaEvent \u0026 { 43:",
+            "outputChars": 6281
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\\(\" src/resources/chat/completions.ts src/resources/completions.ts 2\u003e\u00261 | head -100",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/chat/completions.ts 2\u003e\u00261 | head -100",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"static stream|static create|\\.stream\\(\" src/resources/responses/responses.ts src/resources/chat/completions.ts src/resources/completions.ts 2\u003e\u00261 | head -150",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/ChatCompletionStream.ts --map 2\u003e\u00261; echo ---; ghx read openai/openai-node src/lib/AssistantStream.ts --map 2\u003e\u00261; echo ---; ghx read openai/openai-node src/lib/EventStream.ts --map 2\u003e\u00261",
+            "outputSummary": "```console === src/lib/ChatCompletionStream.ts (26842 bytes) === 1: import { partialParse } from '../_vendor/partial-json-parser/parser'; 2: import { 8: import OpenAI from '../index'; 9: import { RequestOptions } from '../internal/request-options'; 10: import { type ReadableStrea",
+            "outputChars": 6815
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions.ts --map 2\u003e\u00261 | head -80",
+            "outputSummary": "```console === src/resources/chat/completions.ts (125 bytes) === 3: export * from './completions/index'; # map: 39/125 chars (~31 tokens full, ~9 tokens map) ```=== src/resources/chat/completions.ts (125 bytes) === 3: export * from './completions/index'; # map: 39/125 chars (~31 ",
+            "outputChars": 307
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/completions.ts --map 2\u003e\u00261 | head -60",
+            "outputSummary": "```console === src/resources/completions.ts (13591 bytes) === 3: import { APIResource } from '../core/resource'; 4: import * as CompletionsAPI from './completions'; 5: import * as ChatCompletionsAPI from './chat/completions/completions'; 6: import { APIPromise } from '../core/api",
+            "outputChars": 2289
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions/completions.ts --map 2\u003e\u00261 | head -150",
+            "outputSummary": "```console === src/resources/chat/completions/completions.ts (76050 bytes) === 3: import { APIResource } from '../../../core/resource'; 4: import * as ChatCompletionsAPI from './completions'; 5: import * as CompletionsAPI from '../../completions'; 6: import * as Shared from '../.",
+            "outputChars": 12239
+          },
+          {
+            "title": "ghx tree openai/openai-node src/resources/beta --depth 3 2\u003e\u00261",
+            "outputSummary": "```console assistants.ts beta.ts chatkit.ts chatkit/ chatkit/chatkit.ts chatkit/index.ts chatkit/sessions.ts chatkit/threads.ts index.ts realtime.ts realtime/ realtime/index.ts realtime/realtime.ts realtime/sessions.ts realtime/transcription-sessions.ts threads.ts threads/ thread",
+            "outputChars": 841
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/chat/completions/completions.ts 2\u003e\u00261 | sed -n '26,230p'",
+            "outputSummary": "```console */ export class Completions extends APIResource { messages: MessagesAPI.Messages = new MessagesAPI.Messages(this._client); /** * **Starting a new project?** We recommend trying * [Responses](https://platform.openai.com/docs/api-reference/responses) to take * advantage ",
+            "outputChars": 14247
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/responses/responses.ts 2\u003e\u00261 | sed -n '1,320p'",
+            "outputSummary": "```console === src/resources/responses/responses.ts (221553 bytes) === // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details. import { type ExtractParsedContentFromParams, parseResponse, type ResponseCreateParamsWithTools, addOutputText, } from '..",
+            "outputChars": 20673
+          },
+          {
+            "title": "ghx read openai/openai-node src/client.ts --map 2\u003e\u00261 | head -80",
+            "outputSummary": "```console === src/client.ts (59736 bytes) === 3: import type { RequestInit, RequestInfo, BodyInit } from './internal/builtin-types'; 4: import type { HTTPMethod, PromiseOrValue, MergedRequestInit, FinalizedRequestInit } from './internal/types'; 5: import { uuid4 } from './intern",
+            "outputChars": 6575
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse|Stream\\.\" src/client.ts src/core/api-promise.ts 2\u003e\u00261 | head -60",
+            "outputSummary": "```console (Bash completed with no output) ```(Bash completed with no output)",
+            "outputChars": 77
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/AssistantStream.ts 2\u003e\u00261 | sed -n '1,120p'",
+            "outputSummary": "```console === src/lib/AssistantStream.ts (23840 bytes) === import { TextContentBlock, ImageFileContentBlock, Message, MessageContentDelta, Text, ImageFile, TextDelta, MessageDelta, MessageContent, } from '../resources/beta/threads/messages'; import { RequestOptions } from '../in",
+            "outputChars": 7819
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse\" src/core/api-promise.ts src/client.ts src/resources/beta/threads/runs/runs.ts 2\u003e\u00261\necho \"---try2---\"\nghx read openai/openai-node src/core/api-promise.ts 2\u003e\u00261 | grep -n \"Stream\"",
+            "outputSummary": "```console ---try2--- ```---try2---",
+            "outputChars": 35
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/beta/threads/runs/runs.ts --map 2\u003e\u00261 | head -100",
+            "outputSummary": "```console === src/resources/beta/threads/runs/runs.ts (36870 bytes) === 3: import { APIResource } from '../../../../core/resource'; 4: import * as RunsAPI from './runs'; 5: import * as Shared from '../../../shared'; 6: import * as AssistantsAPI from '../../assistants'; 7: import",
+            "outputChars": 5477
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/api-promise.ts 2\u003e\u00261",
+            "outputSummary": "```console === src/core/api-promise.ts (3619 bytes) === // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details. import { type OpenAI } from '../client'; import { type PromiseOrValue } from '../internal/types'; import { type APIResponseProps, default",
+            "outputChars": 7341
+          },
+          {
+            "title": "ghx read openai/openai-node src/resources/beta/threads/runs/runs.ts 2\u003e\u00261 | sed -n '49,303p'",
+            "outputSummary": "```console */ export class Runs extends APIResource { steps: StepsAPI.Steps = new StepsAPI.Steps(this._client); /** * Create a run. * * @deprecated The Assistants API is deprecated in favor of the Responses API */ create(threadID: string, params: RunCreateParamsNonStreaming, opti",
+            "outputChars": 17357
+          },
+          {
+            "title": "ghx read openai/openai-node src/internal/parse.ts 2\u003e\u00261",
+            "outputSummary": "```console === src/internal/parse.ts (3117 bytes) === // File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details. import type { FinalRequestOptions } from './request-options'; import { Stream } from '../core/streaming'; import { type OpenAI } from '../c",
+            "outputChars": 6333
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/responses/ResponseStream.ts 2\u003e\u00261",
+            "outputSummary": "```console === src/lib/responses/ResponseStream.ts (8831 bytes) === import { ResponseTextConfig, type ParsedResponse, type Response, type ResponseCreateParamsBase, type ResponseCreateParamsStreaming, type ResponseStreamEvent, } from '../../resources/responses/responses'; import {",
+            "outputChars": 17789
+          },
+          {
+            "title": "ghx read openai/openai-node src/lib/ChatCompletionStream.ts 2\u003e\u00261 | sed -n '130,260p'",
+            "outputSummary": "```console export class ChatCompletionStream\u003cParsedT = null\u003e extends AbstractChatCompletionRunner\u003cChatCompletionStreamEvents\u003cParsedT\u003e, ParsedT\u003e implements AsyncIterable\u003cChatCompletionChunk\u003e { #params: ChatCompletionCreateParams | null; #choiceEventStates: ChoiceEventState[]; #cur",
+            "outputChars": 8517
+          }
+        ]
+      }
+    ]
+  },
+  "calibrated": false,
+  "scoredAt": "2026-07-06T16:44:14.959584Z"
+}

@@ -31,6 +31,10 @@ type TurnResult struct {
 	ReplayedThinking string
 	// ToolCalls lists the tool calls observed during the turn (kind: command + status).
 	ToolCalls []string
+	// Route is the session-routing decision that placed this ask
+	// (ADR-0030.1 D7): it rides back on every response surface so the caller
+	// sees where the answer came from before building on it.
+	Route *RouteDecision `json:"route,omitempty"`
 	// ToolTraces records full per-call audit data for eval/training artifacts.
 	ToolTraces []ToolCallTrace
 	// ReplayedToolTraces records tool history replayed before this turn's
