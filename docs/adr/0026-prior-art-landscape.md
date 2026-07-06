@@ -23,8 +23,15 @@ phoenix the same evening, crewai on the 2026-07-05 re-run after ADR-0027
 landed (two turns, resuming the original session; see the CrewAI section
 for the recovery evidence). Second wave (same day, later):
 openai-agents-python, letta, mastra — all three completed at
-`--depth deep`, no new breaking friction. This ADR is therefore both
-landscape and dogfood artifact.
+`--depth deep`, no new breaking friction. Third wave (2026-07-06):
+OpenHands and google/adk-python at `--depth deep`, plus the first
+**unscoped discovery ask** in this landscape — the moat question itself,
+asked cold ("which frameworks return schema-validated result objects?");
+all three completed cleanly, one new soft friction entry
+(repo-qualifier ambiguity after a legitimate scope drift — see the
+OpenHands section). Running totals: **twelve investigations, eleven
+subject repos plus one discovery sweep, sixteen questions.** This ADR is
+therefore both landscape and dogfood artifact.
 
 ## The organizing lens (founder, 2026-07-05)
 
@@ -154,6 +161,130 @@ fired (`wrapUpRecovered` absent from all records — checked by grep). The
 recovery that mattered here was resume-as-continuation plus the deep
 budget, not the net.
 
+### OpenHands (delegate tool, agent SDK) — session `all-hands-ai-openhands`
+
+Recon note first: the asked repo (`All-Hands-AI/OpenHands`) no longer
+holds the agent code — its README points to `OpenHands/software-agent-sdk`,
+and the sidecar **followed the move on its own** (turn evidence: README
+read, then all subsequent digging in the SDK repo). Capability win,
+but it exposed a report-schema gap: `relevantFiles` paths carry no
+`owner/repo` qualifier while `meta.json` still pins the asked repo, so a
+consumer resolving those paths against `meta.repo` gets 404s (logged as
+soft friction in `docs/dogfood/FRICTION.md`).
+
+The delegation itself: parent calls a `delegate` tool (spawn/delegate
+commands, `DelegateExecutor` in
+`openhands-tools/openhands/tools/delegate/impl.py`) and receives a
+**`DelegateObservation`** — a typed pydantic envelope (`command`,
+`content`, `is_error`) whose payload is still **a plain-text summary**:
+each sub-agent's final response extracted by `get_agent_final_response`
+(the `FinishAction` message or last agent `MessageEvent`). Typed at the
+envelope, string at the evidence layer — the AutoGen pattern with better
+manners. Two things stand out through our lens. **Persistence is
+file-shaped and tree-shaped**: each sub-agent runs its own
+`LocalConversation` whose events/state persist under a `subagents/`
+subdirectory of the parent's `persistence_dir` (inherited only if the
+parent persists) — the closest found analog to our sessions-as-directories
+instinct, though the parent *agent* is never told the path and gets no
+handle to it in the return. **Cost provenance exists**: sub-agent LLM
+metrics merge into the parent's `conversation_stats` under
+`delegate:{agent_id}` — but replaced per delegation call, not summed, so
+repeat delegations to the same id silently overwrite history. The config
+surface is broad and declarative: `AgentDefinition` loaded from
+Markdown+frontmatter (model or "inherit", tools, skills, system_prompt,
+`permission_mode`, `max_iteration_per_run`, `max_budget_per_run`, hooks,
+MCP config, condenser) plus `DelegateExecutor`'s `max_children` and an
+optional `confirmation_handler`. Steal: agent-definition-as-Markdown-
+frontmatter for persona/doctrine files; `subagents/` under the parent's
+persistence dir as prior art for session trees; `delegate:{agent_id}`
+metrics keys for ledger cost provenance (fixing their overwrite bug in
+ours). Honest gaps (from the report): the single-blocking-agent
+`task` toolset path and the ACP-subprocess delegation path
+(`agent/acp_agent.py`) were not read in depth.
+
+### Google ADK (transfer + AgentTool) — session `google-adk-python`
+
+Two mechanisms with opposite return semantics, like OpenAI's SDK but
+more extreme on both ends. **Agent transfer returns nothing at all**:
+`TransferToAgentTool` just sets
+`tool_context.actions.transfer_to_agent = agent_name`
+(`src/google/adk/tools/transfer_to_agent_tool.py`); `BaseLlmFlow`
+detects the action and runs the target inline in the same turn, so the
+external caller sees **one continuous event stream whose `author` field
+switches** — no call/return boundary exists to put evidence on. Which
+agent "owns" the next user turn is reconstructed by scanning session
+events backwards for the last non-user author
+(`Runner._find_agent_to_run`). **AgentTool is the opposite pole**: the
+richest *validated* return found in the scan. When the wrapped agent
+declares an `output_schema`, `AgentTool.run_async` returns
+`validate_schema(output_schema, merged_text)` — an actual
+schema-validated object at the delegation boundary, not a string
+(`src/google/adk/tools/agent_tool.py`; surfaced by the discovery ask
+below, then verified by a direct `ghx read` of the file). But look what
+it costs: the sub-agent runs inside an **ephemeral
+`InMemorySessionService`** whose session is discarded after the call —
+`state_delta` is forwarded to the parent and artifacts pass through a
+`ForwardingArtifactService`, while the delegate's transcript evaporates.
+Evidence is lost at the exact moment structure is gained; the validated
+object is all that survives, and the schema is the caller's answer
+shape, not an evidence contract. Persistence elsewhere is event-sourced
+and declarative: `EventActions.state_delta`/`artifact_delta` applied by
+the session service into shared `session.state` (with `temp:`-prefixed
+keys living only in-memory) — all agents in the tree share one state.
+Tracing is the best-aligned found: OTel **GenAI semconv** spans
+(`invoke_agent` with `gen_ai.agent.name`/`gen_ai.conversation.id`,
+nested `call_llm`/tool spans, `src/google/adk/telemetry/tracing.py`)
+plus HTTP debug endpoints (`/debug/trace/session/{id}`) — independent
+validation of our `gen_ai.*` alignment and direct prior art for a
+served `ghx sidecar view`. Steal: `state_delta`/`artifact_delta` as
+declarative persistence deltas on events (ledger evolution);
+trace-debug endpoints for the viewer. Honest gaps (from the report):
+the newer 2.0 Workflow/Task API delegation path and `artifact_delta`'s
+application inside the artifact services were not verified.
+
+## Discovery tier stress test (the moat question, asked cold) — session `which-open-source-frameworks-let-a-957a9748`
+
+The third wave included the first discovery ask (`--depth deep`, no
+`--repo`) pointed at the moat claim itself: *which frameworks return a
+structured, schema-validated result object from delegation?* This
+doubles as evidence about discovery-tier quality, so the verdict is
+recorded with the split visible.
+
+What it did well: a broad sweep (`ghx repos "multi-agent
+orchestration"`), then **actual code reads** of the top candidates
+(`agent_output.py`, CrewAI `annotations.py`, ADK `agent_tool.py`) — the
+"verify by reading code" instruction was followed, 14 commands, and the
+report labeled its claims honestly: 3 verified, 1 inferred
+(agency-swarm's `response_format`, correctly flagged as
+Assistants-API-level rather than a proven sub-agent path), 0 unverified.
+And it found the one lead the repo-scoped ADK ask had missed: `AgentTool`
++ `output_schema`, which survived orchestrator verification and is now
+in the ADK section above.
+
+What it got loose — and this is the instructive part: **two of its three
+"verified" headline claims conflate schema machinery with the delegation
+boundary**, on exactly the repos where our earlier deep repo-scoped
+sessions had settled the boundary semantics. OpenAI Agents SDK:
+`output_type` validates the *sub-agent's own* `final_output`, but the
+`as_tool()` boundary still returns a string unless
+`custom_output_extractor` intervenes (the openai-agents section above,
+verified in-session). CrewAI: `output_pydantic` coerces *pipeline Task*
+outputs, but the delegation tools (`DelegateWorkTool`) bypass
+`TaskOutput` entirely and return a plain str (the CrewAI section above).
+The discovery report's citations are real code; its synthesis blurred
+"the framework has Pydantic validation somewhere" into "delegation
+returns a validated object." Only the ADK claim held at the boundary.
+
+Verdict for the tier: **discovery finds where to dig and labels its
+confidence honestly; it does not replace the dig.** Candidate surfacing
+and the verified/inferred split worked as designed; boundary-precision
+claims still need the repo-scoped deep tier (or orchestrator
+spot-verification, which is what caught this). That division of labor is
+acceptable for a recon product — but the persona doctrine for discovery
+should be tightened to state claims at the boundary it actually
+verified, not at the headline (routed: discovery persona doctrine,
+ADR-0019.1 follow-up).
+
 ## Agent memory (persistence-adjacent)
 
 ### Letta (memory blocks, archival passages) — session `letta-ai-letta`
@@ -207,25 +338,36 @@ a service DB, ours in local OTel artifacts.
 
 ## What nobody found does (the competitive claim, stated carefully)
 
-Across all nine: **delegation returns strings, transcripts, or — at the
-richest (Mastra) — typed status/output envelopes; none returns a
-schema-validated evidence contract** (claims with citations, commands
-run, uncertainty). The second wave sharpened the other clauses by giving
-each a nearest neighbor: Mastra hands the caller a traceId inside the
-return value, but the trail lives in framework storage domains, not files
-a parent agent can read without the stack; Letta exposes persistent,
+Across all eleven: **delegation returns strings, transcripts, typed
+status/output envelopes (Mastra), or — at the richest (ADK's
+`AgentTool` + `output_schema`) — a caller-schema-validated object; none
+returns a schema-validated evidence contract** (claims with citations,
+commands run, uncertainty). The third wave sharpened the structured-
+return clause the way the second sharpened the others: schema-validated
+delegation returns *do* exist, but the schema is always the **caller's
+answer shape** (ADK `output_schema`, Mastra `structuredOutput`), never
+an evidence shape — and ADK pays for its validated object by discarding
+the delegate's transcript (ephemeral in-memory session), losing the
+evidence at the exact moment it gains the structure. The other nearest
+neighbors stand: Mastra hands the caller a traceId inside the return
+value, but the trail lives in framework storage domains, not files a
+parent agent can read without the stack; Letta exposes persistent,
 versioned agent memory to external callers, but through a running
-server + DB, not artifacts; OpenAI's `custom_output_extractor` is the
-field visibly straining against the string return without shipping a
-contract to escape to. Earlier embryos stand (LangGraph checkpoints,
-AutoGen's last-message flag, Phoenix span scores, CrewAI's event-bus
-trace payloads that reach the vendor dashboard but never the caller).
-None combines the elements, and none measures signal-per-token. The
+server + DB, not artifacts; OpenHands persists delegate transcripts as
+real files under the parent's `persistence_dir/subagents/` — the closest
+found thing to artifact-level visibility — but never hands the parent
+agent the path; OpenAI's `custom_output_extractor` is the field visibly
+straining against the string return without shipping a contract to
+escape to. Earlier embryos stand (LangGraph checkpoints, AutoGen's
+last-message flag, Phoenix span scores, CrewAI's event-bus trace
+payloads that reach the vendor dashboard but never the caller). None
+combines the elements, and none measures signal-per-token. The
 *combination* — auditable, steerable, persistent, evidence-bearing
-delegation as a product — still has no found occupant; Mastra is the
-closest single competitor on the steer-and-trace axes and should be on
-the re-scan shortlist. PRELIMINARY-honest: nine repos across two sittings
-on one day; the landscape moves monthly; re-scan quarterly or on any
+delegation as a product — still has no found occupant; Mastra remains
+the closest single competitor on the steer-and-trace axes, with ADK now
+beside it on the structured-return axis; both belong on the re-scan
+shortlist. PRELIMINARY-honest: eleven repos across three sittings on two
+days; the landscape moves monthly; re-scan quarterly or on any
 funding-scale competitor signal.
 
 ### Inspect AI deep-dive (turn 2, same session — resume dogfood PASSED)
@@ -268,6 +410,13 @@ the ledger carried turn-1 context). The high-impact/low-effort findings:
 | Structured-output schema as a per-delegation dial | Mastra | consumption-surface dials (serve --recon) |
 | Versioned memory blocks (`BlockHistory`) | Letta | session ledger evolution — audited ledger edits |
 | Event-bus-only delegation visibility (dashboard sees more than the caller) | CrewAI | marketing narrative: evidence must return to the caller; ledger provenance prior art (`delegations`/`processed_by_agents`) |
+| Agent definition as Markdown+frontmatter (`AgentDefinition`) | OpenHands | persona/doctrine file shape (sidecar personas) |
+| `subagents/` under parent persistence dir | OpenHands | session-tree layout prior art (`~/.ghx/sessions` nesting) |
+| Per-delegate metrics keys (`delegate:{agent_id}`) — fix their overwrite bug in ours | OpenHands | ledger cost provenance |
+| Declarative persistence deltas on events (`state_delta`/`artifact_delta`) | Google ADK | session ledger evolution |
+| GenAI-semconv agent spans + HTTP trace-debug endpoints | Google ADK | validation of our `gen_ai.*` alignment; served `ghx sidecar view` |
+| Schema-validated return at the tool boundary (`output_schema` -> `validate_schema`) — and its transcript-discard cost as the foil | Google ADK | marketing narrative: structure without evidence; consumption-surface dials |
+| Boundary-precision doctrine: claim at the boundary you verified | discovery ask (self-observation) | discovery persona doctrine (ADR-0019.1 follow-up) |
 
 ## Absorption watchlist (standing — the codemap pattern, generalized)
 
@@ -294,10 +443,11 @@ API (inside ghx). The scan is standing: every prior-art review asks
 
 ## Cross-references
 
-- Sessions: `~/.ghx/sessions/{ukgovernmentbeis-inspect-ai, huggingface-smolagents, langchain-ai-langgraph, microsoft-autogen, arize-ai-phoenix-deep, crewaiinc-crewai, openai-openai-agents-python, letta-ai-letta, mastra-ai-mastra}` — reports + traces (the evidence).
+- Sessions: `~/.ghx/sessions/{ukgovernmentbeis-inspect-ai, huggingface-smolagents, langchain-ai-langgraph, microsoft-autogen, arize-ai-phoenix-deep, crewaiinc-crewai, openai-openai-agents-python, letta-ai-letta, mastra-ai-mastra, all-hands-ai-openhands, google-adk-python, which-open-source-frameworks-let-a-957a9748}` — reports + traces (the evidence).
 - docs/dogfood/FRICTION.md — the two breaking entries this recon produced,
   plus the second wave's soft entries (progress-stream opacity, SDK
-  warning noise).
+  warning noise) and the third wave's (repo-qualifier ambiguity in
+  `relevantFiles` after scope drift).
 - ADR-0020 (protocol landscape), ADR-0023 (judge research), ADR-0024 (M7
   research) — sibling landscape memos this complements.
 - NORTH_STAR "The Moat", capability §3 (main-agent-as-consumer lens).
