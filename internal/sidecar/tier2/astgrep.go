@@ -31,7 +31,8 @@ const AstGrepInstallHint = "ast-grep not found on PATH. Install it with:\n" +
 	"or: cargo install ast-grep --locked / npm i -g @ast-grep/cli\n" +
 	"or grab a release from https://github.com/ast-grep/ast-grep\n" +
 	"(ast-grep also unblocks codemap --importers and --deps.)\n" +
-	"Until installed, Tier 2 structural pattern search is unavailable and answers fall back to remote Tier-1 evidence."
+	"Until installed, backend local:ast-grep is unavailable and answers fall back to remote Tier-1 evidence\n" +
+	"(local:repomap is built into ghx and keeps working without it)."
 
 // ErrAstGrepNotInstalled reports that the ast-grep binary is absent. Callers
 // treat it as a graceful tier fallback signal — the blocked backend is named

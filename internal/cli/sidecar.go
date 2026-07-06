@@ -222,9 +222,11 @@ var sidecarEvalsExportCmd = &cobra.Command{
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
+	Short: "Run preflight diagnostics (token, network, ghx binary, tier-2 tools, ACP agent, report sink)",
 	Long: `Verify the sidecar is ready to run: GitHub token, network reachability, the ghx
-binary, the configured ACP agent handshake, and the report sink. Run this right
+binary, tier-2 structural tools (local:repomap is built into ghx; the optional
+codemap and ast-grep binaries are reported with install hints when absent),
+the configured ACP agent handshake, and the report sink. Run this right
 after ` + "`config init`" + ` and whenever an ` + "`ask`" + ` fails to set up — it prints the resolved
 agent command and config path first, so a failing check is immediately
 attributable, and ends with the ~/.ghx artifacts location. Exit code 3 if any

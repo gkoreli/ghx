@@ -439,9 +439,12 @@ the binary codemap needs for `--importers`/`--deps`), and `local:repomap`
 stolen with attribution from
 [aider's repo map](https://github.com/Aider-AI/aider), Apache-2.0 — an
 algorithm, not a dependency; deterministic given the same snapshot and
-query). If a tool binary is missing, ghx prints the install hint and exits
-before any clone; answers fall back to remote Tier-1 evidence — never a
-silent or faked Tier-2 result. `astgrep` follows grep parity: exit `1` with
+query). Only `local:repomap` works with zero extra installs; codemap and
+ast-grep are optional external binaries, and `ghx sidecar doctor` reports
+which tier-2 backends resolve on your machine with install hints for the
+missing ones. If a tool binary is missing, ghx prints the install hint and
+exits before any clone; answers fall back to remote Tier-1 evidence — never
+a silent or faked Tier-2 result. `astgrep` follows grep parity: exit `1` with
 `[]` means the search ran and found nothing.
 
 When the sidecar answers a question, escalation is never vibes: every turn
