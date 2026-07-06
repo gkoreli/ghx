@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
+	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
 	"github.com/spf13/cobra"
 )
 
@@ -118,6 +119,46 @@ var sidecarReportSinkCmd = &cobra.Command{
 			return fmt.Errorf("--out is required")
 		}
 		return sidecar.RunReportSink(out)
+	},
+}
+
+// sidecarEvalsCmd groups hidden eval-maintenance commands. These are
+// automation surfaces for committed artifacts, not end-user sidecar commands.
+var sidecarEvalsCmd = &cobra.Command{
+	Use:    "evals",
+	Short:  "Internal: sidecar eval artifact tools",
+	Hidden: true,
+	Run:    func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
+}
+
+// sidecarEvalsExportCmd converts committed eval episodes to training records.
+var sidecarEvalsExportCmd = &cobra.Command{
+	Use:    "export --format sft --run <dir> --out <file>",
+	Short:  "Internal: export sidecar eval episodes as training JSONL",
+	Hidden: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+		runDir, _ := cmd.Flags().GetString("run")
+		out, _ := cmd.Flags().GetString("out")
+		if format != "sft" {
+			return fmt.Errorf("--format must be sft")
+		}
+		if runDir == "" {
+			return fmt.Errorf("--run is required")
+		}
+		if out == "" {
+			return fmt.Errorf("--out is required")
+		}
+		manifest, err := evals.ExportSFT(evals.SFTExportOptions{
+			RunDir:      runDir,
+			OutPath:     out,
+			RewardFloor: evals.DefaultSFTRewardFloor,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Print(evals.FormatSFTExportSummary(manifest))
+		return nil
 	},
 }
 
@@ -354,12 +395,17 @@ func init() {
 	_ = sidecarDaemonCmd.Flags().MarkHidden("background")
 	sidecarDaemonCmd.Flags().Bool("stop", false, "Ask the running daemon to stop")
 
+	sidecarEvalsExportCmd.Flags().String("format", "", "Training export format (sft)")
+	sidecarEvalsExportCmd.Flags().String("run", "", "Eval run directory containing committed episode JSON files")
+	sidecarEvalsExportCmd.Flags().String("out", "", "Output JSONL path")
+
 	sidecarConfigInitCmd.Flags().Bool("claude-acp", false, "Write the pinned Claude ACP adapter command (npx @agentclientprotocol/claude-agent-acp) instead of auto-detecting")
 	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp; a diff is shown first)")
 
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
-	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarSessionsCmd, sidecarConfigCmd)
+	sidecarEvalsCmd.AddCommand(sidecarEvalsExportCmd)
+	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarEvalsCmd, sidecarSessionsCmd, sidecarConfigCmd)
 }
 
 // questionSession derives a stable session slug from the question when the ask
