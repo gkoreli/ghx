@@ -15,7 +15,10 @@ import (
 var codeCmd = &cobra.Command{
 	Use:   "code [code | -]",
 	Short: "Execute JavaScript with access to all ghx tools",
-	Args:  cobra.MaximumNArgs(1),
+	Example: `  ghx code 'var r = codemode.explore({repo: "gkoreli/ghx"}); return r.branch;'
+  ghx code --list
+  ghx code - < script.js`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		listFlag, _ := cmd.Flags().GetBool("list")
 

@@ -14,6 +14,6 @@ func main() {
 	cli.ReconSkillMD = skills.ReconSkillMD
 	if err := cli.RootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		os.Exit(cli.CodeForError(err))
 	}
 }

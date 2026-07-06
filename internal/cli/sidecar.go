@@ -23,6 +23,9 @@ bounded ghx evidence exploration and returns compact, auditable reports.
 
 Use "ghx sidecar ask" to investigate a repo. Session state is persisted across
 invocations so follow-up questions retain prior context.`,
+	Example: `  ghx sidecar doctor
+  ghx sidecar ask --repo hono/hono "How is middleware chained?"
+  ghx sidecar sessions list`,
 	Run: func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
 }
 
@@ -30,7 +33,10 @@ invocations so follow-up questions retain prior context.`,
 var sidecarAskCmd = &cobra.Command{
 	Use:   "ask [--repo <owner/repo>] <question>",
 	Short: "Ask a repo question using the sidecar agent",
-	Args:  cobra.ExactArgs(1),
+	Example: `  ghx sidecar ask --repo hono/hono "How is middleware chained?"
+  ghx sidecar ask --repo gkoreli/ghx --depth deep "Where are sidecar reports validated?"
+  ghx sidecar ask --json "Which Go repos implement ACP agents?"`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		session, _ := cmd.Flags().GetString("session")
 		repo, _ := cmd.Flags().GetString("repo")
@@ -90,9 +96,10 @@ type askEnvelope struct {
 // through a strictly-validated tool call instead of a free-text block. It is
 // not meant to be run by hand.
 var sidecarReportSinkCmd = &cobra.Command{
-	Use:    "report-sink --out <path>",
-	Short:  "Internal: serve the submit_report MCP tool over stdio",
-	Hidden: true,
+	Use:     "report-sink --out <path>",
+	Short:   "Internal: serve the submit_report MCP tool over stdio",
+	Example: `  ghx sidecar report-sink --out /tmp/report.json`,
+	Hidden:  true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out, _ := cmd.Flags().GetString("out")
 		if out == "" {
@@ -104,8 +111,9 @@ var sidecarReportSinkCmd = &cobra.Command{
 
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
+	Use:     "doctor",
+	Short:   "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
+	Example: `  ghx sidecar doctor`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
 		// Show what the config resolves to before probing it, so a failing
@@ -117,7 +125,7 @@ var sidecarDoctorCmd = &cobra.Command{
 		fmt.Println()
 		fmt.Println(sidecar.ArtifactsHint(cfg))
 		if !result.Passed {
-			os.Exit(1)
+			return WithExitCode(ExitUpstreamFailure, fmt.Errorf("sidecar preflight failed"))
 		}
 		return nil
 	},
@@ -127,13 +135,17 @@ var sidecarDoctorCmd = &cobra.Command{
 var sidecarSessionsCmd = &cobra.Command{
 	Use:   "sessions",
 	Short: "Manage sidecar named sessions",
-	Run:   func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
+	Example: `  ghx sidecar sessions list
+  ghx sidecar sessions show hono-hono
+  ghx sidecar sessions ledger hono-hono`,
+	Run: func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
 }
 
 // sidecarSessionsListCmd lists all sessions.
 var sidecarSessionsListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all named sessions",
+	Use:     "list",
+	Short:   "List all named sessions",
+	Example: `  ghx sidecar sessions list`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
 		metas, err := sidecar.ListSessions(cfg.SessionsDir)
@@ -155,7 +167,9 @@ var sidecarSessionsListCmd = &cobra.Command{
 var sidecarSessionsShowCmd = &cobra.Command{
 	Use:   "show <session-name>",
 	Short: "Show details and report history for a named session",
-	Args:  cobra.ExactArgs(1),
+	Example: `  ghx sidecar sessions show hono-hono
+  ghx sidecar sessions show discovery-which-go-repos-implement-acp`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
 		name := args[0]
@@ -194,9 +208,10 @@ var sidecarSessionsShowCmd = &cobra.Command{
 
 // sidecarSessionsLedgerCmd prints the persisted evidence ledger for one session.
 var sidecarSessionsLedgerCmd = &cobra.Command{
-	Use:   "ledger <session-name>",
-	Short: "Print the evidence ledger for a named session",
-	Args:  cobra.ExactArgs(1),
+	Use:     "ledger <session-name>",
+	Short:   "Print the evidence ledger for a named session",
+	Example: `  ghx sidecar sessions ledger hono-hono`,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
 		name := args[0]
@@ -221,13 +236,17 @@ var sidecarSessionsLedgerCmd = &cobra.Command{
 var sidecarConfigCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage sidecar configuration",
-	Run:   func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
+	Example: `  ghx sidecar config show
+  ghx sidecar config init --claude-acp
+  ghx sidecar config init --claude-acp --force`,
+	Run: func(cmd *cobra.Command, args []string) { _ = cmd.Help() },
 }
 
 // sidecarConfigShowCmd prints the current config.
 var sidecarConfigShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Print current sidecar configuration",
+	Use:     "show",
+	Short:   "Print current sidecar configuration",
+	Example: `  ghx sidecar config show`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
 		fmt.Println(sidecar.FormatConfig(cfg))
@@ -241,6 +260,8 @@ var sidecarConfigShowCmd = &cobra.Command{
 var sidecarConfigInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Write initial config (--claude-acp for the pinned Claude ACP adapter, else auto-detect)",
+	Example: `  ghx sidecar config init --claude-acp
+  ghx sidecar config init --claude-acp --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		claudeACP, _ := cmd.Flags().GetBool("claude-acp")
 		force, _ := cmd.Flags().GetBool("force")

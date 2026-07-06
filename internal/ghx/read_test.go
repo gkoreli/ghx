@@ -142,6 +142,37 @@ func TestParseFileResponse_BlobWithLines(t *testing.T) {
 	}
 }
 
+func TestParseFileResponse_BlobOverBudgetUsesMap(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "package main\n\nfunc main() {}\nfunc helper() {}\n",
+		"byteSize": float64(46),
+	}
+	r := parseFileResponse("main.go", data, "", &ReadOpts{Budget: 10})
+	if !r.BudgetedMap {
+		t.Fatal("BudgetedMap = false, want true")
+	}
+	if r.Content != "" {
+		t.Fatalf("Content = %q, want empty when budget map is used", r.Content)
+	}
+	if len(r.MapLines) == 0 {
+		t.Fatal("no map lines returned for over-budget file")
+	}
+}
+
+func TestParseFileResponse_BlobOverBudgetFullMode(t *testing.T) {
+	data := map[string]interface{}{
+		"text":     "package main\n\nfunc main() {}\n",
+		"byteSize": float64(29),
+	}
+	r := parseFileResponse("main.go", data, "", &ReadOpts{Budget: 10, FullMode: true})
+	if r.BudgetedMap {
+		t.Fatal("BudgetedMap = true, want false in full mode")
+	}
+	if r.Content == "" {
+		t.Fatal("Content is empty, want full content")
+	}
+}
+
 func TestParseFileResponse_BlobWithGlobPattern(t *testing.T) {
 	data := map[string]interface{}{
 		"text":     "content\n",
