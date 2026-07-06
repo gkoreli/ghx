@@ -313,7 +313,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | B4 | Runtime resilience: wrap-up recovery, liveness watchdog, artifacts-on-failure, evidence-required reports (ADR-0027) | Done 2026-07-06 |
 | B5 | Discovery tier: repo optional, GitHub-wide reconnaissance (ADR-0019.1) | Done 2026-07-06 |
 | B6 | Always-on runtime: warm daemon shared across entrypoints, no cold starts (§4) | Future |
-| B7 | Session routing: sidecar routes questions to the right active session; main agent never sees sessions (§4 end state) | Future (after B6) |
+| B7 | Session routing: sidecar routes questions to the right active session; main agent never sees sessions (§4 end state) | v1 shipped 2026-07-06 (ADR-0030.1): deterministic R1–R5 cascade + `sessions reroute` recovery live in daemon and daemonless ask, route provenance on every answer; next: dogfood route-record audit toward D4 phase 2 |
 | B8 | Persona proficiency: mining-driven persona revisions, each pre-registered before the next gate run | Standing; first batch implemented 2026-07-06 (ADR-0029 persona revision 1) |
 | B9 | Escalation tiers sidecar-decided (= M7 brain half); eager anticipation (= M8) | Future (B6 prerequisite for M8) |
 

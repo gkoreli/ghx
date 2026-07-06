@@ -188,9 +188,13 @@ ghx sidecar ask --repo hono/hono "How does Hono implement middleware chaining, a
   Without it: **discovery** — "which repos/libraries do X" — the sidecar sweeps
   GitHub for candidates and reads into the top ones before claiming anything
   (see [ADR-0019.1](docs/adr/0019.1-discovery-tier.md)).
-- `--session <name>` is optional (defaults to a repo slug like `hono-hono`, or a
-  question-derived slug for discovery asks — printed so you can resume it); use
-  it to keep parallel investigation threads apart.
+- `--session <name>` is advanced: pin a specific session; normally omit — ghx
+  routes each question to the right session for you
+  ([ADR-0030.1](docs/adr/0030.1-session-routing.md)). With `--repo` the
+  repo-slug session (like `hono-hono`) still stands; with neither flag the
+  daemon runs a deterministic cascade (explicit → repo mention in the question
+  → warm continuation → ledger overlap → new session) and reports the route it
+  chose: `session: hono-hono (routed: overlap 0.62, next 0.21)`.
 - `--json` prints an envelope — `{"report": {...}, "artifacts": {"sessionDir":
   "...", "traceId": "..."}}` — the validated report plus a pointer to the
   session's audit trail. Without it you get the answer plus compact verified /
@@ -207,6 +211,7 @@ session automatically and answer faster. A fresh question takes tens of seconds.
 ghx sidecar sessions list                 # all sessions
 ghx sidecar sessions show <session>       # details + report history
 ghx sidecar sessions ledger <session>     # the accumulated evidence ledger
+ghx sidecar sessions reroute <s> <turn> <dest>  # move a mis-routed turn; both ledgers rebuilt by replay
 ghx sidecar view [session]                # spawn a local trace UI over the session's artifacts
 ghx sidecar view --list                   # sessions with turn/report counts
 ghx sidecar view --port 9000              # viewer UI port (default 8000)
