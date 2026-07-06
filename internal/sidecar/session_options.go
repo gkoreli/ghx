@@ -97,10 +97,18 @@ type SessionOptions struct {
 }
 
 // ThinkingConfig mirrors the claude-agent-sdk ThinkingConfig union:
-// {"type":"disabled"} | {"type":"enabled","budgetTokens":N} | {"type":"adaptive"}.
+// {"type":"disabled"} | {"type":"enabled","budgetTokens":N,"display":...} |
+// {"type":"adaptive","display":...}.
 type ThinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budgetTokens,omitempty"`
+	// Display must be "summarized" for reasoning to ever be visible over
+	// ACP: recent models default to "omitted", which streams signature-only
+	// thinking blocks with empty text, and the adapter drops those before
+	// they become agent_thought_chunk (acp-agent.js:3884
+	// `if (chunk.thinking.length > 0)`; SDK forwards the flag only when set,
+	// sdk.mjs `--thinking-display`). Root-caused live 2026-07-05.
+	Display string `json:"display,omitempty"`
 }
 
 // thinkingConfigForBudget converts a token budget into the SDK object shape:
@@ -109,7 +117,7 @@ func thinkingConfigForBudget(tokens int) *ThinkingConfig {
 	if tokens == 0 {
 		return &ThinkingConfig{Type: "disabled"}
 	}
-	return &ThinkingConfig{Type: "enabled", BudgetTokens: tokens}
+	return &ThinkingConfig{Type: "enabled", BudgetTokens: tokens, Display: "summarized"}
 }
 
 // depthBudget is one row of the depth→budget mapping table (ADR-0020.1 D3).
