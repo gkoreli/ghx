@@ -124,7 +124,13 @@ modular, and reused across both.
    analysis) as internal tools. Tier 3: hand back to the main agent. The
    customer agent sees one sidecar and one small skill; which tier answered
    is always visible in the report and traces (ADR-0014.1's tiers, now a
-   product phase).
+   product phase). Scope runs the other direction too (Goga, 2026-07-06,
+   ADR-0019.1): reconnaissance starts at **discovery** — "which repos do
+   X" — one step before "how does X work in repo Y". A repo is optional
+   scope, never a requirement; without one the sidecar sweeps the GitHub
+   open-source world itself and verifies candidates by reading before
+   claiming. The dogfood week proved the demand: the week's first real
+   question couldn't reach a repo-locked sidecar at all.
 2. **Eager anticipation, configurable.** Questions arrive about a project or
    an exploration thread; the sidecar anticipates the follow-ups and starts
    exploring *before* they are asked — capturing traces and reports so an
@@ -261,11 +267,11 @@ frontier milestone is not starved by it.
 | M2 | Go-native sidecar runtime over ACP (ADR-0015) | P2 | Shipped |
 | M3 | Eval kernel + validity hardening + observability (ADR-0016.1–.5, 0015.1) | P2 | Done; all five gates pass on live spot checks |
 | M4 | **Formal gate run** (≥ 6 tasks × 5 trials × 3 profiles) → committed verdict | P2 | **DONE — THESIS SUPPORTED 2026-07-05** at full sample (90 eps, all five gates pass; sidecar correctness 0.908 vs ghx 0.931 at 25× compression, 24× signal/token). Evidence: `docs/evals/gate-run-2026-07-05-confirmatory/`; the honest negative that drove the ADR-0016.7 fixes is kept at `docs/evals/gate-run-2026-07/` |
-| M5 | Concise "reconnaissance service" skill + integration ergonomics: main agent needs zero ghx CLI knowledge; founder dogfoods the sidecar daily | P2 | **← frontier** — ADR-0019 D1-D4 implemented 2026-07-05 (recon skill ≤30 lines, single-tool MCP mode, frictionless `ask`, ACP-handshake fail-fast); one-week dogfood exit bar still pending |
+| M5 | Concise "reconnaissance service" skill + integration ergonomics: main agent needs zero ghx CLI knowledge; founder dogfoods the sidecar daily | P2 | **← frontier** — ADR-0019 D1-D4 implemented 2026-07-05; dogfood week active (FRICTION.md: 6 entries 2026-07-05, both breaking items governed by ADR-0027 resume/watchdog/artifacts, setup + discovery gaps governed by config-init work and ADR-0019.1 optional-repo discovery tier); exit = week logged + breaking items fixed or explicitly deferred |
 | M6 | Shared SAF/SAFE trace infrastructure: runtime sessions emit the same OTel traces/reports as evals; `~/.ghx` root storage; full visibility surface | P2 | **DONE 2026-07-05** — ADR-0018 (semantics) + ADR-0022 (shared `internal/sidecar/telemetry`, production `Ask` emission, `~/.ghx` root, doctor viewer guidance); live-proven: a real `ghx sidecar ask` leaves traces/logs/metrics/reports in its session dir, replayable per the ADR-0018 recipe |
 | M7 | Escalation tiers: codemap CLI + local clone as internal sidecar tools, sidecar-decided, fully visible | P3 | Future (ADR before build) |
 | M8 | Eager anticipation with configurable styles; sub-second answers to anticipated questions | P3 | Future (ADR before build) |
-| M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Blocked on M4 verdict |
+| M9 | Trajectory accumulation at scale (evals + consented dogfood sessions); SFT/preference/reward exports | P4 prep | Unblocked by M4 (SUPPORTED); export design decided (ADR-0017.1: TRL JSONL, KTO-first); still gated on the calibrated judge (ADR-0023.1 D5) for trajectory-quality labels |
 | M10 | Trained `ghx-sidecar` model behind the same boundary; re-run the same suite | P4 | Blocked on M9 |
 
 M4's verdict gates the investment: G1 (correctness) or G3 (compression)
@@ -279,10 +285,12 @@ pre-registered fact recall, not exploration quality. A **calibrated judge
 scorer** (LLM judge with full OTel reasoning traces, hand-label calibration,
 committed prompt/model version, never the gate alone) is needed to compare
 plain vs ghx vs ghx-sidecar reasoning, tool calls, and outputs — real-world
-quality claims to customers must rest on both layers. ADR before build;
-natural sequencing: alongside or immediately after the ADR-0016.7
-confirmatory rerun, and definitely before M9 preference/reward exports
-(which need trajectory-quality labels anyway).
+quality claims to customers must rest on both layers. Status 2026-07-06:
+decided (ADR-0023.1) and the offline machinery is merged (profile-blind
+bundles, task-authored rubrics, k=3 runner, disagreement report); no
+judge score is citable until the founder-labeled κ ≥ 0.6 calibration
+gate passes — and that ordering is deliberate, before M9
+preference/reward exports (which need trajectory-quality labels anyway).
 
 ## The North-Star Filter
 

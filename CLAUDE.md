@@ -27,6 +27,28 @@ Cost is a tie-breaker, not a quality rule. If a cheaper model's output does not 
 
 ## Delegation Model
 
+Fleet economics (Goga, 2026-07-06, 20x Claude plan): the default execution
+fleet is **parallel background Claude workers**, one isolated worktree per
+worker, spawned wide — under-delegation wastes the plan, and Goga has said
+so explicitly ("delegate much more"). Codex/GPT workers are supplementary
+capacity for mechanical, clear-spec work when their tokens are available.
+Fable stays the serial merge point: review each worker's evidence against
+the ADR and AGENTS.md before merging; plan conflict-watch pairs at spawn
+time (workers touching neighboring files merge in a deliberate order).
+
+Background-worker mechanics learned the hard way:
+
+- Tell every worker explicitly: run long commands (live asks, gate rounds)
+  in the **foreground** with a generous Bash timeout, and never end the
+  turn while work is pending — a worker that "completes" mid-wait strands
+  its task.
+- If a worker ends prematurely anyway, relaunch with a continuation prompt
+  that includes a state check of what the first attempt already produced
+  (session dirs, commits); mid-flight steering of a running worker is not
+  always available.
+- Workers commit on their branch, never merge, never push. Worktrees with
+  commits survive worker completion; merge and clean up from mainline.
+
 Use Codex/GPT implementation workers for scoped coding tasks where the desired behavior is clear. GPT-5.5-class workers are highly steerable; give them crisp boundaries, exact files or modules when known, expected tests, and explicit non-goals.
 
 Good Codex delegation prompts include:

@@ -216,6 +216,22 @@ screenshots when WebSearch existed — pure token waste).
 - The optimization target is signal per token (NORTH_STAR "The Moat") —
   it applies to how agents work on this repo, not only to the product.
 
+## Delegated Workers
+
+Rules for any delegated worker (background agent, worktree agent, Codex):
+
+- Work on your own branch/worktree. Commit at checkpoints; **never merge to
+  mainline, never push** — the orchestrator reviews and merges.
+- Never end your turn while work is pending. Long-running commands (live
+  sidecar asks, eval rounds) run in the foreground with an explicit generous
+  timeout; a completion report on unfinished work is a false report.
+- The Evidence Contract above applies to your final report: cite files,
+  commits (shas), commands, and test output. Failures are first-class
+  evidence — report them verbatim rather than retrying past usefulness.
+- Do not touch the eval measurement stack (`internal/sidecar/evals` scoring/
+  detection) unless your task's ADR explicitly covers it — measurement
+  changes must be pre-registered.
+
 ## Commits
 
 Commit at meaningful checkpoints, not only at the end of a task. A meaningful
