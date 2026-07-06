@@ -19,14 +19,15 @@ number quoted anywhere is only as strong as its rows here.
 | Anomaly persistence | Stored per-episode anomalies == re-derived | Regression test (ADR-0016.8 D6) | evals tests | 2026-07-06 |
 | Map-compression copy claim | ~92% reproduces (93.9% typical file; 22.5% outlier scoped out) | Live measurement | skills SKILL.md notes, `b11abf7` | 2026-07-06 |
 | Discovery target sets | Verified by the sidecar itself + direct reads | Dogfood verification (3 sessions, cited) | ADR-0019.2 notes, `7fdec51` | 2026-07-06 |
+| Trace internal consistency (bounded) | On fixbatch committed episodes: zero stuck-pending toolTraces; episode toolTraces == OTel tool spans == turn counts (100 episodes / 130 turns / 1,355 tools); all 284 sidecar `report.commandsRun` present in captured tool inputs. Bound: proves episode-JSON/OTel consistency only — does NOT prove ACP captured every raw SDK block (H3 stays open) | Cross-family audit (codex, read-only) | `trace-capture-audit-2026-07-06.md` over `gate-run-2026-07-06-fixbatch/` | 2026-07-06 |
 
 ## Open holes (named, owned, not yet closed)
 
 | # | Hole | Risk | Status |
 |---|---|---|---|
 | H1 | **Checks measure fact recall, not quality.** Substring gates can score a lucky mention. | Quality claims overstate | Judge layer built; **uncalibrated (κ never computed)** — gold-set packets ready, founder labeling session pending; judge moving to CLI rails |
-| H2 | **Memorization confound.** Famous-repo tasks (gin/flask/express); plain baseline ~0.90 may be recall-from-weights, not exploration. Never quantified. | All profiles inflated; exploration signal unknown per task | Closed-book probe being pre-registered (ADR-0016.9 draft in flight) |
-| H3 | **Trace-capture completeness.** toolTraces come from ACP notifications; drops would be silent. | Trajectory metrics under-count | Raw-SDK-diff comparator being designed (audit in flight) |
+| H2 | **Memorization confound.** Famous-repo tasks (gin/flask/express); plain baseline ~0.90 may be recall-from-weights, not exploration. Never quantified. | All profiles inflated; exploration signal unknown per task | ADR-0016.9 drafted (proposed), closed-book probe specified |
+| H3 | **Trace-capture completeness.** toolTraces come from ACP notifications; drops would be silent. | Trajectory metrics under-count | Scan complete + comparator designed (see `trace-capture-audit-2026-07-06.md`); build pending |
 | H4 | **Anomaly taxonomy is closed-world.** Detectors only catch pre-registered patterns. | Unknown failure modes pass | Standing; judge + human trace review are the backstop |
 | H5 | **Token accounting is a chars/4 proxy**, not provider-reported tokens. | SPT absolute values approximate (ratios robust) | Documented in ADR-0016.6; real token capture is a follow-up |
 | H6 | **Sample economics.** n=5 trials/cell; thin-margin gates swing on single episodes. | Verdict fragility on close calls | Stopping bounds + at_least(n) reducers queued (ADR-0025 stats follow-up) |
