@@ -121,6 +121,30 @@ ghx serve --http :8080                       # HTTP transport
 
 7 tools: `explore`, `read`, `search`, `repos`, `tree`, `code` (meta-tool), `search_tools`.
 
+## Sidecar
+
+Persistent specialist agent for repo reconnaissance: ask English questions,
+get compact evidence reports. Every session persists its artifacts — reports
+plus spec-exact OTel traces/logs/metrics — under `~/.ghx/sessions/`.
+
+```bash
+ghx sidecar ask --repo <owner/repo> "<question>"  # one investigation turn (session persists)
+ghx sidecar sessions list                          # list named sessions
+ghx sidecar sessions show <session>                # metadata + report history
+ghx sidecar view [session]                         # browse a session's OTel artifacts in a UI
+ghx sidecar view --list                            # sessions with turn/report counts
+ghx sidecar view --port 9000                       # viewer UI port (default 8000)
+ghx sidecar doctor                                 # preflight diagnostics
+ghx sidecar config init                            # detect ACP agents, write config
+```
+
+`ghx sidecar view` spawns
+[otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer) and
+replays the session's traces (plus logs/metrics when present) into it — one
+command instead of a curl loop. No argument means the most recent session.
+Requires the viewer on PATH:
+`go install github.com/CtrlSpice/otel-desktop-viewer@latest`.
+
 ## Agent Integration
 
 ```bash

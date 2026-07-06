@@ -208,13 +208,13 @@ func FormatConfig(cfg Config) string {
 }
 
 // ArtifactsHint tells a human where per-session OTel artifacts live and how to
-// replay them (ADR-0022 D5). Every session directory is a spec-exact OTLP
-// bundle, so the ADR-0018 "Live validation" replay recipe works on it
-// unchanged — point at that recipe rather than duplicating the script.
+// view them (ADR-0022 D5). Every session directory is a spec-exact OTLP
+// bundle; `ghx sidecar view` replays it into a local viewer in one command
+// (ADR-0026.1, absorbing the ADR-0018 "Live validation" curl recipe).
 func ArtifactsHint(cfg Config) string {
 	return fmt.Sprintf(
 		"Session artifacts: %s/<session>/ (traces.jsonl, logs.jsonl, metrics.jsonl, reports/)\n"+
-			"Replay any session dir into an OTLP viewer (otel-desktop-viewer) using the recipe in\n"+
-			"docs/adr/0018-agentic-observability-genai-conventions.md (\"Live validation\").",
+			"Browse any session in a local viewer UI: ghx sidecar view [session]\n"+
+			"(spec-exact OTLP, so the ADR-0018 curl replay recipe also still works).",
 		cfg.SessionsDir)
 }
