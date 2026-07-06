@@ -109,8 +109,8 @@ func TestBuildSessionMetaShape(t *testing.T) {
 
 	// D3: mechanical budget fields present for "normal" depth. Thinking is
 	// the SDK ThinkingConfig object shape, never a bare number.
-	if mt, _ := opts["maxTurns"].(float64); mt != 8 {
-		t.Errorf("options.maxTurns = %v for depth=normal, want 8", mt)
+	if mt, _ := opts["maxTurns"].(float64); mt != 24 {
+		t.Errorf("options.maxTurns = %v for depth=normal, want 24", mt)
 	}
 	th, ok := opts["thinking"].(map[string]any)
 	if !ok {
@@ -171,14 +171,14 @@ func TestBuildSessionMetaDepthBudgets(t *testing.T) {
 		effort       string
 	}{
 		// cheap: 4 turns, thinking disabled, low effort
-		{"cheap", 4, "disabled", 0, "low"},
+		{"cheap", 12, "disabled", 0, "low"},
 		// normal: 8 turns, 2048-token thinking, medium effort
-		{"normal", 8, "enabled", 2048, "medium"},
+		{"normal", 24, "enabled", 2048, "medium"},
 		// deep: 16 turns, 4096-token thinking, high effort
-		{"deep", 16, "enabled", 4096, "high"},
+		{"deep", 48, "enabled", 4096, "high"},
 		// unknown depth defaults to normal
-		{"", 8, "enabled", 2048, "medium"},
-		{"bogus", 8, "enabled", 2048, "medium"},
+		{"", 24, "enabled", 2048, "medium"},
+		{"bogus", 24, "enabled", 2048, "medium"},
 	}
 	for _, tc := range cases {
 		tc := tc

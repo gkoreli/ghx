@@ -140,13 +140,21 @@ type depthBudget struct {
 
 func intPtr(n int) *int { return &n }
 
+// maxTurns is a hard safety net, NOT the operative budget — the persona's
+// command budget is. An SDK "turn" is every assistant/tool cycle (thinking,
+// each tool round, the final submit_report call), so it must sit well above
+// the command budget or the adapter kills the prompt with a hard
+// "Reached maximum number of turns" error and the whole exploration is lost
+// before the report — observed live 2026-07-05 (spot-2026-07-05-d2-adr21:
+// flask-routing and openai-node-streaming died at maxTurns=8; ADR-0020.1
+// implementation notes). Rule of thumb: ~3× the persona command budget.
 var depthBudgets = map[string]depthBudget{
-	// cheap: 4 turns, no thinking, low effort
-	"cheap": {maxTurns: intPtr(4), thinking: intPtr(0), effort: "low"},
-	// normal: 8 turns, 2048-token thinking, medium effort (default)
-	"normal": {maxTurns: intPtr(8), thinking: intPtr(2048), effort: "medium"},
-	// deep: 16 turns, 4096-token thinking, high effort
-	"deep": {maxTurns: intPtr(16), thinking: intPtr(4096), effort: "high"},
+	// cheap: persona budget 4 commands → 12-turn safety net
+	"cheap": {maxTurns: intPtr(12), thinking: intPtr(0), effort: "low"},
+	// normal: persona budget 8 commands → 24-turn safety net (default)
+	"normal": {maxTurns: intPtr(24), thinking: intPtr(2048), effort: "medium"},
+	// deep: extended investigation → 48-turn safety net
+	"deep": {maxTurns: intPtr(48), thinking: intPtr(4096), effort: "high"},
 }
 
 // sidecarToolsAllowlist is the conservative tool allowlist for the sidecar
