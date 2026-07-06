@@ -146,8 +146,10 @@ func TestQuestionSessionEmptyFallsBackToDiscovery(t *testing.T) {
 	}
 }
 
-// handleRecon session defaults mirror the CLI (ADR-0019.1 D1/D2): repo slug
-// with a repo, question-derived slug without one; repo stays optional.
+// handleRecon passes the caller's parameters through untouched (ADR-0030.1
+// D4 phase 1): session routing lives in the daemon, so the tool no longer
+// does any local session defaulting. Explicit session and repo still travel
+// verbatim (R1/R2 preserve the ADR-0019.1 precedence inside the runtime).
 func TestHandleReconSessionDefaults(t *testing.T) {
 	orig := askSidecar
 	defer func() { askSidecar = orig }()
@@ -157,7 +159,8 @@ func TestHandleReconSessionDefaults(t *testing.T) {
 		return &sidecar.Report{Answer: "ok"}, nil, nil
 	}
 
-	// Discovery: no repo argument at all.
+	// Discovery: no repo argument at all — the daemon routes (R3-R5), so the
+	// tool must NOT pre-fill a question-derived session.
 	req := mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"question": "which repos do X"}
 	res, err := handleRecon(context.Background(), req)
@@ -170,11 +173,12 @@ func TestHandleReconSessionDefaults(t *testing.T) {
 	if got.Repo != "" {
 		t.Fatalf("discovery ask must pass empty repo, got %q", got.Repo)
 	}
-	if want := questionSession("which repos do X"); got.Session != want {
-		t.Fatalf("discovery session = %q, want question-derived %q", got.Session, want)
+	if got.Session != "" {
+		t.Fatalf("discovery ask must leave session empty for daemon routing, got %q", got.Session)
 	}
 
-	// Repo-scoped: repo slug default, unchanged behavior.
+	// Repo-scoped: repo travels verbatim; the daemon's R2 resolves the same
+	// repo-slug session as the old local defaulting did.
 	req = mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"question": "q", "repo": "OwnerX/RepoY"}
 	if _, err := handleRecon(context.Background(), req); err != nil {
@@ -183,11 +187,11 @@ func TestHandleReconSessionDefaults(t *testing.T) {
 	if got.Repo != "OwnerX/RepoY" {
 		t.Fatalf("repo not passed through, got %q", got.Repo)
 	}
-	if got.Session != "ownerx-repoy" {
-		t.Fatalf("repo-scoped session = %q, want %q", got.Session, "ownerx-repoy")
+	if got.Session != "" {
+		t.Fatalf("repo-scoped ask must leave session empty for daemon routing, got %q", got.Session)
 	}
 
-	// Explicit session always wins.
+	// Explicit session always wins (R1) and travels verbatim.
 	req = mcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"question": "q", "session": "my-thread"}
 	if _, err := handleRecon(context.Background(), req); err != nil {

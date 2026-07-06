@@ -56,6 +56,10 @@ type Config struct {
 	Model string `json:"model,omitempty"`
 	// Visibility controls the shared telemetry/visibility runtime (ADR-0022).
 	Visibility VisibilityConfig `json:"visibility,omitempty"`
+	// Route overrides the session-routing knobs (ADR-0030.1 D3). Nil means
+	// the pinned defaults; the knobs are part of the daemon config digest so
+	// a change restarts the warm daemon (ADR-0030 D6).
+	Route *RouteSettings `json:"route,omitempty"`
 	// Cwd overrides the ACP session cwd. Empty means current working directory.
 	Cwd string `json:"-"`
 	// Env overrides the spawned ACP adapter environment. Nil means inherit.
@@ -77,6 +81,23 @@ func (c Config) CaptureContent() bool {
 		return *c.Visibility.CaptureContent
 	}
 	return true
+}
+
+// RouteSettings are the user-tunable session-routing knobs (ADR-0030.1 D3),
+// resolved over the pinned defaults by RouteConfigFor. Zero/nil fields keep
+// the defaults; the decision-table tests in route_test.go are the pinned
+// specification of those defaults.
+type RouteSettings struct {
+	// OverlapThreshold is the minimum R4 overlap score to join an existing
+	// session (default 0.5).
+	OverlapThreshold *float64 `json:"overlapThreshold,omitempty"`
+	// OverlapMargin is the required lead over the runner-up (default 0.25).
+	OverlapMargin *float64 `json:"overlapMargin,omitempty"`
+	// ContinuationWindowMinutes bounds R3 warm candidates (default 30, the
+	// daemon warm-worker TTL).
+	ContinuationWindowMinutes int `json:"continuationWindowMinutes,omitempty"`
+	// RoutingWindowHours bounds R4 candidates (default 168 = 7 days).
+	RoutingWindowHours int `json:"routingWindowHours,omitempty"`
 }
 
 func defaultConfig(root string) Config {
@@ -149,7 +170,16 @@ func DiffConfigs(oldCfg, newCfg Config) []string {
 	add("sessionsDir", fmt.Sprintf("%q", oldCfg.SessionsDir), fmt.Sprintf("%q", newCfg.SessionsDir))
 	add("model", fmt.Sprintf("%q", oldCfg.Model), fmt.Sprintf("%q", newCfg.Model))
 	add("visibility.captureContent", formatBoolPtr(oldCfg.Visibility.CaptureContent), formatBoolPtr(newCfg.Visibility.CaptureContent))
+	add("route", formatRouteSettings(oldCfg.Route), formatRouteSettings(newCfg.Route))
 	return diff
+}
+
+func formatRouteSettings(r *RouteSettings) string {
+	if r == nil {
+		return "(defaults)"
+	}
+	data, _ := json.Marshal(r)
+	return string(data)
 }
 
 func formatBoolPtr(b *bool) string {

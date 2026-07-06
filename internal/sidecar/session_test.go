@@ -10,7 +10,7 @@ func TestSessionLifecycle(t *testing.T) {
 	if IsInitialized(dir, "s1") {
 		t.Fatal("session should not be initialized before InitSession")
 	}
-	if err := InitSession(dir, "s1", "honojs/hono", "middleware"); err != nil {
+	if err := InitSession(dir, "s1", "honojs/hono", "middleware", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	if !IsInitialized(dir, "s1") {
@@ -52,7 +52,7 @@ func TestReadMetaMissingSession(t *testing.T) {
 
 func TestSaveMetaPersistsACPSessionID(t *testing.T) {
 	dir := t.TempDir()
-	if err := InitSession(dir, "s1", "o/r", "scope"); err != nil {
+	if err := InitSession(dir, "s1", "o/r", "scope", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	meta, _ := ReadMeta(dir, "s1")
@@ -68,7 +68,7 @@ func TestSaveMetaPersistsACPSessionID(t *testing.T) {
 
 func TestSaveAndListReports(t *testing.T) {
 	dir := t.TempDir()
-	if err := InitSession(dir, "s1", "o/r", "scope"); err != nil {
+	if err := InitSession(dir, "s1", "o/r", "scope", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 
@@ -91,7 +91,7 @@ func TestSaveAndListReports(t *testing.T) {
 
 func TestListReportsIgnoresNonReportFiles(t *testing.T) {
 	dir := t.TempDir()
-	if err := InitSession(dir, "s1", "o/r", "scope"); err != nil {
+	if err := InitSession(dir, "s1", "o/r", "scope", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	// meta.json and the initialized marker live in the same directory.
@@ -106,10 +106,10 @@ func TestListReportsIgnoresNonReportFiles(t *testing.T) {
 
 func TestListSessionsSortedNewestFirst(t *testing.T) {
 	dir := t.TempDir()
-	if err := InitSession(dir, "older", "o/r1", "a"); err != nil {
+	if err := InitSession(dir, "older", "o/r1", "a", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
-	if err := InitSession(dir, "newer", "o/r2", "b"); err != nil {
+	if err := InitSession(dir, "newer", "o/r2", "b", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	// Force distinct UpdatedAt ordering regardless of clock resolution.

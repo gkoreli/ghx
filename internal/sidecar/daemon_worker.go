@@ -58,6 +58,19 @@ func (p *AgentPool) Shutdown() {
 	}
 }
 
+// Drop retires the warm worker for one session, closing its ACP process. The
+// reroute path uses it so a corrected session's next turn starts from the
+// durable ledger instead of a cached ACP conversation (ADR-0030.1 D5).
+func (p *AgentPool) Drop(session string) {
+	p.mu.Lock()
+	w := p.workers[session]
+	delete(p.workers, session)
+	p.mu.Unlock()
+	if w != nil {
+		w.Shutdown()
+	}
+}
+
 func (p *AgentPool) expire(session string, worker *AgentWorker) {
 	p.mu.Lock()
 	if p.workers[session] != worker {

@@ -151,10 +151,10 @@ Example: var r = codemode.explore({ repo: "vercel/next.js" }); return r.files;`,
 
 func registerReconTool(s *server.MCPServer) {
 	reconTool := mcp.NewTool("recon",
-		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration."),
+		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration. Follow-up questions are routed to the right investigation session automatically (the route is reported with each answer)."),
 		mcp.WithString("question", mcp.Required(), mcp.Description("English question about the repo")),
 		mcp.WithString("repo", mcp.Description("owner/repo (optional scope; omit for cross-GitHub discovery questions like \"which repos do X\")")),
-		mcp.WithString("session", mcp.Description("optional named session for parallel investigation threads")),
+		mcp.WithString("session", mcp.Description("advanced: pin a specific session; normally omit — ghx routes for you (ADR-0030.1)")),
 	)
 	s.AddTool(reconTool, handleRecon)
 }
@@ -170,16 +170,12 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	repo := request.GetString("repo", "")
-	// Session naming mirrors the CLI (ADR-0019.1 D2): explicit session wins,
-	// then the repo slug, then a question-derived slug in discovery mode.
+	// Session routing lives in the daemon (ADR-0030.1 D4 phase 1): the tool
+	// passes the caller's parameters through untouched. An explicit session
+	// still wins (R1); a repo still names the repo-slug session (R2); with
+	// neither, the daemon evaluates the R3-R5 cascade instead of the old
+	// local question-slug defaulting.
 	session := request.GetString("session", "")
-	if session == "" {
-		if repo != "" {
-			session = defaultReconSession(repo)
-		} else {
-			session = questionSession(question)
-		}
-	}
 
 	cfg := sidecar.LoadConfig()
 	report, turn, err := askSidecar(ctx, cfg, sidecar.AskRequest{
@@ -193,9 +189,13 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	}
 	data, _ := json.Marshal(report)
 	text := string(data)
-	// Same artifacts pointer as the CLI footer: the parent agent gets the
-	// audit-trail location (session dir + root trace ID) with every answer.
+	// Route provenance (ADR-0030.1 D5.2/D7) plus the artifacts pointer: the
+	// parent agent sees which session answered and why before building on
+	// it, and gets the audit-trail location with every answer.
 	if turn != nil {
+		if turn.Route != nil {
+			text += "\n" + turn.Route.Line()
+		}
 		if footer := turn.Artifacts.FooterLine(); footer != "" {
 			text += "\n" + footer
 		}

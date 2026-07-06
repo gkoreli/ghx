@@ -111,8 +111,32 @@ func UpdateLedgerFromTurn(ledger *Ledger, meta *SessionMeta, report *Report, tra
 			addLedgerEntry(&ledger.OpenQuestions, q, turn)
 		}
 	}
+	ApplyTraceCommands(ledger, TraceCommandLedger(traces), turn)
+}
+
+// TraceCommandLedger extracts the bare trace-derived command strings the
+// ledger consumes from a turn's tool traces. It is persisted verbatim in the
+// per-turn ReportArtifact (ADR-0030.1 D5): the artifact must capture
+// everything ledger derivation consumes, so replaying reports/ reproduces
+// ledger.json exactly.
+func TraceCommandLedger(traces []ToolCallTrace) []string {
+	var out []string
 	for _, tr := range traces {
 		cmd := commandFromRawInput(tr.RawInput)
+		if strings.TrimSpace(cmd) == "" {
+			continue
+		}
+		out = append(out, cmd)
+	}
+	return out
+}
+
+// ApplyTraceCommands merges trace-derived command strings into the ledger,
+// exactly as UpdateLedgerFromTurn does for a live turn. RebuildLedger replays
+// the persisted TraceCommandLedger through this same code path (ADR-0030.1
+// D5 rebuild-determinism invariant).
+func ApplyTraceCommands(ledger *Ledger, commands []string, turn int) {
+	for _, cmd := range commands {
 		if strings.TrimSpace(cmd) == "" {
 			continue
 		}
