@@ -31,6 +31,9 @@ func directPreamble(p Profile, repo string) string {
 var directPreambleBuilder = defaultDirectPreamble
 
 func defaultDirectPreamble(p Profile, repo string) string {
+	if repo == "" {
+		return defaultDiscoveryDirectPreamble(p)
+	}
 	common := fmt.Sprintf(`You are investigating the GitHub repository %s.
 Work remotely — do NOT clone the repository and do NOT write any files.
 Answer the question below with the specific implementation files (exact paths),
@@ -51,6 +54,30 @@ Use the ghx CLI for all repository access. Core commands:
   ghx read <owner/repo> --grep "pattern" <path>  — matching lines only
   ghx search "<query> repo:<owner/repo>"         — code search
 Map before reading. Narrow globs before reading many files.`
+	default:
+		return common
+	}
+}
+
+func defaultDiscoveryDirectPreamble(p Profile) string {
+	common := `You are discovering open-source GitHub repositories that answer the question.
+Work remotely — do NOT clone repositories and do NOT write any files.
+Sweep broadly, then verify repository claims by reading concrete files before calling them verified.
+Use owner/repo or owner/repo:path citations. Repositories seen only in search results or metadata are inferred or unverified, not verified.
+State what you did not verify.`
+
+	switch p {
+	case ProfilePlain:
+		return common + `
+You may use your shell, gh search, gh repo view, gh api contents, and raw GitHub file reads.`
+	case ProfileGhx:
+		return common + `
+Use the ghx CLI for GitHub exploration. Core commands:
+  ghx search "<query>"                 — cross-GitHub code or repo search
+  ghx repos "<query>"                  — repository discovery
+  ghx explore <owner/repo>             — branch + tree + README in 1 call
+  ghx read <owner/repo> <file>         — verify a concrete path
+Search broadly first, then read into the best candidates before claiming them as verified.`
 	default:
 		return common
 	}

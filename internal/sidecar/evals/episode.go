@@ -248,9 +248,12 @@ type Episode struct {
 	Profile Profile `json:"profile"`
 	// Checks snapshots the task's deterministic scoring contract so trace
 	// score explanations remain recomputable from the episode artifact.
-	Checks  TaskChecks   `json:"checks,omitempty"`
-	Turns   []TurnRecord `json:"turns"`
-	Actions []Action     `json:"actions,omitempty"`
+	Checks TaskChecks `json:"checks,omitempty"`
+	// DiscoveryChecks snapshots discovery-task target sets for ADR-0019.2
+	// episodes only; repo-scoped G1-G5 episodes leave it nil.
+	DiscoveryChecks *DiscoveryChecks `json:"discoveryChecks,omitempty"`
+	Turns           []TurnRecord     `json:"turns"`
+	Actions         []Action         `json:"actions,omitempty"`
 	// Observations captures bounded tool outputs; OutputSize is exact even
 	// when Text is truncated to the first 2048 bytes.
 	Observations []Observation `json:"observations,omitempty"`
@@ -265,8 +268,11 @@ type Episode struct {
 	Anomalies  []Anomaly         `json:"anomalies,omitempty"`
 	Context    ContextAccounting `json:"context"`
 	Rewards    RewardBreakdown   `json:"rewards"`
-	StartedAt  time.Time         `json:"startedAt"`
-	EndedAt    time.Time         `json:"endedAt"`
+	// DiscoveryRewards snapshots ADR-0019.2 D3 metrics for discovery
+	// episodes only; repo-scoped G1-G5 episodes leave it nil.
+	DiscoveryRewards *DiscoveryRewardBreakdown `json:"discoveryRewards,omitempty"`
+	StartedAt        time.Time                 `json:"startedAt"`
+	EndedAt          time.Time                 `json:"endedAt"`
 	// Parallel marks an episode that ran concurrently with other episodes
 	// under GHX_EVAL_PARALLEL > 1 (ADR-0025 D3). Its wall-clock duration is
 	// contended and must be excluded from latency claims; the same marker is
