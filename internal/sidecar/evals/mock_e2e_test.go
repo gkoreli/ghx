@@ -472,6 +472,157 @@ func TestEvalReportRendersMockRun(t *testing.T) {
 	}
 }
 
+// TestMockSidecarEpisodeMaxTurnsWrapUp is the ADR-0027 D1 integration proof:
+// a scripted agent kills the first prompt with the adapter's hard max-turns
+// error; the runtime LoadSession-resumes the SAME session, sends exactly the
+// wrap-up prompt, accepts the wrap-up's sink report, records wrapUpRecovered
+// on the turn, and the run counts the soft turn_cap_wrapup anomaly.
+func TestMockSidecarEpisodeMaxTurnsWrapUp(t *testing.T) {
+	t.Setenv("GHX_REPORT_SINK_EXE", "/usr/local/bin/ghx")
+	bin := buildMockAgent(t)
+	promptLog := filepath.Join(t.TempDir(), "prompts.log")
+	t.Setenv("MOCKAGENT_PROMPT_LOG", promptLog)
+
+	wrapUpReport := map[string]any{
+		"answer":        "Middleware composition lives in src/compose.ts (recovered by wrap-up).",
+		"verified":      []any{map[string]any{"summary": "compose() builds the dispatch chain", "evidence": "src/compose.ts: dispatch recursion"}},
+		"unverified":    []any{map[string]any{"summary": "hono-base wiring not re-confirmed before the turn cap", "evidence": ""}},
+		"relevantFiles": []any{map[string]any{"path": "src/compose.ts", "reason": "defines compose()"}},
+		"commandsRun":   []any{"ghx tree honojs/hono src --depth 2"},
+		"backendsUsed":  []any{"remote"},
+	}
+	turn2Report := map[string]any{
+		"answer":        "Errors propagate through onError wired in src/hono-base.ts.",
+		"verified":      []any{map[string]any{"summary": "onError receives dispatch errors", "evidence": "src/hono-base.ts"}},
+		"relevantFiles": []any{map[string]any{"path": "src/hono-base.ts", "reason": "error handler composition"}},
+		"commandsRun":   []any{"ghx read honojs/hono src/hono-base.ts --grep onError"},
+		"backendsUsed":  []any{"remote"},
+	}
+	writeScript(t, []map[string]any{
+		{
+			"toolCalls":   []string{"ghx tree honojs/hono src --depth 2"},
+			"promptError": "Reached maximum number of turns (24)",
+		},
+		{
+			"text":         "wrapping up with what I have",
+			"submitReport": wrapUpReport,
+		},
+		{
+			"toolCalls":    []string{"ghx read honojs/hono src/hono-base.ts --grep onError"},
+			"text":         "second turn proceeds normally",
+			"submitReport": turn2Report,
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cfg := RunConfig{AgentCmd: bin, SessionsDir: t.TempDir()}
+	ep, err := RunEpisode(ctx, cfg, honoTask(t), ProfileSidecar)
+	if err != nil {
+		t.Fatalf("episode must survive the turn cap via wrap-up: %v", err)
+	}
+
+	if len(ep.Turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(ep.Turns))
+	}
+	if !ep.Turns[0].WrapUpRecovered {
+		t.Fatal("turn 0 must record wrapUpRecovered")
+	}
+	if ep.Turns[0].Report == nil || !strings.Contains(ep.Turns[0].Report.Answer, "recovered by wrap-up") {
+		t.Fatalf("turn 0 report = %+v, want the wrap-up's sink report", ep.Turns[0].Report)
+	}
+	if ep.Turns[1].WrapUpRecovered {
+		t.Fatal("turn 1 completed normally and must not record a wrap-up")
+	}
+
+	// The wrap-up must have resumed the SAME ACP session with the exact prompt.
+	logData, err := os.ReadFile(promptLog)
+	if err != nil {
+		t.Fatalf("read prompt log: %v", err)
+	}
+	if !strings.Contains(string(logData), "LOAD mock-sess-1") {
+		t.Fatalf("wrap-up did not LoadSession-resume the session:\n%s", logData)
+	}
+	if !strings.Contains(string(logData), "PROMPT wrap up: call submit_report now with what you have; mark unverified items unverified") {
+		t.Fatalf("exact wrap-up prompt not sent:\n%s", logData)
+	}
+
+	found := false
+	for _, a := range DetectAnomalies(ep) {
+		if a.Kind == AnomalyTurnCapWrapUp {
+			found = true
+			if a.Severity != SeveritySoft {
+				t.Fatalf("turn_cap_wrapup severity = %s, want soft", a.Severity)
+			}
+		}
+		if a.Severity == SeverityBreaking {
+			t.Fatalf("recovered episode must not carry breaking anomalies: %s", a.String())
+		}
+	}
+	if !found {
+		t.Fatal("turn_cap_wrapup anomaly not detected")
+	}
+}
+
+// TestMockSidecarEpisodeHangTimeout is the ADR-0027 D2/D3 integration proof:
+// a scripted agent goes silent mid-prompt; the liveness watchdog cancels the
+// turn, the episode records the episode_hang_timeout anomaly, and the failed
+// turn still leaves traces.jsonl + logs.jsonl in the session dir (D3).
+func TestMockSidecarEpisodeHangTimeout(t *testing.T) {
+	t.Setenv("GHX_REPORT_SINK_EXE", "/usr/local/bin/ghx")
+	t.Setenv("GHX_SIDECAR_LIVENESS_TIMEOUT", "500ms")
+	bin := buildMockAgent(t)
+	writeScript(t, []map[string]any{
+		{"hangMs": 30000, "text": "never reached"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	sessions := t.TempDir()
+	cfg := RunConfig{AgentCmd: bin, SessionsDir: sessions}
+	start := time.Now()
+	ep, err := RunEpisode(ctx, cfg, honoTask(t), ProfileSidecar)
+	if err == nil {
+		t.Fatal("a hung turn must fail the episode")
+	}
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
+		t.Fatalf("watchdog did not cancel the hang: episode took %s", elapsed)
+	}
+	if ep == nil || len(ep.Turns) != 1 {
+		t.Fatalf("partial episode with the failed turn expected, got %+v", ep)
+	}
+	if !strings.Contains(ep.Turns[0].Error, "liveness watchdog timeout") {
+		t.Fatalf("turn error = %q, want the liveness watchdog marker", ep.Turns[0].Error)
+	}
+
+	found := false
+	for _, a := range ep.Anomalies {
+		if a.Kind == AnomalyEpisodeHangTimeout && a.Severity == SeverityBreaking {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("episode_hang_timeout anomaly not detected: %+v", ep.Anomalies)
+	}
+
+	// D3: the failed turn's session dir still carries traces + logs.
+	sessionDir := filepath.Join(sessions, ep.ID)
+	for _, artifact := range []string{"traces.jsonl", "logs.jsonl"} {
+		if _, err := os.Stat(filepath.Join(sessionDir, artifact)); err != nil {
+			t.Fatalf("failed turn left no %s (D3 violated): %v", artifact, err)
+		}
+	}
+	logData, err := os.ReadFile(filepath.Join(sessionDir, "logs.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "sidecar.turn.error") {
+		t.Fatalf("logs.jsonl missing the turn error record:\n%s", logData)
+	}
+}
+
 // TestMockSidecarEpisodeSubmitReportSink drives the full production sidecar
 // path with the agent completing each turn via the report-sink instead of a
 // <ghx-report> text block (ADR-0021 D1/D2). The scripted agent writes an
@@ -489,11 +640,18 @@ func TestMockSidecarEpisodeSubmitReportSink(t *testing.T) {
 		"answer":        "Middleware composition is implemented in src/compose.ts (submitted via the report sink).",
 		"verified":      []any{map[string]any{"summary": "compose() builds the dispatch chain", "evidence": "src/compose.ts"}},
 		"relevantFiles": []any{map[string]any{"path": "src/compose.ts", "reason": "defines compose()"}},
+		"commandsRun":   []any{"ghx tree honojs/hono src --depth 2"},
 		"backendsUsed":  []any{"remote"},
 	}
+	// Fixtures carry the D4 evidence trio (verified-with-evidence, relevant
+	// file, command run) so they stay representative of what the real
+	// submit_report tool accepts (ADR-0027 D4).
 	sinkReport1 := map[string]any{
-		"answer":       "Errors propagate through onError, wired in src/hono-base.ts (report sink).",
-		"backendsUsed": []any{"remote"},
+		"answer":        "Errors propagate through onError, wired in src/hono-base.ts (report sink).",
+		"verified":      []any{map[string]any{"summary": "onError receives dispatch errors", "evidence": "src/hono-base.ts"}},
+		"relevantFiles": []any{map[string]any{"path": "src/hono-base.ts", "reason": "error handler composition"}},
+		"commandsRun":   []any{"ghx read honojs/hono src/hono-base.ts --grep onError"},
+		"backendsUsed":  []any{"remote"},
 	}
 	writeScript(t, []map[string]any{
 		{

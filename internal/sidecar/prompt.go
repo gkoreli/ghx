@@ -81,8 +81,17 @@ Your turn is complete only after submit_report returns "report accepted". The
 report is validated strictly, with no auto-correction: if the tool returns a
 validation error, read it, fix exactly what it names (a missing "answer", a
 list field that must be a JSON array, an unknown field, a wrong item shape),
-and call submit_report again. Only "answer" is strictly required; still fill
-the other fields when you have the evidence.
+and call submit_report again.
+
+Evidence is required, not optional. A report is accepted only when it
+contains ALL of:
+- at least one "verified" claim with a non-empty "evidence" field,
+- at least one entry in "relevantFiles",
+- at least one command in "commandsRun".
+An answer without evidence is a hypothesis and will be rejected with
+field-level errors. The only exception is a BLOCKED report: if you cannot
+investigate at all, set answer to "BLOCKED: <why>" (you must state why) and
+the evidence requirement is skipped.
 
 Do not call submit_report until you have gathered enough evidence to answer
 confidently (or have exhausted your budget).

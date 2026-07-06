@@ -117,6 +117,11 @@ type TurnRecord struct {
 	// lenient <ghx-report> coercion fallback (ADR-0021 D3) rather than a strict
 	// submit_report submission. Surfaced so evals count every coercion.
 	ReportCoerced bool `json:"reportCoerced,omitempty"`
+	// WrapUpRecovered records that the adapter's max-turns safety net fired
+	// and the runtime recovered the exploration via the one-shot LoadSession
+	// wrap-up prompt (ADR-0027 D1). Counted as the soft anomaly
+	// turn_cap_wrapup so runs show how often the net fires.
+	WrapUpRecovered bool `json:"wrapUpRecovered,omitempty"`
 	// Resumed reports whether this turn continued prior agent context
 	// (ACP LoadSession for the sidecar profile; same live session for
 	// direct profiles). Always false on turn 0.

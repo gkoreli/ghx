@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -52,6 +54,11 @@ type TurnResult struct {
 	// producer drift (Visibility and Truthfulness). Always false when the report
 	// came from the strict submit_report sink.
 	ReportCoerced bool
+	// WrapUpRecovered is true when the turn hit the adapter's max-turns safety
+	// net and the exploration was recovered by the one-shot LoadSession wrap-up
+	// prompt (ADR-0027 D1). Recorded on the eval turn record and counted as the
+	// soft anomaly turn_cap_wrapup so evals can see how often the net fires.
+	WrapUpRecovered bool
 }
 
 // ImplementationInfo records the ACP adapter identity returned by initialize.
@@ -62,6 +69,74 @@ type ImplementationInfo struct {
 }
 
 const defaultHandshakeTimeout = 10 * time.Second
+
+// Runtime resilience taxonomy (ADR-0027). These markers are the stable,
+// cross-package contract for classifying turn failures: the runtime uses them
+// to pick a recovery path (D1 wrap-up, D2 fail-fast), and the eval layer uses
+// them to derive anomalies (turn_cap_wrapup, episode_hang_timeout) from the
+// persisted turn error strings without importing runtime internals.
+const (
+	// LivenessTimeoutEnv configures the D2 liveness watchdog window. Accepts a
+	// Go duration ("10m", "90s"); "0" disables the watchdog. Default
+	// DefaultLivenessTimeout.
+	LivenessTimeoutEnv = "GHX_SIDECAR_LIVENESS_TIMEOUT"
+	// DefaultLivenessTimeout is the watchdog window when the env var is unset:
+	// no ACP session update for this long cancels the turn (ADR-0027 D2).
+	DefaultLivenessTimeout = 10 * time.Minute
+
+	// LivenessTimeoutMarker appears in every watchdog-cancelled turn error so
+	// artifact-only consumers (evals anomaly detection) can classify the
+	// failure from the persisted string alone.
+	LivenessTimeoutMarker = "liveness watchdog timeout"
+	// maxTurnsErrorMarker is the adapter's hard turn-cap error text
+	// (claude-agent-acp: "Reached maximum number of turns (N)").
+	maxTurnsErrorMarker = "Reached maximum number of turns"
+	// peerClosedMarker matches the ACP SDK's dead-peer cause ("peer connection
+	// closed", connection.go) — "peer disconnected" is its request-level twin.
+	peerClosedMarker = "peer connection closed"
+)
+
+// ErrLivenessTimeout is the sentinel for a turn cancelled by the D2 liveness
+// watchdog. Wrapped errors carry the concrete window; match with errors.Is or,
+// from persisted strings, with LivenessTimeoutMarker.
+var ErrLivenessTimeout = errors.New("sidecar " + LivenessTimeoutMarker)
+
+// IsMaxTurnsError reports whether err is the adapter's hard turn-cap error
+// (ADR-0027 D1 recovery trigger). Matching is textual because the error
+// arrives as an opaque JSON-RPC internal error from the adapter.
+func IsMaxTurnsError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), maxTurnsErrorMarker)
+}
+
+// IsPeerClosedError reports whether err means the ACP peer died (process exit,
+// closed stdio). Dead peers fail the turn immediately (ADR-0027 D2).
+func IsPeerClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, peerClosedMarker) || strings.Contains(msg, "peer disconnected")
+}
+
+// resolveLivenessTimeout resolves the D2 watchdog window: an explicit option
+// wins, then GHX_SIDECAR_LIVENESS_TIMEOUT, then DefaultLivenessTimeout.
+// A zero (or negative) resolved value disables the watchdog.
+func resolveLivenessTimeout(explicit time.Duration) time.Duration {
+	if explicit != 0 {
+		return explicit
+	}
+	raw := strings.TrimSpace(os.Getenv(LivenessTimeoutEnv))
+	if raw == "" {
+		return DefaultLivenessTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: invalid %s=%q (want a Go duration like \"10m\"); using default %s\n",
+			LivenessTimeoutEnv, raw, DefaultLivenessTimeout)
+		return DefaultLivenessTimeout
+	}
+	return d
+}
 
 // ACPHandshakeFailureMessage is the actionable failure text shared by ask,
 // doctor, and config init when a configured binary exists but does not speak
@@ -136,9 +211,35 @@ func ToolOutputText(content []acp.ToolCallContent, rawOutput any) string {
 // denyClient implements acp.Client with read-only permission semantics.
 // Text deltas are streamed to stdout; tool call events are written to stderr.
 // Write-shaped operations are rejected so the sidecar cannot mutate state.
+//
+// mu guards result/promptSent/closed: session updates arrive from the SDK's
+// notification goroutine, and the D2 cancellable wait can abandon a turn while
+// late notifications are still in flight — closeAndSnapshot freezes the result
+// so the caller reads a consistent copy (ADR-0027 D2).
 type denyClient struct {
+	mu         sync.Mutex
 	result     *TurnResult
 	promptSent bool
+	closed     bool
+	// onActivity, when set, is invoked on every session update. It feeds the
+	// D2 liveness watchdog; it must not block.
+	onActivity func()
+}
+
+// markPromptSent flips replay accounting to live-turn accounting.
+func (c *denyClient) markPromptSent() {
+	c.mu.Lock()
+	c.promptSent = true
+	c.mu.Unlock()
+}
+
+// closeAndSnapshot stops recording and returns a copy of the accumulated turn
+// result that is safe to read even if the peer is still emitting updates.
+func (c *denyClient) closeAndSnapshot() TurnResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	return *c.result
 }
 
 func (c *denyClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
@@ -302,7 +403,16 @@ func (c *denyClient) RequestPermission(_ context.Context, params acp.RequestPerm
 }
 
 // SessionUpdate streams text to stdout and records tool call observations.
+// Every update also feeds the liveness watchdog (ADR-0027 D2).
 func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotification) error {
+	if c.onActivity != nil {
+		c.onActivity()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
 	u := params.Update
 	replayed := !c.promptSent
 	switch {
@@ -450,6 +560,10 @@ type RunTurnOptions struct {
 	// the turn. Registered on both NewSession and LoadSession so resumed turns
 	// keep the tool.
 	ReportSinkPath string
+	// LivenessTimeout overrides the D2 watchdog window for this turn. Zero
+	// means "resolve from GHX_SIDECAR_LIVENESS_TIMEOUT (default 10m)";
+	// negative disables the watchdog explicitly.
+	LivenessTimeout time.Duration
 }
 
 // reportSinkMcpServers returns the ACP McpServer list to register for a turn.
@@ -504,8 +618,20 @@ func RunTurn(ctx context.Context, agentCmd, acpSessionID, prompt string) (result
 }
 
 // RunTurnWithOptions is RunTurn plus eval/runtime overrides for cwd and env.
+//
+// Resilience (ADR-0027 D2): the turn runs under a cancellable wait — the
+// prompt is awaited in a select over completion, parent-context cancellation,
+// the liveness watchdog, and the peer connection dying. A dead peer fails the
+// turn immediately; silence beyond the liveness window cancels it with
+// ErrLivenessTimeout. On failure the partial TurnResult AND the established
+// ACP session ID are still returned so callers can flush artifacts (D3) and
+// resume the same session for the wrap-up recovery prompt (D1).
 func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnResult, newSessionID string, err error) {
-	cmd := exec.CommandContext(ctx, opts.AgentCmd)
+	liveness := resolveLivenessTimeout(opts.LivenessTimeout)
+	turnCtx, cancelTurn := context.WithCancelCause(ctx)
+	defer cancelTurn(nil)
+
+	cmd := exec.CommandContext(turnCtx, opts.AgentCmd)
 	if opts.Env != nil {
 		cmd.Env = opts.Env
 	}
@@ -524,23 +650,51 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	}
 	defer ShutdownAgent(cmd, stdin)
 
-	client := &denyClient{result: &result}
+	// Liveness clock: every ACP session update (and every completed RPC step)
+	// counts as a sign of life. The watchdog cancels the turn — which also
+	// kills the spawned agent via exec.CommandContext — when the clock goes
+	// stale for the whole window (ADR-0027 D2).
+	var lastActivity atomic.Int64
+	lastActivity.Store(time.Now().UnixNano())
+	touch := func() { lastActivity.Store(time.Now().UnixNano()) }
+
+	client := &denyClient{result: &result, onActivity: touch}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
+
+	if liveness > 0 {
+		go func() {
+			for {
+				idle := time.Duration(time.Now().UnixNano() - lastActivity.Load())
+				remaining := liveness - idle
+				if remaining <= 0 {
+					cancelTurn(fmt.Errorf("%w: no ACP session update for %s (set %s to adjust)",
+						ErrLivenessTimeout, liveness, LivenessTimeoutEnv))
+					return
+				}
+				select {
+				case <-turnCtx.Done():
+					return
+				case <-time.After(remaining):
+				}
+			}
+		}()
+	}
 
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
 
-	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
+	initResp, err := conn.Initialize(turnCtx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
 			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
 		},
 	})
 	if err != nil {
-		return result, "", fmt.Errorf("acp initialize: %w", err)
+		return result, "", fmt.Errorf("acp initialize: %w", turnFailureCause(turnCtx, err))
 	}
+	touch()
 	if initResp.AgentInfo != nil {
 		result.AgentInfo = &ImplementationInfo{
 			Name:    initResp.AgentInfo.Name,
@@ -560,33 +714,97 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		if opts.SessionMeta != nil {
 			req.Meta = opts.SessionMeta
 		}
-		resp, err := conn.NewSession(ctx, req)
+		resp, err := conn.NewSession(turnCtx, req)
 		if err != nil {
-			return result, "", fmt.Errorf("acp new session: %w", err)
+			return result, "", fmt.Errorf("acp new session: %w", turnFailureCause(turnCtx, err))
 		}
 		sessionID = resp.SessionId
 	} else {
-		_, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
+		_, err := conn.LoadSession(turnCtx, acp.LoadSessionRequest{
 			SessionId:  acp.SessionId(opts.ACPSessionID),
 			Cwd:        cwd,
 			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
 		})
 		if err != nil {
-			return result, "", fmt.Errorf("acp load session: %w", err)
+			return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(turnCtx, err))
 		}
 		sessionID = acp.SessionId(opts.ACPSessionID)
 	}
+	touch()
 
-	client.promptSent = true
-	if _, err := conn.Prompt(ctx, acp.PromptRequest{
-		SessionId: sessionID,
-		Prompt:    []acp.ContentBlock{acp.TextBlock(opts.Prompt)},
-	}); err != nil {
-		return result, "", fmt.Errorf("acp prompt: %w", err)
+	client.markPromptSent()
+	promptDone := make(chan error, 1)
+	go func() {
+		_, perr := conn.Prompt(turnCtx, acp.PromptRequest{
+			SessionId: sessionID,
+			Prompt:    []acp.ContentBlock{acp.TextBlock(opts.Prompt)},
+		})
+		promptDone <- perr
+	}()
+
+	var promptErr error
+	select {
+	case promptErr = <-promptDone:
+	case <-conn.Done():
+		// Dead peer: fail the turn immediately (ADR-0027 D2) — never wait for
+		// a timer on a connection that cannot answer. Give the in-flight
+		// Prompt call a short grace to unwind first: when both channels are
+		// ready (agent answered and then exited) the completed prompt wins.
+		perr, finished := awaitPromptOrGrace(promptDone)
+		if finished {
+			promptErr = perr
+		} else {
+			promptErr = errors.New(peerClosedMarker + " before the prompt turn completed")
+		}
+		if promptErr != nil && !IsPeerClosedError(promptErr) {
+			promptErr = fmt.Errorf("%s: %w", peerClosedMarker, promptErr)
+		}
+	case <-turnCtx.Done():
+		// Watchdog or parent cancellation. The SDK's own wait also selects on
+		// this context; the grace only covers its unwinding.
+		if perr, finished := awaitPromptOrGrace(promptDone); finished {
+			promptErr = perr
+		} else {
+			promptErr = context.Cause(turnCtx)
+		}
+	}
+	// Prefer the watchdog cause over the SDK's stringified rendering of it so
+	// errors.Is(err, ErrLivenessTimeout) works for callers.
+	if cause := context.Cause(turnCtx); errors.Is(cause, ErrLivenessTimeout) {
+		promptErr = cause
+	}
+	// Freeze the result before returning: late notifications from a dying
+	// peer must not race the caller's reads (D3 flushes partial results).
+	result = client.closeAndSnapshot()
+	if promptErr != nil {
+		return result, string(sessionID), fmt.Errorf("acp prompt: %w", promptErr)
 	}
 
 	os.Stdout.WriteString("\n")
 	return result, string(sessionID), nil
+}
+
+// awaitPromptOrGrace waits briefly for an abandoned Prompt call to unwind.
+// It returns the prompt's error and whether the prompt finished within the
+// grace window (a finished prompt with a nil error is a genuine success even
+// when the peer exited right behind it).
+func awaitPromptOrGrace(promptDone <-chan error) (error, bool) {
+	select {
+	case err := <-promptDone:
+		return err, true
+	case <-time.After(shutdownGrace):
+		return nil, false
+	}
+}
+
+// turnFailureCause maps an RPC error to the turn-level cause when the turn
+// context was cancelled by the liveness watchdog, so pre-prompt hangs
+// (initialize / session setup) classify the same way as prompt hangs.
+func turnFailureCause(turnCtx context.Context, err error) error {
+	if cause := context.Cause(turnCtx); errors.Is(cause, ErrLivenessTimeout) {
+		return cause
+	}
+	return err
 }
 
 // CheckACPHandshake spawns an agent and verifies that ACP initialize completes

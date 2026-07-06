@@ -11,6 +11,7 @@ import (
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar/telemetry"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
@@ -41,14 +42,19 @@ const (
 // artifacts. It carries session/turn identifiers plus the TurnResult, report,
 // and timing — not any eval type — so the shared runtime stays domain-neutral.
 type turnTelemetry struct {
-	SessionsDir    string
-	Session        string
-	Repo           string
-	Model          string
-	Turn           int
-	Question       string
-	Result         TurnResult
-	Report         *Report
+	SessionsDir string
+	Session     string
+	Repo        string
+	Model       string
+	Turn        int
+	Question    string
+	Result      TurnResult
+	Report      *Report
+	// Error carries the turn's failure (liveness watchdog, dead peer,
+	// unrecovered turn-cap). When set, the turn span is marked as an error and
+	// an error log record is written next to it (ADR-0027 D2/D3) — failed
+	// explorations are the ones that most need auditing.
+	Error          string
 	StartedAt      time.Time
 	EndedAt        time.Time
 	CaptureContent bool
@@ -56,7 +62,12 @@ type turnTelemetry struct {
 
 // emitTurnArtifacts writes the session's traces/logs/metrics for one Ask turn.
 // Any failure is warned to stderr and swallowed so the ask still returns.
+// It runs on every Ask exit path, including failures (ADR-0027 D3).
 func emitTurnArtifacts(ctx context.Context, t turnTelemetry) {
+	// The flush must survive the very cancellation it documents: a
+	// watchdog-cancelled or deadline-exceeded context would otherwise abort
+	// emission exactly when the artifacts matter most (ADR-0027 D3).
+	ctx = context.WithoutCancel(ctx)
 	dir := sessionDir(t.SessionsDir, t.Session)
 	if err := t.emitTraces(ctx, dir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to emit turn traces/logs: %v\n", err)
@@ -125,8 +136,32 @@ func (t turnTelemetry) emitTurnSpan(parent context.Context, tracer trace.Tracer,
 		t.emitToolSpan(turnCtx, tracer, tool)
 	}
 	logs := t.contentLogs(span.SpanContext(), start)
+	if t.Error != "" {
+		span.SetStatus(codes.Error, boundedStr(t.Error, 256))
+		logs = append(logs, t.errorLog(span.SpanContext(), end))
+	}
 	span.End(trace.WithTimestamp(end))
 	return logs
+}
+
+// errorLog is the production error entry for a failed turn (ADR-0027 D2/D3):
+// watchdog timeouts, dead peers, and turn-cap deaths become an auditable log
+// record correlated with the turn span, not only a stderr line. Written
+// regardless of the content-capture setting — it carries the failure, not
+// message content.
+func (t turnTelemetry) errorLog(span trace.SpanContext, at time.Time) telemetry.LogRecord {
+	return telemetry.LogRecord{
+		Time:      at,
+		Span:      span,
+		EventName: "sidecar.turn.error",
+		Attributes: []attribute.KeyValue{
+			attribute.String("gen_ai.system", sidecarSystem),
+			attribute.String("ghx.sidecar.session", t.Session),
+			attribute.String("ghx.sidecar.repo", t.Repo),
+			attribute.Int("ghx.sidecar.turn", t.Turn),
+			attribute.String("error.message", boundedStr(t.Error, 2048)),
+		},
+	}
 }
 
 func (t turnTelemetry) emitToolSpan(parent context.Context, tracer trace.Tracer, tool ToolCallTrace) {
@@ -179,6 +214,7 @@ func (t turnTelemetry) turnAttributes() []attribute.KeyValue {
 		attribute.Int("ghx.sidecar.tool_call_count", len(r.ToolTraces)),
 		attribute.Bool("ghx.sidecar.report_retried", r.ReportRetried),
 		attribute.Bool("ghx.sidecar.report_coerced", r.ReportCoerced),
+		attribute.Bool("ghx.sidecar.wrap_up_recovered", r.WrapUpRecovered),
 	}
 	if t.Model != "" {
 		attrs = append(attrs, semconv.GenAIRequestModel(t.Model))

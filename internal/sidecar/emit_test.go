@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,6 +140,93 @@ func TestAskContentCaptureDisabled(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sess, "logs.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("logs.jsonl should not exist when content capture is disabled (err=%v)", err)
+	}
+}
+
+// TestAskEmitsArtifactsOnFailedTurn is the ADR-0027 D3 acceptance test: a turn
+// that dies mid-flight (here: liveness watchdog) still leaves traces.jsonl and
+// logs.jsonl in the session dir, with the error recorded — previously a failed
+// turn left only meta.json (FRICTION.md "failed turns leave zero artifacts").
+func TestAskEmitsArtifactsOnFailedTurn(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	runTurnWithOptions = func(ctx context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		now := time.Now().UTC()
+		return TurnResult{
+			FullText: "partial exploration output",
+			ToolTraces: []ToolCallTrace{{
+				ID: "call-1", Kind: "execute", Title: "ghx tree o/r",
+				OutputSize: 10, OutputExcerpt: "tree lines",
+				StatusTransitions: []ToolStatusTransition{
+					{Status: "in_progress", At: now},
+					{Status: "completed", At: now.Add(time.Millisecond)},
+				},
+			}},
+			ToolOutputChars: 10,
+		}, "sess-1", fmt.Errorf("acp prompt: %w: no ACP session update for 10m0s", ErrLivenessTimeout)
+	}
+
+	_, result, err := Ask(context.Background(), Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	})
+	if err == nil {
+		t.Fatal("the failed turn must surface its error")
+	}
+	if result == nil || len(result.ToolTraces) != 1 {
+		t.Fatalf("partial result not returned: %+v", result)
+	}
+
+	sess := filepath.Join(dir, "s")
+
+	// traces.jsonl: the failed turn's spans, including the tool call it made.
+	_, spans := readProdSpans(t, filepath.Join(sess, "traces.jsonl"))
+	names := map[string]bool{}
+	for _, sp := range spans {
+		names[sp.Name] = true
+	}
+	for _, want := range []string{"sidecar.ask", "sidecar.turn", "tool.execute"} {
+		if !names[want] {
+			t.Fatalf("missing span %q on the failure path; got %v", want, spanNames(spans))
+		}
+	}
+
+	// logs.jsonl: the error record correlates the failure with the turn span.
+	logData, err := os.ReadFile(filepath.Join(sess, "logs.jsonl"))
+	if err != nil {
+		t.Fatalf("read logs.jsonl (D3: failed turns must leave logs): %v", err)
+	}
+	for _, want := range []string{"sidecar.turn.error", "liveness watchdog timeout"} {
+		if !strings.Contains(string(logData), want) {
+			t.Fatalf("logs.jsonl missing %q:\n%s", want, logData)
+		}
+	}
+}
+
+// TestAskEmitsArtifactsOnFailedTurnWithCancelledContext pins the D3 flush
+// against a dead context: even when the caller's context is already cancelled
+// (deadline exceeded, watchdog fired), emission still writes the artifacts.
+func TestAskEmitsArtifactsOnFailedTurnWithCancelledContext(t *testing.T) {
+	stubHandshake(t)
+	dir := t.TempDir()
+
+	old := runTurnWithOptions
+	defer func() { runTurnWithOptions = old }()
+	runTurnWithOptions = func(ctx context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+		return TurnResult{FullText: "partial"}, "", fmt.Errorf("acp prompt: %w", context.DeadlineExceeded)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // caller's context already dead when emission runs
+	if _, _, err := Ask(ctx, Config{SessionsDir: dir, AgentCmd: "mock"}, AskRequest{
+		Session: "s", Repo: "o/r", Question: "q",
+	}); err == nil {
+		t.Fatal("expected the turn failure to surface")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "s", "traces.jsonl")); err != nil {
+		t.Fatalf("traces.jsonl must be written even under a cancelled context: %v", err)
 	}
 }
 

@@ -21,6 +21,33 @@ type RunConfig struct {
 	SessionsDir string
 }
 
+// episodeLivenessInterval paces the per-episode liveness heartbeat printed by
+// RunEpisode (ADR-0027 D2): a human watching a run sees an elapsed line keep
+// ticking for a stalled episode instead of silence. Package variable so tests
+// can shorten it.
+var episodeLivenessInterval = time.Minute
+
+// startEpisodeLiveness prints a liveness line for one running episode every
+// episodeLivenessInterval until the returned stop func is called.
+func startEpisodeLiveness(task Task, profile Profile) (stop func()) {
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		ticker := time.NewTicker(episodeLivenessInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				fmt.Fprintf(os.Stderr, "eval episode live task=%s profile=%s elapsed=%s (still running)\n",
+					task.ID, profile, time.Since(start).Round(time.Second))
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
 // RunEpisode executes one task under one profile and returns the scored
 // episode. A mid-episode turn failure ends the episode early; the partial
 // episode (with the turn error recorded) is returned alongside the error so
@@ -31,6 +58,9 @@ func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) 
 		return nil, rtErr
 	}
 	defer rt.Cleanup()
+
+	stopLiveness := startEpisodeLiveness(task, profile)
+	defer stopLiveness()
 
 	ep := &Episode{
 		ID:        fmt.Sprintf("%s_%s_%d", task.ID, profile, time.Now().UnixMilli()),
@@ -94,28 +124,20 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 			Depth:    "normal",
 		})
 		rec.DurationMs = time.Since(start).Milliseconds()
+		// Ask returns the partial TurnResult on failure too (ADR-0027 D3);
+		// capture whatever the failed turn produced before recording the error
+		// so failed episodes stay auditable.
+		if turn != nil {
+			populateTurnRecord(&rec, turn)
+		}
 		if err != nil {
 			rec.Error = err.Error()
 			rec.Resumed = false
 			ep.Turns = append(ep.Turns, rec)
+			appendTraceProjections(ep, rec)
 			return fmt.Errorf("sidecar turn %d: %w", i, err)
 		}
 
-		rec.Text = turn.FullText
-		rec.Thinking = turn.Thinking
-		rec.ReplayedText = turn.ReplayedText
-		rec.ReplayedThinking = turn.ReplayedThinking
-		rec.ToolCalls = turn.ToolCalls
-		rec.ToolOutputChars = turn.ToolOutputChars
-		rec.ReportRetried = turn.ReportRetried
-		rec.ReportCoerced = turn.ReportCoerced
-		for _, tr := range turn.ToolTraces {
-			rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
-		}
-		for _, tr := range turn.ReplayedToolTraces {
-			rec.ReplayedToolTraces = append(rec.ReplayedToolTraces, convertSidecarTrace(tr))
-		}
-		rebuildToolSummaries(&rec)
 		rec.Report = report
 		ep.Turns = append(ep.Turns, rec)
 		appendTraceProjections(ep, rec)
@@ -127,6 +149,28 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		}
 	}
 	return nil
+}
+
+// populateTurnRecord copies one sidecar TurnResult into the episode's turn
+// record. Shared by the success and failure paths so partial results from
+// failed turns carry the same audit fields (ADR-0027 D3).
+func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
+	rec.Text = turn.FullText
+	rec.Thinking = turn.Thinking
+	rec.ReplayedText = turn.ReplayedText
+	rec.ReplayedThinking = turn.ReplayedThinking
+	rec.ToolCalls = turn.ToolCalls
+	rec.ToolOutputChars = turn.ToolOutputChars
+	rec.ReportRetried = turn.ReportRetried
+	rec.ReportCoerced = turn.ReportCoerced
+	rec.WrapUpRecovered = turn.WrapUpRecovered
+	for _, tr := range turn.ToolTraces {
+		rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
+	}
+	for _, tr := range turn.ReplayedToolTraces {
+		rec.ReplayedToolTraces = append(rec.ReplayedToolTraces, convertSidecarTrace(tr))
+	}
+	rebuildToolSummaries(rec)
 }
 
 // runDirectEpisode drives a plain or ghx profile: one live agent process for

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -71,7 +72,79 @@ func DecodeReportStrict(data []byte) (*Report, error) {
 	if err := ValidateReport(&r); err != nil {
 		return nil, err
 	}
+	if err := ValidateReportEvidence(&r); err != nil {
+		return nil, err
+	}
 	return &r, nil
+}
+
+// blockedAnswerPrefix marks the escape-hatch report for investigations that
+// could not proceed at all. BLOCKED reports must state why (after the prefix)
+// and are exempt from the evidence requirement — a blocked investigation has
+// no evidence by definition.
+const blockedAnswerPrefix = "BLOCKED"
+
+// ValidateReportEvidence enforces the evidence contract on the strict
+// submit_report path (ADR-0027 D4): a non-BLOCKED report is accepted only when
+// it carries ALL of — at least one verified claim with non-empty evidence, at
+// least one relevant file, and at least one command run. An answer without
+// evidence is a hypothesis, not a finding (AGENTS.md "Evidence Contract").
+// The returned error names every missing field exactly so the producer can fix
+// its report in the same in-band loop ADR-0021 runs for shape errors.
+func ValidateReportEvidence(r *Report) error {
+	if r == nil {
+		return errors.New("report is nil")
+	}
+	answer := strings.TrimSpace(r.Answer)
+	if strings.HasPrefix(answer, blockedAnswerPrefix) {
+		why := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(answer, blockedAnswerPrefix), ":"))
+		if why == "" {
+			return errors.New(`report failed validation: answer: a BLOCKED report must state why it is blocked ("BLOCKED: <reason>")`)
+		}
+		return nil
+	}
+	var missing []string
+	if !hasVerifiedClaimWithEvidence(r.Verified) {
+		missing = append(missing, `verified: at least one verified claim with a non-empty "evidence" field is required`)
+	}
+	if !hasRelevantFile(r.RelevantFiles) {
+		missing = append(missing, `relevantFiles: at least one relevant file with a non-empty "path" is required`)
+	}
+	if !hasCommandRun(r.CommandsRun) {
+		missing = append(missing, `commandsRun: at least one command you actually ran is required`)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("report failed validation: evidence requirements not met — %s. Cite the evidence you gathered, or submit a BLOCKED report (answer starting %q) stating why you could not investigate",
+		strings.Join(missing, "; "), blockedAnswerPrefix+": <reason>")
+}
+
+func hasVerifiedClaimWithEvidence(claims []Claim) bool {
+	for _, c := range claims {
+		if strings.TrimSpace(c.Summary) != "" && strings.TrimSpace(c.Evidence) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRelevantFile(files []RelevantFile) bool {
+	for _, f := range files {
+		if strings.TrimSpace(f.Path) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCommandRun(commands []string) bool {
+	for _, c := range commands {
+		if strings.TrimSpace(c) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateReport enforces the semantic minimum shared by the strict submission
@@ -95,7 +168,7 @@ func ValidateReport(r *Report) error {
 func reportInputSchema() json.RawMessage {
 	schema := jsonSchemaForType(reflect.TypeOf(Report{}))
 	schema["required"] = []string{"answer"}
-	schema["description"] = "The ghx-sidecar evidence report. Submit the complete report object; only \"answer\" is strictly required. No unknown fields."
+	schema["description"] = "The ghx-sidecar evidence report. Submit the complete report object. A non-BLOCKED report must include at least one verified claim with evidence, at least one relevantFiles entry, and at least one commandsRun entry (ADR-0027 D4). No unknown fields."
 	if props, ok := schema["properties"].(map[string]any); ok {
 		applyFieldDescriptions(props, reportFieldDescriptions)
 	}
@@ -197,7 +270,9 @@ func NewReportSinkServer(outPath string) *server.MCPServer {
 			"complete an investigation turn. The report is validated strictly against "+
 			"the report schema: on success it is accepted and you end your turn without repeating the answer; "+
 			"on failure the exact validation error is returned so you can fix the report "+
-			"and call submit_report again. No coercion is applied.",
+			"and call submit_report again. No coercion is applied. Evidence is required: "+
+			"a non-BLOCKED report needs at least one verified claim with evidence, one "+
+			"relevant file, and one command run; a BLOCKED report must state why it is blocked.",
 		reportInputSchema(),
 	)
 	s.AddTool(tool, reportSinkHandler(outPath))
