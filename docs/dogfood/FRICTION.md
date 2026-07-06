@@ -54,13 +54,13 @@ Entry format:
 - Attempted: `sidecar ask --repo Arize-ai/phoenix "how does LLM-as-judge eval work..."` (large repo, sprawling internals) at default depth.
 - Ground: the agent explored ~20+ tool calls, then the adapter killed the prompt with `Internal error: Reached maximum number of turns (24)`. The entire exploration was lost — no report, not even a partial. The budget safety net fires as a hard error instead of forcing a "submit what you have" wrap-up.
 - Trace: ~/.ghx/sessions/arize-ai-phoenix/ — see next entry.
-- Disposition: open — design settled (Goga, 2026-07-05): this is a SESSION RESUME problem, not error handling. The ACP session survives the turn error; the runtime must LoadSession-resume it and send a "wrap up: submit_report with what you have" prompt (fresh query = fresh turn budget). Part of the always-on-runtime capability (NORTH_STAR §4): explorations are never lost to process or turn boundaries.
+- Disposition: fixed ae832b3 (ADR-0027 D1) — the runtime LoadSession-resumes the same ACP session on the max-turns error and sends one "wrap up: call submit_report now with what you have" prompt (fresh query = fresh turn budget); recovery recorded as `wrapUpRecovered` + soft anomaly `turn_cap_wrapup`; a failed wrap-up terminates as a BLOCKED report with artifacts instead of a lost exploration.
 
 ## 2026-07-05 failed turns leave zero artifacts — breaking
 - Attempted: audit the failed phoenix ask above.
 - Ground: the session dir has only meta.json — no traces.jsonl, no logs, nothing. Emission happens after a successful turn, so exactly the turns that fail (the ones most needing audit) are invisible. Violates the visibility tenet at its most valuable moment.
 - Trace: ~/.ghx/sessions/arize-ai-phoenix/ (absence of artifacts is the evidence).
-- Disposition: open — emit per-turn artifacts incrementally or flush on error path.
+- Disposition: fixed ae832b3 (ADR-0027 D3) — emission now runs on every Ask exit path (turn-cap, watchdog, peer-closed, terminal WARN) under a non-cancellable context; failed turns leave traces.jsonl + logs.jsonl with a `sidecar.turn.error` record, pinned by `TestAskEmitsArtifactsOnFailedTurn`.
 
 _Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
