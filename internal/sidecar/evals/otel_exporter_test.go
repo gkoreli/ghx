@@ -44,6 +44,64 @@ type exportedLogRecord struct {
 	} `json:"attributes"`
 }
 
+type exportedMetric struct {
+	Name      string `json:"name"`
+	Histogram *struct {
+		DataPoints []struct {
+			Attributes []exportedAttribute `json:"attributes"`
+			Count      string              `json:"count"`
+		} `json:"dataPoints"`
+	} `json:"histogram"`
+	Sum *struct {
+		DataPoints []struct {
+			Attributes []exportedAttribute `json:"attributes"`
+			AsInt      string              `json:"asInt"`
+		} `json:"dataPoints"`
+	} `json:"sum"`
+}
+
+type exportedAttribute struct {
+	Key   string `json:"key"`
+	Value struct {
+		StringValue string `json:"stringValue"`
+		BoolValue   bool   `json:"boolValue"`
+		IntValue    string `json:"intValue"`
+	} `json:"value"`
+}
+
+func readExportedMetrics(t *testing.T, runDir string) (lines int, metrics []exportedMetric) {
+	t.Helper()
+	f, err := os.Open(filepath.Join(runDir, metricFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines++
+		var md struct {
+			ResourceMetrics []struct {
+				ScopeMetrics []struct {
+					Metrics []exportedMetric `json:"metrics"`
+				} `json:"scopeMetrics"`
+			} `json:"resourceMetrics"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &md); err != nil {
+			t.Fatalf("line %d is not OTLP MetricsData JSON: %v", lines, err)
+		}
+		for _, rm := range md.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				metrics = append(metrics, sm.Metrics...)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return lines, metrics
+}
+
 func readExportedLogs(t *testing.T, runDir string) (lines int, logs []exportedLogRecord) {
 	t.Helper()
 	f, err := os.Open(filepath.Join(runDir, logFileName))
@@ -250,4 +308,71 @@ func TestOTLPJSONLogsExporterEmitsSpecHexIDsAndGenAIContent(t *testing.T) {
 
 func timeNowUTC() time.Time {
 	return time.Now().UTC()
+}
+
+func TestOTLPJSONMetricsExporterEmitsGenAIAndGhxMetrics(t *testing.T) {
+	runDir := t.TempDir()
+	ep := &Episode{
+		ID:      "ep-metrics",
+		TaskID:  "task-metrics",
+		Repo:    "owner/repo",
+		Profile: ProfileSidecar,
+		Turns: []TurnRecord{{
+			Turn:       0,
+			Question:   "Where is routing configured?",
+			Text:       "Routing lives in router.go.",
+			Thinking:   "Need to inspect route files.",
+			DurationMs: 1250,
+		}},
+		Identity:  AgentIdentity{SubjectModel: "test-model"},
+		Rewards:   RewardBreakdown{Correctness: 1, Evidence: 0.5, Trajectory: 1, Compression: 0.2, Safety: 1, Overall: 0.74},
+		Anomalies: []Anomaly{{Kind: AnomalySidecarReportRetried, Severity: SeveritySoft}},
+		StartedAt: timeNowUTC(),
+	}
+	ep.EndedAt = ep.StartedAt.Add(2 * time.Second)
+
+	if err := EmitEpisodeMetrics(runDir, ep); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, metrics := readExportedMetrics(t, runDir)
+	if lines != 1 {
+		t.Fatalf("metric lines = %d, want 1", lines)
+	}
+	byName := map[string]exportedMetric{}
+	for _, metric := range metrics {
+		byName[metric.Name] = metric
+	}
+	for _, name := range []string{
+		genAIClientOperationDurationMetric,
+		genAIClientTokenUsageMetric,
+		ghxEvalRewardMetric,
+		ghxEvalAnomalyCount,
+	} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("missing metric %s; got %v", name, metricNames(metrics))
+		}
+	}
+	tokenMetric := byName[genAIClientTokenUsageMetric]
+	seenTokenTypes := map[string]bool{}
+	for _, point := range tokenMetric.Sum.DataPoints {
+		for _, attr := range point.Attributes {
+			if attr.Key == genAITokenTypeAttribute {
+				seenTokenTypes[attr.Value.StringValue] = true
+			}
+		}
+	}
+	for _, tokenType := range []string{"input", "output", "reasoning"} {
+		if !seenTokenTypes[tokenType] {
+			t.Fatalf("missing token type %q in %s", tokenType, genAIClientTokenUsageMetric)
+		}
+	}
+}
+
+func metricNames(metrics []exportedMetric) []string {
+	names := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		names = append(names, metric.Name)
+	}
+	return names
 }
