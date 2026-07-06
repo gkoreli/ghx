@@ -86,6 +86,13 @@ const defaultHandshakeTimeout = 10 * time.Second
 // splitting with no shell quoting; a binary path containing spaces still
 // needs a wrapper script.
 func splitAgentCmd(agentCmd string) (name string, args []string) {
+	return SplitAgentCmd(agentCmd)
+}
+
+// SplitAgentCmd splits a configured agent command line into argv for exec.
+// Exported for the eval runner's identity probes (a multi-word AgentCmd such
+// as the pinned npx adapter line must not be passed as a single argv[0]).
+func SplitAgentCmd(agentCmd string) (name string, args []string) {
 	fields := strings.Fields(agentCmd)
 	if len(fields) == 0 {
 		return agentCmd, nil
