@@ -146,21 +146,22 @@ go install github.com/gkoreli/ghx/v2/cmd/ghx@latest
 The sidecar drives an ACP-capable agent under the hood, and it reads GitHub
 through the authenticated [gh CLI](https://cli.github.com/) (`gh auth login`).
 
-### 2. Configure the agent
+### 2. Configure the agent (optional — zero-config works)
 
 The sidecar speaks [Agent Client Protocol (ACP)](https://agentclientprotocol.com)
-to its underlying model. One command writes a working config using the
+to its underlying model. **With no config at all, the pinned
 [claude-agent-acp](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
-adapter:
+adapter is the default** — if you have Node/npx and are logged into Claude Code,
+`ghx sidecar ask` works out of the box. Write an explicit config only to pin a
+different agent or model:
 
 ```bash
 ghx sidecar config init --claude-acp    # writes ~/.ghx/config.json with the ACP adapter
 ```
 
-> Setup is the hardest step, so this is designed to be one command. Without
-> `--claude-acp`, `config init` auto-detects any ACP-capable agent already on
-> your PATH; a bare `claude` binary does **not** speak ACP on stdio and is
-> rejected on purpose (it would hang every turn — see
+> Without `--claude-acp`, `config init` auto-detects any ACP-capable agent
+> already on your PATH; a bare `claude` binary does **not** speak ACP on stdio
+> and is rejected on purpose (it would hang every turn — see
 > [ADR-0019](docs/adr/0019-sidecar-adoption-zero-cli-surface.md) D4).
 
 Re-running `config init --claude-acp` against an existing config shows a field
@@ -358,6 +359,7 @@ ghx sidecar doctor                          # Verify token, network, ghx binary,
 ghx sidecar doctor --live                   # Run a real one-prompt ACP turn for diagnosis
 ghx sidecar ask --repo <owner/repo> "<q>"   # Delegate one repo question to the sidecar
 ghx sidecar ask "<q>"                       # Discovery question across GitHub
+ghx sidecar ask --repo <o/r> --local "<q>"  # Also allow tier-2 local analysis (codemap/ast-grep/repomap)
 ghx sidecar daemon --status                 # Inspect the warm sidecar daemon
 ghx sidecar daemon --stop                   # Stop the warm sidecar daemon
 ghx sidecar sessions list                   # List persisted sidecar sessions
