@@ -269,7 +269,9 @@ const agentAuthHint = "The spawned Claude agent has no usable credentials (auth 
 	"  npx -y @agentclientprotocol/claude-agent-acp --cli auth login --claudeai\n" +
 	"If this machine authenticates through Bedrock/Vertex or a gateway instead, export those\n" +
 	"env vars in the shell where you run ghx — every ask forwards them to the agent\n" +
-	"automatically (ADR-0033.1), so no daemon restart is needed;\n" +
+	"automatically (ADR-0033.1), so no daemon restart is needed.\n" +
+	"To use YOUR installed Claude Code (and its credentials/config) instead of the adapter's\n" +
+	"bundled binary, set CLAUDE_CODE_EXECUTABLE to its path (see README: toolbox/wrapper builds).\n" +
 	"`ghx sidecar sessions show <session>` lists which auth env names the agent actually saw."
 
 // agentHints maps stable failure markers — observed in the turn error text or

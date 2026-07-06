@@ -167,6 +167,28 @@ ghx sidecar config init --claude-acp    # writes ~/.ghx/config.json with the ACP
 Re-running `config init --claude-acp` against an existing config shows a field
 diff and refuses to overwrite without `--force`.
 
+**Using your installed Claude Code (toolbox / wrapper builds).** The adapter's
+SDK ships its own bundled Claude Code binary and its own credential store — by
+default your `claude` on PATH (and its `~/.claude/settings.json`, credential
+hooks, model aliases) is **not** what runs. If your organization installs a
+wrapped `claude` that carries work credentials, point the adapter at it with
+`CLAUDE_CODE_EXECUTABLE` (honored by `claude-agent-acp` ≥ 0.55):
+
+```json
+{
+  "agent": "env CLAUDE_CODE_EXECUTABLE=/path/to/your/claude npx -y @agentclientprotocol/claude-agent-acp@0.55.0"
+}
+```
+
+Embedding `env VAR=...` in the agent command makes the setting travel with the
+command itself, so it works no matter which process (CLI or resident daemon)
+spawns the agent. Exporting `CLAUDE_CODE_EXECUTABLE` in your shell also works:
+every ask forwards auth-relevant env to the agent
+([ADR-0033.1](docs/adr/0033.1-client-auth-env-passthrough.md)), and the same
+applies to Bedrock/Vertex/gateway env (`CLAUDE_CODE_USE_BEDROCK`, `AWS_*`,
+`ANTHROPIC_BASE_URL`, ...). `ghx sidecar doctor` shows exactly which names your
+shell would forward.
+
 ### 3. Verify
 
 ```bash
