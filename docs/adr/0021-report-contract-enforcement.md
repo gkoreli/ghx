@@ -109,6 +109,94 @@ adapters; the anomaly table of the re-run is the proof either way.
   dependency to the product runtime and hides the producer's failure;
   the producer must fix its own report.
 
+## Implementation Notes (2026-07-05)
+
+Status stays **accepted**. D1–D3 are implemented; **D4 is NOT satisfied** — no
+confirmatory re-run has been done, so no performance numbers are claimed here.
+The expected outcomes in D4 remain expectations, not results.
+
+### What shipped
+
+- **D1 — submit_report MCP tool.** New hidden command
+  `ghx sidecar report-sink --out <path>` (internal/cli/sidecar.go) serves an
+  mcp-go stdio server (internal/sidecar/reportsink.go) exposing exactly
+  `submit_report`. Its input schema is derived from the `Report` Go type by
+  reflection (`reportInputSchema`), and validation runs through
+  `DecodeReportStrict` — `json.Decoder` with `DisallowUnknownFields`, a
+  trailing-token check, and the shared `ValidateReport` (non-empty answer).
+  **No coercion on this path.** A valid submission writes canonical JSON to the
+  sink atomically and returns `"report accepted — finish your reply now"`; an
+  invalid one returns the exact validation error as an MCP tool error
+  (`isError`). The server is registered on the ACP session at both `NewSession`
+  and `LoadSession` (internal/sidecar/acp.go `reportSinkMcpServers`, command =
+  `os.Executable()`). The persona's `## submit_report` section now describes the
+  real tool; `<ghx-report>` is documented as the fallback only.
+
+- **D2 — runtime completion gate.** `Ask` (internal/sidecar/runtime.go) creates
+  a runtime-owned temp sink, passes it to every turn, and after each turn
+  prefers the strict sink report over any text block (`resolveTurnReport`). On
+  absence it falls back to `ExtractReportErr` and sends a corrective follow-up
+  carrying the **concrete** reason (`reportRetryPromptWithError`), bounded at
+  **two** retries (`maxReportRetries`), replacing the old single static nudge.
+  The WARN fallback survives as the retries-exhausted terminal state.
+
+- **D3 — fallback diagnostics + coercion visibility.**
+  `ExtractReportErr(text) (*Report, bool, error)` reports the failure category
+  (no block / invalid JSON / schema mismatch / empty answer) and whether
+  coercion was applied; `ExtractReport` is now a thin wrapper. Coercion is
+  confined to this fallback path and surfaced via `TurnResult.ReportCoerced`,
+  plumbed to `TurnRecord.ReportCoerced`, and counted by the new soft anomaly
+  `sidecar_report_coerced` (internal/sidecar/evals/anomalies.go).
+
+### Adapter/SDK findings that shaped the design (verified against shipped source)
+
+Checked against `claude-agent-acp@0.55.0`
+(`~/.npm/_npx/1af57d800c077c6c/.../dist/acp-agent.js`, `dist/tools.js`) and
+`@anthropic-ai/claude-agent-sdk` (`sdk.d.ts`):
+
+- Our ACP-registered stdio server is **always merged** into the SDK's
+  `mcpServers` (`acp-agent.js:2722-2746, 2822`); the Go `McpServer` stdio
+  variant marshals with no `type` field (acp-go-sdk `types_gen.go:2918-2928`),
+  matching the adapter's `!("type" in server)` stdio branch
+  (`acp-agent.js:2735`).
+- `tools: ["Bash","Read"]` is the SDK **built-in** tools base set
+  (`sdk.d.ts:1367-1370`); MCP tools are a separate category, so the allowlist
+  does **not** hide `submit_report`.
+- `strictMcpConfig: true` only ignores *other* MCP config sources
+  (`sdk.d.ts:1889-1895`); servers passed via the `mcpServers` option are kept —
+  it does **not** block our own registered server.
+- **Key gotcha:** the adapter classifies every MCP tool call as ACP kind
+  `"other"` (`tools.js` `toolInfoFromToolUse` default case), and the sidecar's
+  read-only `denyClient` treats `"other"` as write-shaped and would reject it.
+  Fix: add the fully-qualified tool id `mcp__ghx-report-sink__submit_report` to
+  session `allowedTools` (session_options.go), which the SDK auto-approves
+  without the permission callback (`sdk.d.ts:1305`); the adapter forwards this
+  field verbatim via `...userProvidedOptions` (`acp-agent.js:2800`). A narrow
+  defensive allowance for this tool was also added to
+  `denyClient.RequestPermission`.
+
+### Test coverage (unit + fake-stdio, no live tokens)
+
+- `DecodeReportStrict`: valid / unknown top-level & nested fields / wrong shape
+  / empty answer / no payload / trailing data.
+- `reportInputSchema`: derived property names match Report json tags,
+  `additionalProperties:false`, `required:["answer"]`.
+- **Full MCP round-trips proving the closed loop** invalid→error→valid→sink:
+  in-process transport (`TestReportSinkServer_MCPRoundTrip`) and the real
+  production spawn over stdio (`TestReportSinkStdioEndToEnd`, builds the ghx
+  binary and speaks MCP JSON-RPC to `ghx sidecar report-sink`).
+- Runtime gate: sink preference over text, concrete-error retry prompt,
+  coerced-flag, two-retry bound.
+- `sidecar_report_coerced` anomaly detection + aggregation.
+- Mock e2e (`TestMockSidecarEpisodeSubmitReportSink`): the scripted agent
+  completes turns via the sink through the real `Ask` path.
+
+**Not covered / accepted gap:** a true *in-adapter* MCP round-trip inside the
+mock e2e — the fake ACP adapter does not spawn MCP servers, and `os.Executable`
+under `go test` is the test binary, not `ghx`. The tool's validation and the
+real stdio transport are proven by the two round-trip tests above instead; the
+mock e2e proves the runtime sink-preference wiring.
+
 ## Cross-references
 
 - ADR-0016.7 — the lenient-parsing predecessor (RC2/RC3) this ADR
