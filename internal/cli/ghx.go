@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	ghxlib "github.com/gkoreli/ghx/v2/internal/ghx"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var VERSION = "dev"
@@ -14,7 +16,17 @@ var VERSION = "dev"
 var RootCmd = &cobra.Command{
 	Use:   "ghx",
 	Short: "GitHub code exploration for agents and humans",
-	Long:  `ghx — GitHub code exploration for agents and humans`,
+	Long: `ghx — GitHub code exploration for agents and humans
+
+Exit codes:
+  0  ok
+  1  no results
+  2  bad invocation
+  3  upstream/API failure`,
+	Version: VERSION,
+	Example: `  ghx --version
+  ghx explore gkoreli/ghx
+  ghx read gkoreli/ghx cmd/ghx/main.go --lines 1-40`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			cmd.Help()
@@ -25,22 +37,25 @@ var RootCmd = &cobra.Command{
 func init() {
 	RootCmd.SilenceErrors = true
 	RootCmd.SilenceUsage = true
-	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
+	RootCmd.SetFlagErrorFunc(teachingFlagError)
+	RootCmd.AddCommand(reposCmd, exploreCmd, readCmd, searchCmd, grepCmd, treeCmd, skillCmd, versionCmd, sidecarCmd)
 }
 
 var reposCmd = &cobra.Command{
 	Use:   "repos <query> [--limit N]",
 	Short: "Search repos with README preview",
-	Args:  cobra.ExactArgs(1),
+	Example: `  ghx repos "go web framework" --limit 5
+  ghx repos "tree-sitter parser"`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		limit, _ := cmd.Flags().GetInt("limit")
 		results, total, err := ghxlib.Repos(args[0], ghxlib.ReposOpts{Limit: limit})
 		if err != nil {
-			return err
+			return WithExitCode(ExitUpstreamFailure, err)
 		}
 		fmt.Printf("%d repos found\n", total)
 		if len(results) == 0 {
-			os.Exit(1)
+			return WithExitCode(ExitNoResults, fmt.Errorf("no repos found for %q", args[0]))
 		}
 		for _, r := range results {
 			fmt.Printf("%s (%d★ %s) %s\n", r.NameWithOwner, r.Stars, r.Language, r.Description)
@@ -59,15 +74,24 @@ func init() {
 var exploreCmd = &cobra.Command{
 	Use:   "explore <owner/repo> [path]",
 	Short: "Branch + tree + README in 1 API call",
-	Args:  cobra.RangeArgs(1, 2),
+	Example: `  ghx explore gkoreli/ghx
+  ghx explore gkoreli/ghx internal/cli
+  ghx explore gkoreli/ghx --full`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := ""
 		if len(args) > 1 {
 			path = args[1]
 		}
+		budget, _ := cmd.Flags().GetInt("budget")
+		fullMode, _ := cmd.Flags().GetBool("full")
 		result, err := ghxlib.Explore(args[0], path)
 		if err != nil {
-			return err
+			return WithExitCode(ExitUpstreamFailure, err)
+		}
+		if !fullMode {
+			printCompactExplore(args[0], path, result, budget)
+			return nil
 		}
 		fmt.Printf("description: %s\n", result.Description)
 		fmt.Printf("branch: %s\n", result.Branch)
@@ -99,17 +123,32 @@ var exploreCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	exploreCmd.Flags().Int("budget", 12000, "Approximate output budget in characters")
+	exploreCmd.Flags().Bool("full", false, "Show complete explore output without budget compaction")
+}
+
 var readCmd = &cobra.Command{
 	Use:   "read <owner/repo> <path1> [path2...]",
 	Short: "Read 1-10 files in 1 API call",
-	Args:  cobra.MinimumNArgs(2),
+	Example: `  ghx read gkoreli/ghx cmd/ghx/main.go --lines 1-40
+  ghx read gkoreli/ghx "internal/**/*.go" --map --kind func
+  ghx read gkoreli/ghx internal/cli/ghx.go --grep "RunE|Use:"`,
+	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		grepPattern, _ := cmd.Flags().GetString("grep")
 		lineRange, _ := cmd.Flags().GetString("lines")
+		normalizedLines, err := normalizedReadLineRange(cmd, lineRange)
+		if err != nil {
+			return WithExitCode(ExitBadInvocation, err)
+		}
+		lineRange = normalizedLines
 		mapMode, _ := cmd.Flags().GetBool("map")
 		mapLevel, _ := cmd.Flags().GetString("level")
 		mapKind, _ := cmd.Flags().GetString("kind")
 		mapEngine, _ := cmd.Flags().GetString("map-engine")
+		budget, _ := cmd.Flags().GetInt("budget")
+		fullMode, _ := cmd.Flags().GetBool("full")
 
 		opts := &ghxlib.ReadOpts{
 			Grep:      grepPattern,
@@ -118,10 +157,12 @@ var readCmd = &cobra.Command{
 			MapLevel:  mapLevel,
 			MapKind:   mapKind,
 			MapEngine: mapEngine,
+			Budget:    budget,
+			FullMode:  fullMode,
 		}
 		results, err := ghxlib.Read(args[0], args[1:], opts)
 		if err != nil {
-			return err
+			return WithExitCode(ExitUpstreamFailure, err)
 		}
 
 		// Show glob summary when matches were truncated
@@ -177,6 +218,9 @@ var readCmd = &cobra.Command{
 					fmt.Printf("%s%d: %s\n", prefix, hit.LineNum, hit.Line)
 				}
 			} else if len(r.MapLines) > 0 {
+				if r.BudgetedMap {
+					fmt.Println(readBudgetHint(r.Path, r.ByteSize))
+				}
 				for _, line := range r.MapLines {
 					fmt.Println(line)
 				}
@@ -205,40 +249,62 @@ var readCmd = &cobra.Command{
 func init() {
 	readCmd.Flags().String("grep", "", "Filter output to matching lines")
 	readCmd.Flags().String("lines", "", "Extract specific line range (e.g., 42-80)")
+	readCmd.Flags().Int("start", 0, "Hidden alias for --lines START-END")
+	readCmd.Flags().Int("end", 0, "Hidden alias for --lines START-END")
+	readCmd.Flags().Int("offset", 0, "Hidden alias for --lines START-END")
+	readCmd.Flags().Int("limit", 0, "Hidden alias for --lines START-END")
 	readCmd.Flags().Bool("map", false, "Structural signatures only")
 	readCmd.Flags().String("level", "compact", "Map detail level: outline|minimal|compact|standard")
 	readCmd.Flags().String("kind", "", "Map symbol kind filter: func|type|import|const|var|package")
 	readCmd.Flags().String("map-engine", "auto", "Map engine: auto|regex|tree-sitter")
+	readCmd.Flags().Int("budget", 12000, "Approximate output budget in characters before structural fallback")
+	readCmd.Flags().Bool("full", false, "Show complete file contents without budget fallback")
+	_ = readCmd.Flags().MarkHidden("start")
+	_ = readCmd.Flags().MarkHidden("end")
+	_ = readCmd.Flags().MarkHidden("offset")
+	_ = readCmd.Flags().MarkHidden("limit")
 }
 
 var searchCmd = &cobra.Command{
-	Use:   "search <query> [--limit N] [--full]",
+	Use:   "search [<owner/repo>] <query> [--limit N] [--full]",
 	Short: "Code search (AND matching, matching context)",
-	Args:  cobra.ExactArgs(1),
+	Example: `  ghx search gkoreli/ghx "func main" --lang go
+  ghx search "repo:gkoreli/ghx cobra.Command" --limit 10
+  ghx search gkoreli/ghx "SetFlagErrorFunc" --glob "internal/**/*.go"`,
+	SuggestFor: []string{"find"},
+	Args:       cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		limit, _ := cmd.Flags().GetInt("limit")
 		fullMode, _ := cmd.Flags().GetBool("full")
+		budget, _ := cmd.Flags().GetInt("budget")
+		lang, _ := cmd.Flags().GetString("lang")
+		glob, _ := cmd.Flags().GetString("glob")
+		query := buildSearchQuery(args, lang, glob)
 
-		result, err := ghxlib.Search(args[0], ghxlib.SearchOpts{
+		result, err := ghxlib.Search(query, ghxlib.SearchOpts{
 			Limit:    limit,
 			FullMode: fullMode,
+			Budget:   budget,
 		})
 		if err != nil {
-			return err
+			return WithExitCode(ExitUpstreamFailure, err)
 		}
 
 		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
 		if result.Incomplete {
-			fmt.Println("⚠ Results may be incomplete (query timed out)")
+			fmt.Println("Results may be incomplete (query timed out)")
 		}
 
 		if len(result.Matches) == 0 {
 			fmt.Println("→ To search repos by topic, use: ghx repos \"<query>\"")
-			os.Exit(1)
+			return WithExitCode(ExitNoResults, fmt.Errorf("no code results for %q", query))
 		}
 
 		for _, m := range result.Matches {
 			fmt.Printf("%s %s: %s\n", m.Repo, m.Path, m.Fragment)
+		}
+		if result.Truncated {
+			fmt.Println("→ output truncated by --budget; narrow with --lang/--glob or use --full.")
 		}
 		return nil
 	},
@@ -247,12 +313,59 @@ var searchCmd = &cobra.Command{
 func init() {
 	searchCmd.Flags().IntP("limit", "l", 30, "Number of results")
 	searchCmd.Flags().Bool("full", false, "Show complete fragments without truncation")
+	searchCmd.Flags().Int("budget", 12000, "Approximate output budget in characters")
+	searchCmd.Flags().String("lang", "", "Limit repo-first search by language")
+	searchCmd.Flags().String("glob", "", "Limit repo-first search by path glob")
+}
+
+var grepCmd = &cobra.Command{
+	Use:   "grep <owner/repo> <pattern>",
+	Short: "Search a repo with grep-like flag names",
+	Example: `  ghx grep gkoreli/ghx "func main"
+  ghx grep gkoreli/ghx "cobra.Command" --path internal/cli
+  ghx grep gkoreli/ghx "RunE" --glob "internal/**/*.go" --limit 10`,
+	SuggestFor: []string{"rg"},
+	Args:       cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		glob, _ := cmd.Flags().GetString("glob")
+		path, _ := cmd.Flags().GetString("path")
+		limit, _ := cmd.Flags().GetInt("limit")
+		budget, _ := cmd.Flags().GetInt("budget")
+		query := buildGrepQuery(args[0], args[1], glob, path)
+		result, err := ghxlib.Search(query, ghxlib.SearchOpts{
+			Limit:  limit,
+			Budget: budget,
+		})
+		if err != nil {
+			return WithExitCode(ExitUpstreamFailure, err)
+		}
+		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
+		if len(result.Matches) == 0 {
+			return WithExitCode(ExitNoResults, fmt.Errorf("no grep results for %q in %s", args[1], args[0]))
+		}
+		for _, m := range result.Matches {
+			fmt.Printf("%s %s: %s\n", m.Repo, m.Path, m.Fragment)
+		}
+		if result.Truncated {
+			fmt.Println("→ output truncated by --budget; narrow with --path/--glob or use --limit.")
+		}
+		return nil
+	},
+}
+
+func init() {
+	grepCmd.Flags().String("glob", "", "Limit matches by path glob")
+	grepCmd.Flags().String("path", "", "Limit matches to paths containing this value")
+	grepCmd.Flags().IntP("limit", "l", 30, "Number of results")
+	grepCmd.Flags().Int("budget", 12000, "Approximate output budget in characters")
 }
 
 var treeCmd = &cobra.Command{
 	Use:   "tree <owner/repo> [path]",
 	Short: "Full recursive tree listing",
-	Args:  cobra.RangeArgs(1, 2),
+	Example: `  ghx tree gkoreli/ghx
+  ghx tree gkoreli/ghx internal --depth 2`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := ""
 		if len(args) > 1 {
@@ -264,7 +377,7 @@ var treeCmd = &cobra.Command{
 		}
 		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
-			return err
+			return WithExitCode(ExitUpstreamFailure, err)
 		}
 		for _, entry := range results {
 			fmt.Println(entry)
@@ -280,6 +393,9 @@ func init() {
 var skillCmd = &cobra.Command{
 	Use:   "skill",
 	Short: "Output SKILL.md for agent context injection",
+	Example: `  ghx skill
+  ghx skill --mcp
+  ghx skill --recon`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		mcpFlag, _ := cmd.Flags().GetBool("mcp")
 		reconFlag, _ := cmd.Flags().GetBool("recon")
@@ -299,6 +415,8 @@ var skillCmd = &cobra.Command{
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version",
+	Example: `  ghx version
+  ghx --version`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("ghx %s\n", VERSION)
 	},
@@ -307,6 +425,251 @@ var versionCmd = &cobra.Command{
 func init() {
 	skillCmd.Flags().Bool("mcp", false, "Output MCP skill instead of CLI skill")
 	skillCmd.Flags().Bool("recon", false, "Output recon sidecar skill instead of CLI skill")
+}
+
+func teachingFlagError(cmd *cobra.Command, err error) error {
+	flag := unknownFlagName(err.Error())
+	if flag == "" {
+		return WithExitCode(ExitBadInvocation, err)
+	}
+	nearest := nearestFlag(cmd, flag)
+	if alias := knownFlagAlias(flag); alias != "" {
+		nearest = alias
+	}
+	if nearest == "" {
+		return WithExitCode(ExitBadInvocation, fmt.Errorf("unknown flag --%s; run %s --help for valid flags", flag, cmd.CommandPath()))
+	}
+	return WithExitCode(ExitBadInvocation, fmt.Errorf("unknown flag --%s; use %s, e.g. %s", flag, nearest, exampleForFlag(cmd, nearest)))
+}
+
+func unknownFlagName(message string) string {
+	const prefix = "unknown flag: --"
+	if !strings.Contains(message, prefix) {
+		return ""
+	}
+	flag := strings.TrimPrefix(message[strings.Index(message, prefix):], prefix)
+	if i := strings.IndexAny(flag, " =\n\t"); i >= 0 {
+		flag = flag[:i]
+	}
+	return strings.TrimSpace(flag)
+}
+
+func nearestFlag(cmd *cobra.Command, unknown string) string {
+	type candidate struct {
+		name     string
+		distance int
+	}
+	var candidates []candidate
+	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Hidden {
+			return
+		}
+		candidates = append(candidates, candidate{name: flag.Name, distance: levenshtein(unknown, flag.Name)})
+	})
+	cmd.InheritedFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Hidden {
+			return
+		}
+		candidates = append(candidates, candidate{name: flag.Name, distance: levenshtein(unknown, flag.Name)})
+	})
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].distance == candidates[j].distance {
+			return candidates[i].name < candidates[j].name
+		}
+		return candidates[i].distance < candidates[j].distance
+	})
+	if candidates[0].distance > 4 {
+		return ""
+	}
+	return "--" + candidates[0].name
+}
+
+func knownFlagAlias(flag string) string {
+	switch flag {
+	case "start", "end", "offset", "limit", "line-range":
+		return "--lines START-END"
+	case "type":
+		return "--lang LANG"
+	default:
+		return ""
+	}
+}
+
+func exampleForFlag(cmd *cobra.Command, nearest string) string {
+	switch nearest {
+	case "--lines START-END":
+		return "ghx read owner/repo main.go --lines 40-80"
+	case "--lang LANG":
+		return "ghx search owner/repo \"middleware\" --lang go"
+	case "--glob":
+		return "ghx search owner/repo \"middleware\" --glob \"**/*.go\""
+	case "--budget":
+		return cmd.CommandPath() + " --budget 20000"
+	case "--full":
+		return cmd.CommandPath() + " --full"
+	default:
+		return cmd.CommandPath() + " " + nearest
+	}
+}
+
+func levenshtein(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr := make([]int, len(b)+1)
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			curr[j] = min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost)
+		}
+		prev = curr
+	}
+	return prev[len(b)]
+}
+
+func normalizedReadLineRange(cmd *cobra.Command, lineRange string) (string, error) {
+	start, _ := cmd.Flags().GetInt("start")
+	end, _ := cmd.Flags().GetInt("end")
+	offset, _ := cmd.Flags().GetInt("offset")
+	limit, _ := cmd.Flags().GetInt("limit")
+	hasStart := cmd.Flags().Changed("start") || cmd.Flags().Changed("end")
+	hasOffset := cmd.Flags().Changed("offset") || cmd.Flags().Changed("limit")
+	if lineRange != "" && (hasStart || hasOffset) {
+		return "", fmt.Errorf("--lines cannot be combined with hidden aliases --start/--end or --offset/--limit")
+	}
+	if hasStart && hasOffset {
+		return "", fmt.Errorf("--start/--end cannot be combined with --offset/--limit")
+	}
+	if hasStart {
+		if start <= 0 || end <= 0 || end < start {
+			return "", fmt.Errorf("use --lines START-END, e.g. ghx read owner/repo main.go --lines 40-80")
+		}
+		return fmt.Sprintf("%d-%d", start, end), nil
+	}
+	if hasOffset {
+		if offset <= 0 || limit <= 0 {
+			return "", fmt.Errorf("use --lines START-END, e.g. ghx read owner/repo main.go --lines 40-80")
+		}
+		return fmt.Sprintf("%d-%d", offset, offset+limit-1), nil
+	}
+	return lineRange, nil
+}
+
+func readBudgetHint(path string, byteSize int) string {
+	return fmt.Sprintf("# budget: %s is %d bytes; showing structural map. Use --lines START-END, --grep PATTERN, --map, or --full to read more.", path, byteSize)
+}
+
+func printCompactExplore(repo string, path string, result *ghxlib.ExploreResult, budget int) {
+	if budget <= 0 {
+		budget = 12000
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "description: %s\n", result.Description)
+	fmt.Fprintf(&b, "branch: %s\n", result.Branch)
+	label := "files"
+	if path != "" {
+		label = "entries"
+	}
+	fmt.Fprintf(&b, "%s:\n", label)
+	limit := len(result.Files)
+	if limit > 40 {
+		limit = 40
+	}
+	for _, e := range result.Files[:limit] {
+		suffix := ""
+		if e.Type == "tree" {
+			suffix = "/"
+		}
+		fmt.Fprintf(&b, "  %s%s\n", e.Name, suffix)
+	}
+	if len(result.Files) > limit {
+		fmt.Fprintf(&b, "  ... %d more entries; use --full to show all.\n", len(result.Files)-limit)
+	}
+	if path == "" {
+		readme := compactReadme(result.Readme, budget-b.Len())
+		if readme == "" {
+			readme = "(no README.md)"
+		}
+		fmt.Fprintf(&b, "\nREADME summary:\n%s\n", readme)
+	}
+	if b.Len() > budget {
+		out := b.String()[:budget]
+		fmt.Print(out)
+		fmt.Println("\n→ output truncated by --budget; use --full to show complete explore output.")
+		return
+	}
+	fmt.Print(b.String())
+}
+
+func compactReadme(readme string, budget int) string {
+	readme = strings.TrimSpace(readme)
+	if readme == "" {
+		return ""
+	}
+	lines := strings.Split(readme, "\n")
+	var kept []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" && len(kept) > 0 {
+			continue
+		}
+		kept = append(kept, line)
+		if len(strings.Join(kept, "\n")) >= budget || len(kept) >= 80 {
+			break
+		}
+	}
+	out := strings.Join(kept, "\n")
+	if len(out) > budget && budget > 0 {
+		out = out[:budget]
+	}
+	if len(lines) > len(kept) || len(readme) > len(out) {
+		out += "\n→ README truncated by --budget; use --full to show complete README."
+	}
+	return out
+}
+
+func buildSearchQuery(args []string, lang string, glob string) string {
+	if len(args) == 1 {
+		return appendSearchQualifiers(args[0], lang, glob)
+	}
+	query := fmt.Sprintf("%s repo:%s", quoteCodeSearchTerm(args[1]), args[0])
+	return appendSearchQualifiers(query, lang, glob)
+}
+
+func buildGrepQuery(repo string, pattern string, glob string, path string) string {
+	query := fmt.Sprintf("%s repo:%s", quoteCodeSearchTerm(pattern), repo)
+	if path != "" {
+		query += " path:" + path
+	}
+	return appendSearchQualifiers(query, "", glob)
+}
+
+func appendSearchQualifiers(query string, lang string, glob string) string {
+	if lang != "" {
+		query += " language:" + lang
+	}
+	if glob != "" {
+		query += " path:" + glob
+	}
+	return query
+}
+
+func quoteCodeSearchTerm(term string) string {
+	if strings.HasPrefix(term, "\"") && strings.HasSuffix(term, "\"") {
+		return term
+	}
+	if strings.ContainsAny(term, " \t(){}[]:") {
+		return strconv.Quote(term)
+	}
+	return term
 }
 
 var SkillMD string

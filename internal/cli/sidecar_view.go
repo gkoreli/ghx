@@ -47,6 +47,9 @@ otel-desktop-viewer UI.
 
 With no argument it views the most recent session. Requires otel-desktop-viewer
 on PATH (go install github.com/CtrlSpice/otel-desktop-viewer@latest).`,
+	Example: `  ghx sidecar view
+  ghx sidecar view --list
+  ghx sidecar view hono-hono --port 9000`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")

@@ -28,6 +28,7 @@ type FileResult struct {
 	MapEngine   string      `json:"mapEngine,omitempty"`   // mapper engine used when Map is true
 	MapWarnings []string    `json:"mapWarnings,omitempty"` // fallback/quality warnings from mapper
 	GlobPattern string      `json:"globPattern,omitempty"` // the glob that matched this file (empty for exact paths)
+	BudgetedMap bool        `json:"budgetedMap,omitempty"` // true when content exceeded Budget and was replaced by a structural map
 }
 
 type ReadOpts struct {
@@ -37,6 +38,8 @@ type ReadOpts struct {
 	MapLevel  string // map detail level: outline|minimal|compact|standard
 	MapKind   string // map symbol kind filter: func|type|import|const|var
 	MapEngine string // map engine: auto|regex|tree-sitter
+	Budget    int    // output budget in characters before structural fallback
+	FullMode  bool   // disable budget fallback and return complete content
 
 	// Output: populated after Read() when globs are used
 	Globs []GlobResult
@@ -184,26 +187,33 @@ func parseFileResponse(path string, data interface{}, globPattern string, opts *
 	} else if opts.Lines != "" {
 		result.Content = extractLines(text, opts.Lines)
 	} else if opts.Map {
-		mapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{
-			Engine: mapengine.Engine(opts.MapEngine),
-			Level:  mapengine.Level(opts.MapLevel),
-			Kind:   mapengine.Kind(opts.MapKind),
-		})
-		result.MapLines = mapResult.Lines
-		result.MapChars = mapResult.OriginalChars
-		result.MapEngine = string(mapResult.Engine)
-		result.MapWarnings = mapResult.Warnings
-		if err != nil {
-			result.MapWarnings = append(result.MapWarnings, err.Error())
-		}
-		if len(result.MapLines) == 0 {
-			result.MapLines = []string{"(no signatures detected)"}
-		}
+		applyMapResult(&result, path, text, opts)
+	} else if opts.Budget > 0 && !opts.FullMode && len(text) > opts.Budget {
+		applyMapResult(&result, path, text, opts)
+		result.BudgetedMap = true
 	} else {
 		result.Content = text
 	}
 
 	return result
+}
+
+func applyMapResult(result *FileResult, path string, text string, opts *ReadOpts) {
+	mapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{
+		Engine: mapengine.Engine(opts.MapEngine),
+		Level:  mapengine.Level(opts.MapLevel),
+		Kind:   mapengine.Kind(opts.MapKind),
+	})
+	result.MapLines = mapResult.Lines
+	result.MapChars = mapResult.OriginalChars
+	result.MapEngine = string(mapResult.Engine)
+	result.MapWarnings = mapResult.Warnings
+	if err != nil {
+		result.MapWarnings = append(result.MapWarnings, err.Error())
+	}
+	if len(result.MapLines) == 0 {
+		result.MapLines = []string{"(no signatures detected)"}
+	}
 }
 
 // normalizeBRE converts BRE-style escaped metacharacters to their ERE equivalents.

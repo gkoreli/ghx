@@ -18,11 +18,13 @@ type SearchResult struct {
 	Total      int           `json:"total"`
 	Incomplete bool          `json:"incomplete"`
 	Matches    []SearchMatch `json:"matches"`
+	Truncated  bool          `json:"truncated"`
 }
 
 type SearchOpts struct {
 	Limit    int  // default 30, max 100
 	FullMode bool // disable 200-char truncation
+	Budget   int  // approximate output budget in characters
 }
 
 // Search searches code via GitHub REST API with text_matches.
@@ -62,6 +64,8 @@ func Search(query string, opts SearchOpts) (*SearchResult, error) {
 	}
 
 	matches := make([]SearchMatch, 0, len(resp.Items))
+	usedBudget := 0
+	truncated := false
 	for _, item := range resp.Items {
 		fragment := ""
 		if len(item.TextMatches) > 0 {
@@ -74,16 +78,26 @@ func Search(query string, opts SearchOpts) (*SearchResult, error) {
 			}
 		}
 
-		matches = append(matches, SearchMatch{
+		match := SearchMatch{
 			Repo:     item.Repository.FullName,
 			Path:     item.Path,
 			Fragment: fragment,
-		})
+		}
+		if opts.Budget > 0 && !opts.FullMode {
+			nextSize := len(match.Repo) + len(match.Path) + len(match.Fragment) + 4
+			if usedBudget > 0 && usedBudget+nextSize > opts.Budget {
+				truncated = true
+				break
+			}
+			usedBudget += nextSize
+		}
+		matches = append(matches, match)
 	}
 
 	return &SearchResult{
 		Total:      resp.TotalCount,
 		Incomplete: resp.IncompleteResults,
 		Matches:    matches,
+		Truncated:  truncated || len(matches) < len(resp.Items),
 	}, nil
 }

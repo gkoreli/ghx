@@ -271,9 +271,12 @@ matching files. Same command, always useful output.
 ### Commands
 
 ```bash
-ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
-ghx explore <owner/repo> <path>             # Subdirectory listing
-ghx read <owner/repo> <f1> [f2] [f3]        # Read 1-10 files (GraphQL batching)
+ghx --version                               # Health check / installed version
+ghx explore <owner/repo>                    # Compact branch + tree + README orientation
+ghx explore <owner/repo> --full             # Complete legacy explore output
+ghx explore <owner/repo> <path>             # Compact subdirectory listing
+ghx explore <owner/repo> --budget 20000     # Raise the compact output budget
+ghx read <owner/repo> <f1> [f2] [f3]        # Read 1-10 files (large files map first)
 ghx read <owner/repo> <dir>                 # Directory path → returns file listing
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns with structural map
 ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map (~92% token reduction)
@@ -281,12 +284,28 @@ ghx read <owner/repo> --map --kind func <f> # Map only functions/methods
 ghx read <owner/repo> --map --kind type <f> # Map only types/structs/interfaces
 ghx read <owner/repo> --map --level minimal <f> # Symbol names only (e.g. UserService.GetUser)
 ghx read <owner/repo> --grep "pat" <f>      # Matching lines only (ERE regex, 2 lines context)
-ghx read <owner/repo> --lines 42-80 <f>     # Specific line range
-ghx search "<query>"                        # Code search with matching lines
+ghx read <owner/repo> --lines 42-80 <f>     # Canonical line range
+ghx read <owner/repo> <f> --full            # Force complete content past the budget
+ghx search <owner/repo> "func main"         # Repo-first code search, auto-quotes the query
+ghx search <owner/repo> "router" --lang go  # Narrow by language
+ghx search <owner/repo> "router" --glob "**/*.go" # Narrow by path glob
+ghx search "repo:gkoreli/ghx cobra.Command" # Advanced raw GitHub code-search query
+ghx grep <owner/repo> "func main"           # Grep-like repo search
+ghx grep <owner/repo> "RunE" --path internal/cli --limit 10
 ghx repos "<query>"                         # Repo search with README preview
 ghx tree <owner/repo> [path]                # Full recursive tree
 ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels
 ```
+
+`read` documents one range spelling, `--lines START-END`, but accepts hidden
+agent-guess aliases: `--start N --end M` and `--offset N --limit M`. They work
+for frictionless retries and stay out of help so examples converge on one form.
+
+Output-heavy commands share `--budget CHARS` and `--full`: defaults are bounded,
+and truncation text names the exact flag to lift or narrow the result.
+
+Exit codes are semantic: `0` ok, `1` no results, `2` bad invocation, `3`
+upstream/API failure.
 
 ### Codemode
 
