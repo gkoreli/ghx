@@ -78,3 +78,9 @@ _Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
 "<question>"` directly or wire `ghx serve --recon` into your agent's MCP
 config and let the recon skill do the talking._
+
+## 2026-07-06 stale ACP session ID kills the ask — breaking
+- Attempted: `sidecar ask --repo gin-gonic/gin` (default session `gin-gonic-gin`, which existed from an earlier smoke with a prior binary).
+- Ground: the runtime resumed the persisted ACP session ID from meta.json; the adapter answered `Resource not found` (-32002) and the whole ask failed. A LoadSession miss must fall back to a fresh ACP session (the ledger already carries cross-turn context) — resume is an optimization, never a hard dependency (ADR-0027 spirit).
+- Trace: ~/.ghx/sessions/gin-gonic-gin/ (meta.json holds the dead session ID).
+- Disposition: open — fix: on LoadSession "Resource not found", create a new session, keep the named-session ledger context, log the downgrade.
