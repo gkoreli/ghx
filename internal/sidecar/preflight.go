@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -223,6 +224,100 @@ func parseGhxVersion(out string) string {
 		return ""
 	}
 	return fields[1]
+}
+
+// liveTurnPrompt is the trivial one-shot prompt the --live doctor check sends.
+// It asks for a single word and no tools, so a healthy agent completes fast; a
+// broken one still exercises the full initialize → session/new → prompt path
+// (where auth actually resolves — the acp-handshake check stops at initialize).
+const liveTurnPrompt = "Reply with exactly the single word: ok. Do not use any tools."
+
+// liveTurnTimeout bounds the live probe. Generous enough for a real model
+// round-trip (including cold npx adapter start) but bounded so a hung auth or
+// endpoint fails loudly instead of hanging the doctor.
+const liveTurnTimeout = 90 * time.Second
+
+// CheckLiveTurn runs a full real prompt turn through the configured agent and
+// reports the outcome (ADR-0033 D4). Unlike acp-handshake (ACP initialize
+// only), it creates a session and sends one prompt in a neutral temp workspace
+// with stderr captured, so setups where initialize passes but a real turn dies
+// — the exact shape of the founder's laptop failure, typically auth resolving
+// lazily at prompt time — are diagnosed with the failing STAGE and the agent's
+// stderr tail. It is slow and side-effecting (spawns the real agent), so it is
+// opt-in via `ghx sidecar doctor --live`, never part of the parallel preflight.
+func CheckLiveTurn(ctx context.Context, cfg Config) PreflightCheck {
+	const name = "live-turn"
+	remediation := "The agent completes ACP initialize but a real prompt turn fails. This is usually an\n" +
+		"auth/endpoint problem that resolves only at prompt time (missing or wrong ANTHROPIC_*,\n" +
+		"CLAUDE_CODE_USE_BEDROCK/_USE_VERTEX, or AWS/Vertex credentials), a proxy/CA issue, or an\n" +
+		"adapter/Node version mismatch. Read the stderr tail above and the failing stage; if ghx runs\n" +
+		"under the daemon, note the daemon inherited the FIRST caller's environment (ghx sidecar\n" +
+		"daemon --stop, then re-run from a shell with the right env)."
+
+	dir, err := os.MkdirTemp("", "ghx-doctor-live-")
+	if err != nil {
+		return PreflightCheck{Name: name, Passed: false, Message: "cannot create probe workspace: " + err.Error()}
+	}
+	defer os.RemoveAll(dir)
+	stderrLog := filepath.Join(dir, AgentStderrLogName)
+
+	tctx, cancel := context.WithTimeout(ctx, liveTurnTimeout)
+	defer cancel()
+
+	persona := BuildPersonaSystemPrompt()
+	result, _, runErr := runTurnWithOptions(tctx, RunTurnOptions{
+		AgentCmd:        cfg.AgentCmd,
+		Prompt:          liveTurnPrompt,
+		Cwd:             dir,
+		Env:             cfg.Env,
+		SessionMeta:     BuildSessionMeta(persona, "cheap", cfg.Model, false),
+		AgentStderrPath: stderrLog,
+		LivenessTimeout: liveTurnTimeout,
+	})
+	if runErr != nil {
+		msg := fmt.Sprintf("agent %q failed at stage %q: %s", cfg.AgentCmd, liveTurnStage(runErr), runErr.Error())
+		if tail := AgentStderrTail(stderrLog); tail != "" {
+			msg += "\n    agent stderr (tail):\n" + indentLines(tail, "      ")
+		}
+		return PreflightCheck{Name: name, Passed: false, Message: msg, Remediation: remediation}
+	}
+	reply := strings.TrimSpace(result.FullText)
+	if reply == "" {
+		return PreflightCheck{
+			Name:        name,
+			Passed:      false,
+			Message:     fmt.Sprintf("agent %q completed a turn but produced NO output — the silent-failure shape (ADR-0033)", cfg.AgentCmd),
+			Remediation: remediation,
+		}
+	}
+	if len(reply) > 80 {
+		reply = reply[:80] + "…"
+	}
+	return PreflightCheck{Name: name, Passed: true, Message: fmt.Sprintf("agent %q completed a real prompt turn (replied %q)", cfg.AgentCmd, reply)}
+}
+
+// liveTurnStage extracts the failing ACP stage from a RunTurnWithOptions error
+// whose message is prefixed by the stage ("acp initialize:", "acp new
+// session:", "acp prompt:", …). Returns "spawn/setup" when no stage prefix is
+// present.
+func liveTurnStage(err error) string {
+	msg := err.Error()
+	for _, stage := range []string{"acp initialize", "acp new session", "acp load session", "acp prompt"} {
+		if strings.Contains(msg, stage) {
+			return stage
+		}
+	}
+	return "spawn/setup"
+}
+
+// indentLines prefixes every line of s with prefix, for nested diagnostic
+// blocks under a preflight check.
+func indentLines(s, prefix string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func checkGhxBinary(ctx context.Context) PreflightCheck {

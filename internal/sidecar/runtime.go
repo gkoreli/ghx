@@ -101,6 +101,64 @@ func persistACPSessionID(sessionsDir string, meta *SessionMeta, newSessionID str
 	}
 }
 
+// resolveSessionWorkspace resolves the ACP session working directory for a turn
+// (ADR-0033 D1). Precedence: an explicit Config.Cwd override (evals pin a
+// checkout) > the persisted SessionMeta.Cwd (resume determinism) > the neutral,
+// ghx-owned session directory (SessionWorkspace). The neutral default is not a
+// git repo and holds no host .claude settings, so the spawned agent adopts no
+// foreign, nondeterministic workspace regardless of where ghx was invoked.
+func resolveSessionWorkspace(cfg Config, sessionsDir, session string, meta *SessionMeta) string {
+	if cfg.Cwd != "" {
+		return cfg.Cwd
+	}
+	if meta != nil && meta.Cwd != "" {
+		return meta.Cwd
+	}
+	return SessionWorkspace(sessionsDir, session)
+}
+
+// recordAgentProvenance persists the resolved workspace, the agent command, the
+// creating process's spawn cwd, and the agent-relevant env-var NAMES into the
+// session metadata (ADR-0033 D5) so an environment-specific failure is
+// diagnosable from committed artifacts. It writes only when something changed,
+// so it is cheap on follow-up turns, and backfills legacy sessions on their
+// next turn. Non-fatal — provenance is diagnostic, never load-bearing for the
+// turn. spawnCwd is captured once, when the fields are first written, so it
+// records the environment that actually created the (possibly warm, daemon-
+// owned) session rather than every later caller's directory.
+func recordAgentProvenance(sessionsDir string, meta *SessionMeta, workspace, agentCmd string) {
+	if meta == nil {
+		return
+	}
+	changed := false
+	if meta.Cwd != workspace {
+		meta.Cwd = workspace
+		changed = true
+	}
+	if meta.AgentCmd != agentCmd {
+		meta.AgentCmd = agentCmd
+		changed = true
+	}
+	if meta.SpawnCwd == "" {
+		if wd, err := os.Getwd(); err == nil {
+			meta.SpawnCwd = wd
+			changed = true
+		}
+	}
+	if meta.AgentEnv == nil {
+		if present := PresentAgentEnv(nil); present != nil {
+			meta.AgentEnv = present
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if saveErr := SaveMeta(sessionsDir, *meta); saveErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to save agent provenance: %v\n", saveErr)
+	}
+}
+
 // runTurnWithStaleSessionFallback runs the first turn for Ask. If a persisted
 // ACP session ID is stale (LoadSession Resource not found), it creates exactly
 // one fresh ACP session and continues the same prompt; the durable ledger
@@ -247,6 +305,19 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if err != nil {
 		return nil, nil, fmt.Errorf("read meta: %w", err)
 	}
+
+	// Resolve the neutral, deterministic ACP session workspace and record agent
+	// provenance (ADR-0033 D1/D5). Precedence: an explicit Config.Cwd override
+	// (evals pin a checkout) > the persisted SessionMeta.Cwd (resume
+	// determinism) > the ghx-owned session directory (default). Persist the
+	// resolution plus the agent command, this process's spawn cwd, and the
+	// agent-relevant env-var NAMES so an environment-specific failure is
+	// diagnosable from committed artifacts. This runs on the creating turn
+	// (session just initialized above) and backfills legacy sessions on write.
+	workspace := resolveSessionWorkspace(cfg, sessionsDir, req.Session, meta)
+	stderrLog := AgentStderrLogPath(sessionsDir, req.Session)
+	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd)
+
 	ledger, err := LoadLedger(sessionsDir, req.Session)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read ledger: %w", err)
@@ -301,13 +372,14 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	startedAt := time.Now().UTC()
 
 	turnResult, newSessionID, err := runTurnWithStaleSessionFallback(ctx, runner, RunTurnOptions{
-		AgentCmd:       cfg.AgentCmd,
-		ACPSessionID:   acpSessionID,
-		Prompt:         prompt,
-		Cwd:            cfg.Cwd,
-		Env:            cfg.Env,
-		SessionMeta:    sessionMeta,
-		ReportSinkPath: sinkPath,
+		AgentCmd:        cfg.AgentCmd,
+		ACPSessionID:    acpSessionID,
+		Prompt:          prompt,
+		Cwd:             workspace,
+		Env:             cfg.Env,
+		SessionMeta:     sessionMeta,
+		ReportSinkPath:  sinkPath,
+		AgentStderrPath: stderrLog,
 	})
 
 	// Resume-as-recovery (ADR-0027 D1): the adapter's max-turns error is a
@@ -330,13 +402,14 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 				AgentCmd:     cfg.AgentCmd,
 				ACPSessionID: resumeID,
 				Prompt:       turnCapWrapUpPrompt,
-				Cwd:          cfg.Cwd,
+				Cwd:          workspace,
 				Env:          cfg.Env,
 				// SessionMeta rides along so the resumed wrap-up runs under
 				// the same persona/allowlist/budgets/model pin as the turn it
 				// recovers, plus the eval raw-SDK audit channel (ADR-0020.2).
-				SessionMeta:    sessionMeta,
-				ReportSinkPath: sinkPath,
+				SessionMeta:     sessionMeta,
+				ReportSinkPath:  sinkPath,
+				AgentStderrPath: stderrLog,
 			})
 			// Fold the wrap-up's telemetry in on both outcomes: even a failed
 			// wrap-up attempt is part of this turn's auditable activity (D3).
@@ -394,7 +467,12 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			EndedAt:        time.Now().UTC(),
 			CaptureContent: cfg.CaptureContent(),
 		})
-		return nil, &turnResult, fmt.Errorf("run turn: %w", err)
+		// Surface the failure loudly (ADR-0033 D3): splice the tail of the
+		// per-session adapter stderr log and its path into the error the CLI
+		// caller sees, with the workspace-trust hint when that warning is
+		// present. DiagnoseTurnError preserves the errors.Is chain so the
+		// ADR-0027 resilience classifiers still match.
+		return nil, &turnResult, DiagnoseTurnError(fmt.Errorf("run turn: %w", err), stderrLog)
 	}
 
 	// Completion gate (ADR-0021 D2): prefer the strictly-validated sink report,
@@ -426,12 +504,13 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			AgentCmd:     cfg.AgentCmd,
 			ACPSessionID: retrySessionID,
 			Prompt:       reportRetryPromptWithError(reason),
-			Cwd:          cfg.Cwd,
+			Cwd:          workspace,
 			Env:          cfg.Env,
 			// SessionMeta rides along so the resumed retry stays fully
 			// steered and keeps the eval raw-SDK audit channel (ADR-0020.2).
-			SessionMeta:    sessionMeta,
-			ReportSinkPath: sinkPath,
+			SessionMeta:     sessionMeta,
+			ReportSinkPath:  sinkPath,
+			AgentStderrPath: stderrLog,
 		})
 		if retryErr != nil {
 			break
@@ -446,9 +525,13 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if report != nil {
 		turnResult.ReportCoerced = coerced
 	} else {
-		report = &Report{
-			Answer: "WARN: sidecar did not emit a <ghx-report> block — raw output was produced but no structured report was found.",
-		}
+		// No report after the bounded retries. This is the exact silent-failure
+		// shape the founder hit (empty turn, err == nil). Promote it from mute to
+		// loud (ADR-0033 D3): always point the caller at the per-session adapter
+		// stderr log, and when the adapter reported the untrusted-workspace
+		// warning, carry its remedy. The turn genuinely completed, so this stays
+		// a report (artifacts and contract preserved), never a dead end.
+		report = &Report{Answer: warnNoReportAnswer(stderrLog)}
 	}
 
 	// Persist the ACP session ID so the next turn can resume. Runs after

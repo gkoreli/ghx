@@ -169,7 +169,8 @@ diff and refuses to overwrite without `--force`.
 ### 3. Verify
 
 ```bash
-ghx sidecar doctor    # checks token, network, ghx binary, and the ACP handshake
+ghx sidecar doctor           # token, network, ghx binary, ACP handshake, report sink
+ghx sidecar doctor --live    # also run a REAL one-prompt turn through the agent
 ```
 
 `doctor` fails fast with an actionable message if the configured agent cannot
@@ -178,6 +179,13 @@ replay them. It also verifies that the binary serving the report-sink MCP server
 matches the running ghx version — a stale sink binary would silently degrade
 structured reports to a text fallback, so doctor fails loudly with fix-it text
 instead.
+
+`--live` goes one step further: the plain handshake stops at ACP *initialize*,
+which passes even on setups where a real turn then fails (auth typically
+resolves lazily at prompt time). `--live` runs a full `session/new` + one tiny
+prompt turn through the configured agent and, on failure, prints the failing
+**stage** and the agent's **stderr tail** — the deterministic way to diagnose a
+machine where `ask` produces nothing (see [ADR-0033](docs/adr/0033-sidecar-out-of-box-agent-config.md)).
 
 ### 4. Ask
 
@@ -225,6 +233,33 @@ recipe into one command: it starts the viewer and loads the session's
 most recent session. Everything it shows is the same file you can read by hand.
 Requires the viewer on PATH:
 `go install github.com/CtrlSpice/otel-desktop-viewer@latest`.
+
+### Troubleshooting
+
+If an `ask` returns nothing useful, the failure is recorded, not lost
+([ADR-0033](docs/adr/0033-sidecar-out-of-box-agent-config.md)):
+
+- **Per-session agent stderr.** The spawned agent's stderr is captured to
+  `~/.ghx/sessions/<session>/agent-stderr.log`. Under the always-on daemon it
+  no longer disappears into the daemon's own log. A failed turn also splices the
+  tail of that log — and its path — into the error the CLI prints.
+- **Reproduce it deterministically.** `ghx sidecar doctor --live` runs a real
+  prompt turn and prints the failing stage plus the agent's stderr, even when the
+  plain handshake passes.
+- **`this workspace has not been trusted`.** ghx already runs the agent in a
+  neutral, ghx-owned session directory (outside any git repo, no `.claude`
+  settings), so this warning should not appear. If it still does, the agent
+  picked up a git-repo workspace: trust it once (run the agent interactively
+  there and accept the dialog) or set
+  `projects["<dir>"].hasTrustDialogAccepted: true` in `~/.claude.json`. ghx will
+  never write that file for you.
+- **"works from shell A, fails from shell B".** The daemon auto-spawns from the
+  **first** caller's environment, so a missing auth/proxy env var is a common
+  cause. `ghx sidecar sessions show <session>` lists the agent command, the
+  session's spawn cwd, and the **names** (never values) of the agent-relevant
+  environment variables present when it was created. If the wrong env was
+  inherited, `ghx sidecar daemon --stop` and re-run `ask` from a shell that has
+  the right variables.
 
 ### Delegating from a main agent (MCP)
 

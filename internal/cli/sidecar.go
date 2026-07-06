@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
@@ -207,8 +208,10 @@ after ` + "`config init`" + ` and whenever an ` + "`ask`" + ` fails to set up �
 agent command and config path first, so a failing check is immediately
 attributable, and ends with the ~/.ghx artifacts location. Exit code 3 if any
 check fails.`,
-	Example: `  ghx sidecar doctor`,
+	Example: `  ghx sidecar doctor
+  ghx sidecar doctor --live`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		live, _ := cmd.Flags().GetBool("live")
 		cfg := sidecar.LoadConfig()
 		// Show what the config resolves to before probing it, so a failing
 		// handshake or sink check is immediately attributable.
@@ -216,9 +219,20 @@ check fails.`,
 		fmt.Printf("Config file:   %s\n\n", sidecar.ConfigFilePath())
 		result := sidecar.RunPreflight(context.Background(), VERSION)
 		fmt.Print(sidecar.FormatPreflight(result))
+		passed := result.Passed
+		// --live runs a real session/new + one-prompt turn through the
+		// configured agent (ADR-0033 D4): the deterministic diagnosis for
+		// setups where ACP initialize passes but a real turn dies (auth,
+		// proxy/CA, adapter/Node skew). Slow and side-effecting, hence opt-in.
+		if live {
+			fmt.Println("\nRunning live prompt turn (this spawns the real agent)…")
+			liveCheck := sidecar.CheckLiveTurn(context.Background(), cfg)
+			fmt.Print(sidecar.FormatPreflight(sidecar.PreflightResult{Passed: liveCheck.Passed, Checks: []sidecar.PreflightCheck{liveCheck}}))
+			passed = passed && liveCheck.Passed
+		}
 		fmt.Println()
 		fmt.Println(sidecar.ArtifactsHint(cfg))
-		if !result.Passed {
+		if !passed {
 			return WithExitCode(ExitUpstreamFailure, fmt.Errorf("sidecar preflight failed"))
 		}
 		return nil
@@ -294,6 +308,22 @@ name is the slug from ` + "`list`" + ` (a repo slug or a question-derived slug).
 		fmt.Printf("updated:   %s\n", meta.UpdatedAt)
 		if meta.ACPSessionID != "" {
 			fmt.Printf("acp-id:    %s\n", meta.ACPSessionID)
+		}
+		// Agent provenance (ADR-0033 D5): the workspace, the agent command, the
+		// spawn cwd (the daemon inherits the first caller's), and the NAMES of
+		// agent-relevant env vars present at creation — never values. This is
+		// the surface for diagnosing an environment-specific failure.
+		if meta.AgentCmd != "" {
+			fmt.Printf("agent:     %s\n", meta.AgentCmd)
+		}
+		if meta.Cwd != "" {
+			fmt.Printf("cwd:       %s\n", meta.Cwd)
+		}
+		if meta.SpawnCwd != "" {
+			fmt.Printf("spawn-cwd: %s\n", meta.SpawnCwd)
+		}
+		if len(meta.AgentEnv) > 0 {
+			fmt.Printf("agent-env: %s\n", strings.Join(meta.AgentEnv, ", "))
 		}
 
 		reports, err := sidecar.ListReports(cfg.SessionsDir, name)
@@ -505,6 +535,8 @@ func init() {
 	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (optional scope; omit for cross-GitHub discovery)")
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
+
+	sidecarDoctorCmd.Flags().Bool("live", false, "Also run a real one-prompt turn through the agent (spawns it; diagnoses failures ACP initialize misses)")
 
 	sidecarReportSinkCmd.Flags().String("out", "", "Path to write the accepted report JSON (required)")
 	sidecarDaemonCmd.Flags().Bool("background", false, "Internal: daemon was auto-spawned in the background")

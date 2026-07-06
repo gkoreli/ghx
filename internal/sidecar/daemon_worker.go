@@ -92,6 +92,7 @@ type AgentWorker struct {
 	cancelTurnCtx context.CancelCauseFunc
 	cmd           *exec.Cmd
 	stdin         io.Closer
+	stderrCloser  io.Closer
 	conn          *acp.ClientSideConnection
 	client        *denyClient
 	loadSession   bool
@@ -165,7 +166,13 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 	if opts.Env != nil {
 		cmd.Env = opts.Env
 	}
-	cmd.Stderr = os.Stderr
+	// Tee the warm adapter's stderr to the session's agent-stderr.log
+	// (ADR-0033 D2). The warm worker owns one long-lived adapter process per
+	// session, so the log path is stable for the worker's life and bound once
+	// here; the closer is released in shutdownLocked.
+	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath)
+	w.stderrCloser = stderrCloser
+	cmd.Stderr = stderrW
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
@@ -338,10 +345,14 @@ func (w *AgentWorker) shutdownLocked() {
 	if w.cmd != nil && w.stdin != nil {
 		ShutdownAgent(w.cmd, w.stdin)
 	}
+	if w.stderrCloser != nil {
+		w.stderrCloser.Close()
+	}
 	w.turnCtx = nil
 	w.cancelTurnCtx = nil
 	w.cmd = nil
 	w.stdin = nil
+	w.stderrCloser = nil
 	w.conn = nil
 	w.client = nil
 	w.sessionID = ""

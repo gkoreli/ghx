@@ -162,6 +162,7 @@ func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	m.captureSink(params.McpServers)
+	logEvent("NEW_CWD", params.Cwd)
 	logMeta("NEW_META", params.Meta)
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
 }
@@ -175,6 +176,7 @@ func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) 
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	m.captureSink(params.McpServers)
 	logEvent("LOAD", string(params.SessionId))
+	logEvent("LOAD_CWD", params.Cwd)
 	logMeta("LOAD_META", params.Meta)
 	if os.Getenv("MOCKAGENT_REJECT_UNKNOWN_LOAD") == "1" && string(params.SessionId) != "mock-sess-1" {
 		return acp.LoadSessionResponse{}, &acp.RequestError{Code: -32002, Message: "Resource not found"}
@@ -333,6 +335,13 @@ func main() {
 	if err := json.Unmarshal(data, &replies); err != nil || len(replies) == 0 {
 		fmt.Fprintf(os.Stderr, "mockagent: invalid script: %v\n", err)
 		os.Exit(2)
+	}
+
+	// MOCKAGENT_STDERR, when set, is written to stderr at startup so tests can
+	// exercise the per-session agent stderr capture and diagnostics
+	// (ADR-0033 D2/D3) — e.g. injecting the workspace-trust warning line.
+	if s := os.Getenv("MOCKAGENT_STDERR"); s != "" {
+		fmt.Fprintln(os.Stderr, s)
 	}
 
 	agent := &mockAgent{replies: replies, state: statePath}

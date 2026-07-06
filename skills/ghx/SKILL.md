@@ -62,10 +62,13 @@ The commands above are the *tool layer* — you drive exploration yourself. The 
 ```bash
 ghx sidecar config init --claude-acp   # write ~/.ghx/config.json (pinned Claude ACP adapter; needs Node/npx + a Claude login)
 ghx sidecar doctor                     # verify token, network, ghx binary, ACP handshake, report sink (exit 3 if any check fails)
+ghx sidecar doctor --live              # also run a real one-prompt turn; on failure prints the failing stage + agent stderr
 ghx sidecar ask --repo hono/hono "How is middleware chained, and which files define it?"
 ```
 
 `config init` without `--claude-acp` auto-detects any ACP-capable agent already on PATH.
+
+The sidecar runs the agent in a neutral, ghx-owned session directory (not your repo), so turns are deterministic regardless of where you invoke `ghx`. If an `ask` returns nothing, the agent's stderr is captured at `~/.ghx/sessions/<name>/agent-stderr.log`, a failed turn splices that tail into the CLI error, and `doctor --live` reproduces the failure with its stage. `sessions show <name>` records the agent command, spawn cwd, and agent-relevant env-var names (never values) so an environment-specific failure is diagnosable.
 
 ### Ask
 
