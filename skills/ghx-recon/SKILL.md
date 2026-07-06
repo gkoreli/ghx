@@ -22,11 +22,14 @@ explore a remote repo step-by-step yourself — delegate the whole question.
 
 Give --repo when you know the repo. Omit it for discovery questions —
 "which repos/libraries do X" — and the sidecar sweeps GitHub, verifies
-top candidates, and ranks them. Follow-ups reuse the same session
-automatically (repo-derived, or question-derived — the chosen name is
-printed), so ask them freely — they are faster and context-aware. Use
---session <name> only to keep parallel investigation threads apart. Add
---json for the full structured report wrapped as {report, artifacts}.
+top candidates, and ranks them. Normally omit --session: the daemon routes
+each ask to the right investigation session. Explicit --session wins; a
+repo or owner/repo mention routes to the repo-slug session; otherwise ghx
+checks for a warm continuation, then ledger overlap, then creates a new
+question-derived discovery session. The chosen route is printed as
+"session: <name> (routed: <rule>)". Use --session <name> only to pin a
+specific thread. Add --json for the full structured report wrapped as
+{report, artifacts}.
 
 ## Asking well
 
@@ -43,6 +46,8 @@ One investigation per question; follow up rather than bundling.
 
 Every response ends with "artifacts: <session dir> (trace <id>)" — the
 on-disk audit trail (traces, logs, reports) backing the report.
+If a turn lands in the wrong session, correct it with
+`ghx sidecar sessions reroute <session> <turn> <dest>`.
 
 Trust verified claims; treat inferred/unverified ones as leads. A fresh
 question takes tens of seconds; session follow-ups are faster.

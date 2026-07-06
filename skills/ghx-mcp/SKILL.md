@@ -14,11 +14,15 @@ metadata:
 
 > **This is the power-user/tool layer** — for driving exploration yourself.
 > If you just want answers about a repo, connect to `ghx serve --recon`
-> instead: it exposes a single `recon(question, repo, session?)` tool that
-> returns an evidence report, and `ghx skill --recon` prints its concise
-> skill. You then need zero knowledge of the tools below. (One-time setup for
-> the recon tool: `ghx sidecar config init --claude-acp` then
-> `ghx sidecar doctor`; artifacts land under `~/.ghx/sessions/`.)
+> instead: it exposes a single `recon(question, repo?, session?)` tool that
+> returns an evidence report. Normally omit `session`: the daemon routes each
+> question, reports `session: <name> (routed: <rule>)`, and keeps follow-ups on
+> the right investigation thread. Use `session` only as an advanced pin.
+> `ghx skill --recon` prints the concise skill. You then need zero knowledge of
+> the tools below. (One-time setup for the recon tool:
+> `ghx sidecar config init --claude-acp` then `ghx sidecar doctor`; artifacts
+> land under `~/.ghx/sessions/`; fix a mis-route with
+> `ghx sidecar sessions reroute <session> <turn> <dest>`.)
 
 7 tools for GitHub exploration (served by `ghx serve`). 5 direct tools for simple queries. 1 `code` meta-tool for complex multi-step operations. 1 `search_tools` for discovery.
 
