@@ -185,4 +185,5 @@ If a worker cannot cite files, commands, or outputs, treat its answer as a hypot
 - Give Codex concrete repository evidence in the prompt: paths, lines, `rg` hits, failing commands, or ADR references.
 - Prefer file references and command summaries over pasted large snippets.
 - Do not send secrets or environment values into worker prompts.
+- Every research/investigation delegation prompt must pin the tool economy explicitly: "use text-only tools (WebSearch/WebFetch/curl/gh); do NOT use browser automation, Chrome tools, or screenshots — this is a text research task." Workers left unpinned have burned tokens screenshotting documentation pages (incident 2026-07-05; rule canonical in `AGENTS.md` "Tool Economy").
 - After Codex returns, Fable must verify compatibility with `AGENTS.md`, current code, and the actual test results.

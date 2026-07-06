@@ -188,6 +188,23 @@ attribution and stewardship (MIT in, MIT out). Binding rules:
 - **Be vocal about inspiration.** Credit upstream projects in docs and
   README; hiding influences is both bad stewardship and bad marketing.
 
+## Tool Economy
+
+Match the tool to the information, not to what is available (incident:
+2026-07-05, a delegated research agent browsed documentation via Chrome
+screenshots when WebSearch existed — pure token waste).
+
+- Research, docs reading, and web lookups use **text-only tools**:
+  WebSearch, WebFetch, `curl`, `gh`, package registries, or ghx itself.
+- Browser automation / computer use (screenshots, rendered pages) is
+  reserved for tasks that inherently need a rendered UI — visual
+  verification, form flows, UI debugging. Never for reading text.
+- Prefer the cheapest faithful representation at every step: structured
+  output over prose, `--json` over scraping, a targeted range read over a
+  whole file, a grep over a directory listing.
+- The optimization target is signal per token (NORTH_STAR "The Moat") —
+  it applies to how agents work on this repo, not only to the product.
+
 ## Commits
 
 Commit at meaningful checkpoints, not only at the end of a task. A meaningful
