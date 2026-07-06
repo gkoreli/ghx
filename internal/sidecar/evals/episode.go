@@ -35,7 +35,10 @@ type Task struct {
 	Repo   string     `json:"repo"`
 	Turns  []string   `json:"turns"`
 	Checks TaskChecks `json:"checks"`
-	Tags   []string   `json:"tags,omitempty"`
+	// Judge holds the task author's optional task-specific judge criteria
+	// (ADR-0023.1 D3). Combined with the fixed core rubric at eval time.
+	Judge *JudgeRubric `json:"judge,omitempty"`
+	Tags  []string     `json:"tags,omitempty"`
 }
 
 // Validate reports whether the task is well-formed enough to score, and
@@ -78,6 +81,9 @@ func (t Task) Validate() error {
 				}
 			}
 		}
+	}
+	if err := t.Judge.validate(t.ID); err != nil {
+		return err
 	}
 	return nil
 }

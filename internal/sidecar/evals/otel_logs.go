@@ -21,6 +21,8 @@ const (
 	genAIEvaluationResultEvent          = "gen_ai.evaluation.result"
 	genAIEvaluationNameAttribute        = "gen_ai.evaluation.name"
 	genAIEvaluationScoreValueAttribute  = "gen_ai.evaluation.score.value"
+	genAIEvaluationExplanationAttribute = "gen_ai.evaluation.explanation"
+	genAIRequestModelAttribute          = "gen_ai.request.model"
 )
 
 type genAIMessage struct {
