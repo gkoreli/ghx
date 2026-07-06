@@ -67,6 +67,7 @@ you can `ls` and `jq`:
     traces.jsonl              # OTel spans: session → turn → each tool call
     logs.jsonl                # GenAI-convention message-content records
     metrics.jsonl             # duration, token, report-size metrics
+    tier-decisions.jsonl      # escalation policy evaluation per turn (which tier, why)
 ```
 
 Sessions persist, so follow-up questions on the same repo are cheaper and
@@ -342,6 +343,14 @@ query). If a tool binary is missing, ghx prints the install hint and exits
 before any clone; answers fall back to remote Tier-1 evidence — never a
 silent or faked Tier-2 result. `astgrep` follows grep parity: exit `1` with
 `[]` means the search ran and found nothing.
+
+When the sidecar answers a question, escalation is never vibes: every turn
+gets a declarative policy evaluation
+([ADR-0024.2](docs/adr/0024.2-escalation-policy.md)) over named observables
+(question shape, exhausted searches, low-confidence remote-only reports),
+recorded as a `ghx.tier.decision` span in `traces.jsonl`, a line in the
+session's `tier-decisions.jsonl`, and `tierUsed` provenance on the report —
+so "which tier answered and why" is always recomputable from the artifacts.
 
 ### Codemode
 

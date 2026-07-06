@@ -360,6 +360,10 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		if meta != nil {
 			turn = meta.TurnCount + 1
 		}
+		// Failed turns still record a tier decision (ADR-0024.2 D3): the
+		// policy evaluation over whatever activity was observed is part of
+		// the failure's audit trail. No report exists, so no backfill.
+		tierDecision := recordTierDecision(sessionsDir, req, turn, &turnResult, nil)
 		turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
 			SessionsDir:    sessionsDir,
 			Session:        req.Session,
@@ -368,6 +372,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			Turn:           turn,
 			Question:       req.Question,
 			Result:         turnResult,
+			TierDecision:   tierDecision,
 			Error:          err.Error(),
 			StartedAt:      startedAt,
 			EndedAt:        time.Now().UTC(),
@@ -438,6 +443,14 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if meta != nil {
 		turn = meta.TurnCount + 1
 	}
+
+	// Tier decision (ADR-0024.2): evaluate the pre-registered escalation
+	// policy over this turn's recorded observables, backfill report tierUsed
+	// provenance when the agent did not declare it, and persist the decision
+	// to tier-decisions.jsonl. Runs before ledger/report persistence so the
+	// backfilled provenance lands in every artifact.
+	tierDecision := recordTierDecision(sessionsDir, req, turn, &turnResult, report)
+
 	UpdateLedgerFromTurn(ledger, meta, report, turnResult.ToolTraces, turn)
 	if saveErr := SaveLedger(sessionsDir, req.Session, ledger); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save ledger: %v\n", saveErr)
@@ -470,6 +483,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		Question:       req.Question,
 		Result:         turnResult,
 		Report:         report,
+		TierDecision:   tierDecision,
 		StartedAt:      startedAt,
 		EndedAt:        time.Now().UTC(),
 		CaptureContent: cfg.CaptureContent(),
