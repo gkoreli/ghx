@@ -1,10 +1,233 @@
-# ghx — GitHub Code Exploration for AI Agents
+# ghx — the code-reconnaissance sidecar for AI agents
 
-One command does what takes 3-5 API calls. Batch file reads, code maps, search — all via `gh` CLI. Write JS programs that compose operations in one round-trip.
+**Expensive main agents shouldn't burn frontier tokens on tree/grep/read loops.**
+ghx is a cheap, specialized **sidecar agent** that a main agent delegates code
+reconnaissance to. Ask it a repo question in plain English; it explores GitHub
+under the hood and hands back a **schema-validated evidence report** — claims
+with citations, the commands it ran, and what it could not confirm — while every
+artifact of the investigation lands on disk under `~/.ghx/sessions/` for you or
+the parent agent to inspect.
 
-## Why
+This is the first public cut of the **Agent Sidecar Framework**: a main agent
+delegates a whole competence domain to a proficient specialist instead of loading
+that domain's tools and doctrine into its own context. ghx is the proof — the
+code-reconnaissance sidecar — and, underneath it, a sharp standalone GitHub
+exploration CLI. The durable vision lives in
+[docs/NORTH_STAR.md](docs/NORTH_STAR.md).
 
-An agent wants to understand `packages/shadcn/src/utils/` in [shadcn-ui/ui](https://github.com/shadcn-ui/ui):
+> ghx is two products in one binary: a **sidecar brain** you delegate to (this
+> README's lead), and the **classic exploration CLI** it drives under the hood
+> (documented in full further down). Use whichever fits; they share one core.
+
+## Why a sidecar
+
+When a main agent stops mid-task to explore code, the real cost is not the API
+calls — it is the context. Exploration output floods the window, the agent loses
+the thread of the engineering work, and the ~400 lines of tool doctrine it needs
+to explore well are dead weight it re-pays every session. Frontier-model tokens
+spent on map/grep/read loops are pure waste when a cheap specialist can do the
+same reconnaissance better.
+
+Delegating to a sidecar removes all of it from the main agent's context. The main
+agent gets measurably better at *its own* objective **and** receives better
+exploration answers than it would have produced itself — both, not one. The
+sidecar owns the CLI grammar, the search gotchas, the map-before-read discipline,
+and the backend escalation; the outside world learns one sentence: *ask ghx repo
+questions in English, get evidence reports back.*
+
+## What comes back: an evidence contract, not a string
+
+The sidecar's answer is a validated report, not free text. The report schema is
+enforced at submission time — the sidecar agent cannot finish a turn until it has
+produced a schema-valid report, and it sees the exact validation error if it
+fails (see [ADR-0021](docs/adr/0021-report-contract-enforcement.md)). Fields:
+
+- **answer** — the direct answer to your question.
+- **verified** — claims the sidecar backed with evidence it actually read.
+- **relevantFiles / evidence** — where to look, and what each source showed.
+- **uncertainty / nextReads** — what it could not confirm, and what to read next.
+- **commandsRun** — the exact ghx commands behind the claims.
+
+Because the trace is visible, the sidecar can be opinionated: every claim is
+auditable against the commands and files it cites.
+
+### Full visibility under `~/.ghx`
+
+`~/.ghx` is the product's root storage. Every question leaves a durable,
+inspectable trail in its session directory — no framework, no service, just files
+you can `ls` and `jq`:
+
+```
+~/.ghx/
+  config.json
+  sessions/<owner-repo>/
+    meta.json                 # session identity
+    ledger                    # evidence accumulated across questions
+    reports/<turn>-<ts>.json  # the accepted report of every question
+    traces.jsonl              # OTel spans: session → turn → each tool call
+    logs.jsonl                # GenAI-convention message-content records
+    metrics.jsonl             # duration, token, report-size metrics
+```
+
+Sessions persist, so follow-up questions on the same repo are cheaper and
+context-aware. The traces are **official OpenTelemetry** (OTLP/JSON, GenAI
+semantic conventions) — any industry tool consumes them in seconds, and
+`ghx sidecar view` (below) spawns a local trace UI over a session with one
+command. The runtime and the eval harness emit the *same* artifacts from the
+*same* code, so a real question and a benchmark episode are inspected the same
+way (see [ADR-0022](docs/adr/0022-shared-visibility-runtime.md)).
+
+## How this differs from other delegation
+
+Delegation between agents is now common; auditable delegation is not. We surveyed
+the field with the sidecar itself — six real investigations, one per framework,
+each with a committed report and OTel trail (see
+[ADR-0026](docs/adr/0026-prior-art-landscape.md)). The finding, stated carefully:
+
+> Across the frameworks examined, **delegation returns strings or transcripts;
+> none returns a schema-validated evidence contract** (claims with citations,
+> commands, uncertainty), and none gives the parent agent artifact-level
+> visibility it can read without the framework, an OTel audit trail of the
+> delegate, or persistent cross-question session memory it can inspect. Each
+> element exists somewhere in embryo; the *combination* — auditable, steerable,
+> persistent, evidence-bearing delegation as a product — had no found occupant.
+
+This claim is deliberately scoped: it is based on six repositories examined on one
+evening, the landscape moves monthly, and it is re-scanned on that cadence. We
+credit the prior art we learned from and, where useful, plan to absorb it (see
+the ADR's steal list and attributions).
+
+## How we know it works: pre-registered evals
+
+Quality is measured, not asserted. The methodology lives in `docs/evals/`:
+
+- **Pre-registered gates.** Correctness, evidence, compression, memory, and
+  safety thresholds are decided *before* a run; an under-sampled run self-labels
+  PRELIMINARY and cannot feed a go/no-go decision.
+- **Deterministic scoring.** Every score recomputes from committed episode
+  artifacts — no hidden state, no live model in the loop at scoring time.
+- **Independent cross-family audit.** A different model family (OpenAI Codex, run
+  read-only) adversarially recomputed **all 90 episode scores of the confirmatory
+  run exactly** and independently confirmed the gate outcomes — and logged the
+  provenance defects it found, which are tracked in the open. See
+  [the audit report](docs/evals/audit-2026-07-05-independent/REPORT.md).
+
+The committed verdict for the confirmatory run is **THESIS SUPPORTED**
+([verdict](docs/evals/gate-run-2026-07-05-confirmatory/verdict.md),
+[run dir](docs/evals/gate-run-2026-07-05-confirmatory/)). We link the verdicts
+rather than headline numbers; the numbers are read as a conservative floor and
+the artifacts are the proof either way. The honest negative that drove the fixes
+is kept alongside it at
+[docs/evals/gate-run-2026-07/](docs/evals/gate-run-2026-07/).
+
+## Sidecar quickstart
+
+### 1. Install
+
+```bash
+# Zero install — just run it
+npx @gkoreli/ghx sidecar doctor
+
+# Homebrew
+brew install gkoreli/tap/ghx
+
+# npm (global)
+npm install -g @gkoreli/ghx
+
+# Go
+go install github.com/gkoreli/ghx/v2/cmd/ghx@latest
+```
+
+The sidecar drives an ACP-capable agent under the hood, and it reads GitHub
+through the authenticated [gh CLI](https://cli.github.com/) (`gh auth login`).
+
+### 2. Configure the agent
+
+The sidecar speaks [Agent Client Protocol (ACP)](https://agentclientprotocol.com)
+to its underlying model. One command writes a working config using the
+[claude-agent-acp](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+adapter:
+
+```bash
+ghx sidecar config init --claude-acp    # writes ~/.ghx/config.json with the ACP adapter
+```
+
+> Setup is the hardest step, so this is designed to be one command. Without
+> `--claude-acp`, `config init` auto-detects any ACP-capable agent already on
+> your PATH; a bare `claude` binary does **not** speak ACP on stdio and is
+> rejected on purpose (it would hang every turn — see
+> [ADR-0019](docs/adr/0019-sidecar-adoption-zero-cli-surface.md) D4).
+
+### 3. Verify
+
+```bash
+ghx sidecar doctor    # checks token, network, ghx binary, and the ACP handshake
+```
+
+`doctor` fails fast with an actionable message if the configured agent cannot
+complete the ACP handshake, and it prints where session artifacts live and how to
+replay them.
+
+### 4. Ask
+
+```bash
+ghx sidecar ask --repo hono/hono "How does Hono implement middleware chaining, and which files define it?"
+```
+
+- `--repo owner/repo` is required — the sidecar is remote-first and
+  repo-explicit; it never guesses the repo.
+- `--session <name>` is optional (defaults to a repo slug, e.g. `hono-hono`); use
+  it to keep parallel investigation threads apart.
+- `--json` prints the full report struct; without it you get the answer plus
+  compact verified / relevant-files / uncertainty sections.
+- `--depth cheap|normal|deep` sets the command budget for deeper repos.
+
+Ask by stating the goal, not the steps. Follow-ups on the same repo reuse the
+session automatically and answer faster. A fresh question takes tens of seconds.
+
+### 5. Inspect
+
+```bash
+ghx sidecar sessions list                 # all sessions
+ghx sidecar sessions show <session>       # details + report history
+ghx sidecar sessions ledger <session>     # the accumulated evidence ledger
+ghx sidecar view [session]                # spawn a local trace UI over the session's artifacts
+```
+
+`ghx sidecar view` absorbs the
+[otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer) replay
+recipe into one command: it starts the viewer and loads the session's
+`traces.jsonl` for you. Everything it shows is the same file you can read by hand.
+
+### Delegating from a main agent (MCP)
+
+A main agent talks to the sidecar through a single MCP tool — one tool it cannot
+be tempted into step-driving:
+
+```bash
+ghx serve --recon     # exposes exactly one MCP tool: recon(question, repo, session?)
+```
+
+The recommended skill for agents is the concise recon skill (`ghx skill --recon`,
+≤ 30 lines: what the service is, how to phrase questions, what the report fields
+mean). The main agent needs **zero** knowledge of the ghx CLI grammar — that is
+the whole point ([ADR-0019](docs/adr/0019-sidecar-adoption-zero-cli-surface.md)).
+
+---
+
+# The classic ghx CLI (the tool layer)
+
+Under the sidecar brain is a sharp, standalone GitHub exploration CLI — the #1
+direct tool for reconnaissance, and the eval baseline the sidecar is measured
+against. Use it directly when you want to drive exploration yourself. **One
+command does what takes 3–5 API calls.** Batch file reads, structural code maps,
+and search — all via the `gh` CLI, or composed in a single round-trip with
+codemode.
+
+### Why it's faster than raw `gh`
+
+An agent wants to understand `packages/shadcn/src/utils/` in
+[shadcn-ui/ui](https://github.com/shadcn-ui/ui):
 
 **With `gh` CLI** — 4 turns, 4 API calls, reads 3 full files (3,761 tokens), sees 3 of 34 files:
 ```
@@ -20,7 +243,10 @@ ghx read shadcn-ui/ui packages/shadcn/src/utils                     → director
 ghx read shadcn-ui/ui "packages/shadcn/src/utils/*.ts" --map        → signatures of 10 files (2,859 tokens)
 ```
 
-Same token budget. The `gh` agent read 3 full files. The ghx agent saw the structure of 10 — imports, exports, function signatures — and knows which ones to drill into. Pass a file, get content. Pass a directory, get a listing. Pass a glob, get matching files. Same command, always useful output.
+Same token budget. The `gh` agent read 3 full files; the ghx agent saw the
+structure of 10 — imports, exports, signatures — and knows which to drill into.
+Pass a file, get content. Pass a directory, get a listing. Pass a glob, get
+matching files. Same command, always useful output.
 
 | Tool | Files per call | Matching context | Programmable | Dependencies |
 |------|---------------|-----------------|-------------|-------------|
@@ -28,48 +254,12 @@ Same token budget. The `gh` agent read 3 full files. The ghx agent saw the struc
 | `gh` CLI | 1 | No | No (exact phrase, base64, no README) | `gh` |
 | **ghx** | **1-10 (batch)** | **Yes** | **Yes (codemode)** | **`gh`** |
 
-## Install
-
-```bash
-# Zero install — just run it
-npx @gkoreli/ghx explore vercel/next.js
-
-# Homebrew
-brew install gkoreli/tap/ghx
-
-# npm (global)
-npm install -g @gkoreli/ghx
-
-# Go
-go install github.com/gkoreli/ghx/v2/cmd/ghx@latest
-
-# Build from source
-go build -o ghx ./cmd/ghx
-```
-
-Requires: [gh CLI](https://cli.github.com/) authenticated (`gh auth login`).
-
-### MCP Config (Claude Desktop, Cursor)
-
-```json
-{
-  "mcpServers": {
-    "ghx": {
-      "command": "npx",
-      "args": ["@gkoreli/ghx", "serve"]
-    }
-  }
-}
-```
-
-No install step — npx downloads and caches the binary on first run.
-
-## Commands
+### Commands
 
 ```bash
 ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
 ghx explore <owner/repo> <path>             # Subdirectory listing
-ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files (GraphQL batching)
+ghx read <owner/repo> <f1> [f2] [f3]        # Read 1-10 files (GraphQL batching)
 ghx read <owner/repo> <dir>                 # Directory path → returns file listing
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns with structural map
 ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map (~92% token reduction)
@@ -84,9 +274,11 @@ ghx tree <owner/repo> [path]                # Full recursive tree
 ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels
 ```
 
-## Codemode
+### Codemode
 
-Write JS programs that compose multiple operations in one round-trip. All `codemode.*` calls are synchronous — no `await`. Full TypeScript type stubs with return types are injected into the sandbox.
+Write JS programs that compose multiple operations in one round-trip. All
+`codemode.*` calls are synchronous — no `await`. Full TypeScript type stubs with
+return types are injected into the sandbox.
 
 ```bash
 # What branch is this repo on?
@@ -112,75 +304,120 @@ declare const codemode: {
 }
 ```
 
-## MCP Server
+### MCP server (direct tools)
 
 ```bash
 ghx serve                                   # stdio (for Claude, Cursor, etc.)
-ghx serve --http :8080                       # HTTP transport
+ghx serve --http :8080                      # HTTP transport
+ghx serve --recon                           # single-tool sidecar mode (see above)
 ```
 
-7 tools: `explore`, `read`, `search`, `repos`, `tree`, `code` (meta-tool), `search_tools`.
+Default mode exposes 7 tools: `explore`, `read`, `search`, `repos`, `tree`,
+`code` (meta-tool), `search_tools`.
 
-## Agent Integration
+```json
+{
+  "mcpServers": {
+    "ghx": {
+      "command": "npx",
+      "args": ["@gkoreli/ghx", "serve"]
+    }
+  }
+}
+```
+
+No install step — npx downloads and caches the binary on first run.
+
+### Agent skills
 
 ```bash
-ghx skill                                   # CLI skill (for SKILL.md injection)
-ghx skill --mcp                             # MCP skill
+ghx skill                                   # classic CLI skill (power-user path)
+ghx skill --mcp                             # classic MCP skill
+ghx skill --recon                           # concise recon skill (recommended for agents)
 ```
-
-Install the skills into Claude Code with the skills CLI:
 
 ```bash
 npx skills add gkoreli/ghx -g -a claude-code --skill ghx -y
 npx skills add gkoreli/ghx -g -a claude-code --skill ghx-mcp -y
 ```
 
-Designed for eager context injection via spawn hooks — the agent always has the latest ghx knowledge without loading it mid-conversation.
+## How it works
 
-## How It Was Built
+The classic CLI wraps `gh` with GraphQL batching. `repos` and `explore` batch
+search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up
+to 10 files in 1 call — and if a path is a directory, returns its listing instead
+of "not found" (via `... on Tree` inline fragments, zero extra API calls). Glob
+patterns (`src/**/*.ts`) auto-expand via tree fetch +
+[doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls.
+`--grep` uses ERE regex with BRE normalization. `search` hits REST
+`/search/code` with `text_matches` for matching context.
 
-23 agent sessions, 2,500+ conversation turns, 3 rewrites, 12 ADRs. The full story: **[Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)**
+`--map` runs a dedicated parser engine on the fetched content — no extra API
+calls. Engine selection is automatic: **Go** uses `go/ast`; **TypeScript,
+JavaScript, Python, Rust** use tree-sitter (via
+[gotreesitter](https://github.com/odvcencio/gotreesitter), capturing class/impl
+methods regex cannot reach); everything else falls back to regex. Codemode runs
+JS in a [goja](https://github.com/nicholasgasior/goja) sandbox with esbuild
+TypeScript transpilation (max 20 tool calls, 64 KB code limit).
 
-## How It Works
-
-Wraps `gh` CLI with GraphQL batching. `repos` and `explore` batch search + metadata + README into 1 call. `read` uses GraphQL aliases to fetch up to 10 files in 1 call — and if a path is a directory, returns its file listing instead of "not found" (via `... on Tree` inline fragments in the same query, zero extra API calls). Glob patterns (`src/**/*.ts`) auto-expand via tree fetch + [doublestar](https://github.com/bmatcuk/doublestar) matching in 2 API calls. `--grep` uses ERE regex with BRE normalization (agents trained on `grep` write `\|` for alternation — both styles work). `search` hits REST `/search/code` with `text_matches` for matching context and 200-char token protection.
-
-`--map` runs a dedicated parser engine on the fetched content — no extra API calls. Engine selection is automatic: **Go** uses `go/ast` (top-level declarations only, full multi-line signatures, generics preserved), **TypeScript, JavaScript, Python, Rust** use [gotreesitter](https://github.com/odvcencio/gotreesitter) (captures class/impl methods that regex cannot reach), everything else falls back to regex. Methods carry a parent reference (`UserService.GetUser`) visible at `--level minimal`. `--map-engine regex` forces the fallback for any file.
-
-Codemode runs JS in a [goja](https://github.com/nicholasgasior/goja) sandbox with esbuild TypeScript transpilation. Tools are injected as synchronous functions on a `codemode` global object. Max 20 tool calls per execution, 64KB code size limit.
+The **sidecar** wraps that same core behind an ACP agent that owns the
+exploration doctrine, validates its own evidence report before finishing
+([ADR-0021](docs/adr/0021-report-contract-enforcement.md)), and emits OTel
+artifacts to `~/.ghx/sessions/`
+([ADR-0022](docs/adr/0022-shared-visibility-runtime.md)).
 
 ## Architecture
 
 ```
 cmd/ghx/             — binary entrypoint
-internal/cli/        — CLI frontend (cobra) + MCP server commands
+internal/cli/        — CLI frontend (cobra) + MCP + sidecar commands
 internal/ghx/        — core library (Explore, Read, Search, Repos, Tree, Glob)
 internal/codemode/   — JS executor (goja sandbox, TS transpilation, type generation)
-internal/mapengine/  — parser-backed map engine (GoAST, TreeSitter, Regex, engine routing)
-internal/sidecar/    — sidecar runtime, sessions, reports, and ACP integration
-skills/             — CLI and MCP agent skills, embedded into binary via go:embed
+internal/mapengine/  — parser-backed map engine (GoAST, TreeSitter, Regex, routing)
+internal/sidecar/    — sidecar runtime, sessions, report contract, ACP integration
+internal/sidecar/telemetry/ — shared OTel emission (runtime + evals, one capability)
+skills/              — CLI, MCP, and recon agent skills, embedded via go:embed
 ```
 
-See [docs/adr/](docs/adr/) for architectural decisions.
+Core capabilities live in `internal/ghx`; every frontend — CLI, MCP, codemode,
+sidecar — wraps the same core. See [docs/adr/](docs/adr/) for the full decision
+record and [docs/NORTH_STAR.md](docs/NORTH_STAR.md) for direction.
 
-## Built on Open Source, Openly
+## Built on open source, openly
 
-ghx exists because exploring open source for ideas is where good products
-come from — "good artists copy, great artists steal," and we steal in the
-Picasso sense: openly, with attribution, and with stewardship for future
-generations. The rule we build by: **use official standards and existing
-open-source tools, libraries, and ideas first; hand-roll a framework or
-format only when nothing existing serves the need or the vision.** Agent
-traces are official OTel (OTLP/JSON) so any industry tool — Jaeger,
-[otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer),
-the collector — consumes them in seconds; parsing rides on
-[gotreesitter](https://github.com/odvcencio/gotreesitter) and `go/ast`;
-globbing on [doublestar](https://github.com/bmatcuk/doublestar); codemode on
-[goja](https://github.com/nicholasgasior/goja). Where we do build new —
-ghx itself, the Agent Sidecar Framework — it is because the thing did not
-exist, and it is inspired loudly by what does (tools like
+ghx exists because exploring open source for ideas is where good products come
+from — "good artists copy, great artists steal," and we steal in the Picasso
+sense: openly, with attribution, and with stewardship for future generations. The
+rule we build by: **use official standards and existing open-source tools,
+libraries, and ideas first; hand-roll a framework or format only when nothing
+existing serves the need or the vision.**
+
+- Agent traces are **official OpenTelemetry** (OTLP/JSON) following the
+  [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
+  so any industry tool — Jaeger, the collector,
+  [otel-desktop-viewer](https://github.com/CtrlSpice/otel-desktop-viewer) — reads
+  them in seconds.
+- The sidecar speaks the [Agent Client Protocol (ACP)](https://agentclientprotocol.com)
+  via the
+  [claude-agent-acp](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+  adapter — an adopted boundary, never a bespoke wire protocol.
+- Parsing rides on [gotreesitter](https://github.com/odvcencio/gotreesitter) and
+  `go/ast`; globbing on [doublestar](https://github.com/bmatcuk/doublestar);
+  codemode on [goja](https://github.com/nicholasgasior/goja); GitHub access on
+  the [gh CLI](https://cli.github.com/).
+
+Where we do build new — ghx and the Agent Sidecar Framework — it is because the
+thing did not exist, and it is inspired loudly by what does. Tools like
 [codemap](https://github.com/JordanCoin/codemap) shape where the sidecar's
-internal toolbox goes next). MIT in, MIT out.
+internal toolbox goes next; the plan is to absorb the best of them as internal
+tools rather than compete on CLI surface (see
+[ADR-0026](docs/adr/0026-prior-art-landscape.md)). MIT in, MIT out.
+
+## How it was built
+
+23 agent sessions, 2,500+ conversation turns, 3 rewrites, and a growing ADR
+record. The origin story:
+**[Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)**
 
 ## License
 
