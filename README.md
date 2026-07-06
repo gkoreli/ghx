@@ -302,6 +302,11 @@ ghx grep <owner/repo> "RunE" --path internal/cli --limit 10
 ghx repos "<query>"                         # Repo search with README preview
 ghx tree <owner/repo> [path]                # Full recursive tree
 ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels
+ghx tier2 codemap <owner/repo>              # Tier-2 cross-file structure as JSON (local snapshot)
+ghx tier2 codemap <owner/repo> --context    # Agent-ready JSON context envelope (--compact to shrink)
+ghx tier2 codemap <owner/repo> --importers <file>  # Who imports a file (fan-in; needs ast-grep)
+ghx tier2 codemap <owner/repo> --deps       # Dependency flow / import chains (needs ast-grep)
+ghx tier2 codemap <owner/repo> --ref v1.2.3 --sparse src  # Pin a ref, materialize only candidate paths
 ```
 
 `read` documents one range spelling, `--lines START-END`, but accepts hidden
@@ -313,6 +318,18 @@ and truncation text names the exact flag to lift or narrow the result.
 
 Exit codes are semantic: `0` ok, `1` no results, `2` bad invocation, `3`
 upstream/API failure.
+
+`tier2` commands are the deliberate, visible escalation beyond remote evidence
+([ADR-0024.1](docs/adr/0024.1-escalation-tiers-decision.md)): the repo/ref is
+resolved to a commit SHA and materialized as a shallow, blobless, read-only
+snapshot cached by SHA under `~/.ghx/cache/tier2` (`$GHX_HOME` respected;
+5 GiB budget, 30-day LRU/TTL eviction). Snapshot provenance — repo, ref,
+resolved SHA, clone strategy, cache hit — prints to stderr before any tool
+output, and structural tools run as absorbed subprocesses under canonical
+backend IDs (`local:codemap` first, via
+[codemap](https://github.com/JordanCoin/codemap), MIT). If the tool binary is
+missing, ghx prints the install hint and answers fall back to remote Tier-1
+evidence — never a silent or faked Tier-2 result.
 
 ### Codemode
 
@@ -448,9 +465,9 @@ existing serves the need or the vision.**
 
 Where we do build new — ghx and the Agent Sidecar Framework — it is because the
 thing did not exist, and it is inspired loudly by what does. Tools like
-[codemap](https://github.com/JordanCoin/codemap) shape where the sidecar's
-internal toolbox goes next; the plan is to absorb the best of them as internal
-tools rather than compete on CLI surface (see
+[codemap](https://github.com/JordanCoin/codemap) shape the sidecar's internal
+toolbox: `ghx tier2 codemap` absorbs it as an internal subprocess backend
+(`local:codemap`, ADR-0024.1) rather than competing on CLI surface (see
 [ADR-0026](docs/adr/0026-prior-art-landscape.md)). MIT in, MIT out.
 
 ## How it was built
