@@ -99,6 +99,9 @@ type TurnRecord struct {
 	ReplayedToolTraces []ToolCallTrace `json:"replayedToolTraces,omitempty"`
 	// Report is the structured report extracted this turn (sidecar profile).
 	Report *sidecar.Report `json:"report,omitempty"`
+	// ReportRetried records whether sidecar report extraction needed the
+	// one-shot corrective retry before producing the final report.
+	ReportRetried bool `json:"reportRetried,omitempty"`
 	// Resumed reports whether this turn continued prior agent context
 	// (ACP LoadSession for the sidecar profile; same live session for
 	// direct profiles). Always false on turn 0.
@@ -202,6 +205,7 @@ type Episode struct {
 	// Violations lists safety-contract breaches observed during the run
 	// (write attempts, terminal requests, write-kind permission requests).
 	Violations []string          `json:"violations,omitempty"`
+	Anomalies  []Anomaly         `json:"anomalies,omitempty"`
 	Context    ContextAccounting `json:"context"`
 	Rewards    RewardBreakdown   `json:"rewards"`
 	StartedAt  time.Time         `json:"startedAt"`

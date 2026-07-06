@@ -65,6 +65,7 @@ type GateResult struct {
 type Verdict struct {
 	Aggregates      map[Profile]*ProfileAggregate `json:"aggregates"`
 	Gates           []GateResult                  `json:"gates"`
+	Anomalies       []AnomalyCount                `json:"anomalies,omitempty"`
 	ThesisSupported bool                          `json:"thesisSupported"`
 	// Valid is false when compliance or identity checks invalidate the run.
 	Valid bool `json:"valid"`
@@ -172,7 +173,7 @@ func EvaluateGates(episodes []*Episode) Verdict {
 	sc := agg[ProfileSidecar]
 	gx := agg[ProfileGhx]
 
-	v := Verdict{Aggregates: agg, Valid: valid}
+	v := Verdict{Aggregates: agg, Anomalies: CountAnomalies(episodes), Valid: valid}
 	v.Notes = append(v.Notes, validityNotes...)
 
 	if sc.Episodes == 0 || gx.Episodes == 0 {
@@ -502,6 +503,14 @@ func FormatVerdict(v Verdict) string {
 			status = "PASS"
 		}
 		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n", g.ID, g.Desc, status, g.Detail)
+	}
+
+	if len(v.Anomalies) > 0 {
+		sb.WriteString("\n## Anomalies\n\n")
+		sb.WriteString("| kind | severity | count | episodes |\n|------|----------|-------|----------|\n")
+		for _, a := range v.Anomalies {
+			fmt.Fprintf(&sb, "| %s | %s | %d | %d |\n", a.Kind, a.Severity, a.Count, a.Episodes)
+		}
 	}
 
 	sb.WriteString("\n## Verdict\n\n")

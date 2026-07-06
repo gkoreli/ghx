@@ -73,15 +73,12 @@ func TestEpisodes(t *testing.T) {
 					}
 					t.Logf("rewards: %+v", ep.Rewards)
 					t.Logf("context: %+v", ep.Context)
-					// ADR-0016.7 harness alarm: BLOCKED/WARN sidecar reports
-					// contradict the preflight-verified environment. Loud on
-					// gate runs; fatal on smoke runs (GHX_EVAL_STRICT=1) so
-					// the ladder never green-lights a surrendering build.
-					for _, anomaly := range EpisodeAnomalies(ep) {
-						if os.Getenv("GHX_EVAL_STRICT") == "1" {
-							t.Errorf("ANOMALY (strict): %s", anomaly)
-						} else {
-							t.Logf("ANOMALY — investigate before further rounds: %s", anomaly)
+					// ADR-0016.7 harness alarm: all declarative anomalies are
+					// logged; strict smoke runs fail only breaking severities.
+					for _, anomaly := range DetectAnomalies(ep) {
+						t.Logf("ANOMALY — investigate before further rounds: %s", anomaly.String())
+						if os.Getenv("GHX_EVAL_STRICT") == "1" && anomaly.Severity == SeverityBreaking {
+							t.Errorf("ANOMALY (strict): %s", anomaly.String())
 						}
 					}
 				}

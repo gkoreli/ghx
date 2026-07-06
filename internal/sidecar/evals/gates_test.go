@@ -193,6 +193,47 @@ func TestVerdictSufficientAtGateRunSample(t *testing.T) {
 	}
 }
 
+func TestEvaluateGatesCarriesAndRendersAnomalies(t *testing.T) {
+	eps := passingEpisodes()
+	anomalous := mkEpisode(ProfileSidecar, 0.9, 0.9, 1.0, 800, 9000, false, false)
+	anomalous.ID = "excluded-sidecar-anomaly"
+	anomalous.Invalid = true
+	anomalous.ExclusionReasons = []string{"test exclusion"}
+	anomalous.Turns[0].Report = &sidecar.Report{Answer: "BLOCKED: ghx is unavailable in this sidecar session."}
+	eps = append(eps, anomalous)
+
+	v := EvaluateGates(eps)
+	if len(v.Anomalies) == 0 {
+		t.Fatal("verdict missing anomaly counts")
+	}
+	blocked := mustVerdictAnomalyCount(t, v.Anomalies, AnomalySidecarBlocked)
+	if blocked.Count != 1 || blocked.Episodes != 1 || blocked.Severity != SeverityBreaking {
+		t.Fatalf("blocked anomaly count = %+v, want one breaking anomaly from excluded raw episode", blocked)
+	}
+	md := FormatVerdict(v)
+	if !strings.Contains(md, "## Anomalies") {
+		t.Fatalf("verdict markdown missing anomalies section:\n%s", md)
+	}
+	if !strings.Contains(md, "| sidecar_blocked_report | breaking | 1 | 1 |") {
+		t.Fatalf("verdict markdown missing anomaly row:\n%s", md)
+	}
+	if strings.Index(md, "## Gates") > strings.Index(md, "## Anomalies") ||
+		strings.Index(md, "## Anomalies") > strings.Index(md, "## Verdict") {
+		t.Fatalf("anomalies section should render between Gates and Verdict:\n%s", md)
+	}
+}
+
+func mustVerdictAnomalyCount(t *testing.T, counts []AnomalyCount, kind string) AnomalyCount {
+	t.Helper()
+	for _, c := range counts {
+		if c.Kind == kind {
+			return c
+		}
+	}
+	t.Fatalf("missing anomaly count for %s in %#v", kind, counts)
+	return AnomalyCount{}
+}
+
 func TestDataQualityNoteMissingToolOutputs(t *testing.T) {
 	eps := passingEpisodes()
 	for _, ep := range eps {

@@ -95,6 +95,16 @@ func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) {
 	for _, turn := range ep.Turns {
 		emitTurnSpan(episodeCtx, tracer, ep, turn)
 	}
+	for _, anomaly := range ep.Anomalies {
+		episodeSpan.AddEvent("ghx.eval.anomaly",
+			trace.WithAttributes(
+				attribute.String("ghx.eval.anomaly.kind", anomaly.Kind),
+				attribute.String("ghx.eval.anomaly.severity", string(anomaly.Severity)),
+				attribute.Int("ghx.eval.anomaly.turn", anomaly.Turn),
+				attribute.String("ghx.eval.anomaly.detail", anomaly.Detail),
+			),
+		)
+	}
 	emitRewardSpan(episodeCtx, tracer, ep)
 	if ep.Invalid {
 		episodeSpan.SetAttributes(attribute.Bool("ghx.eval.invalid", true))
