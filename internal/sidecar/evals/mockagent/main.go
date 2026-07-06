@@ -31,13 +31,44 @@ type reply struct {
 	ToolCalls    []string `json:"toolCalls"`
 	ReplayOnLoad []string `json:"replayOnLoad"`
 	Text         string   `json:"text"`
+	// SubmitReport, when set, is written verbatim to the report-sink path the
+	// runtime registered on the session (ADR-0021 D1). It simulates the agent
+	// calling the submit_report MCP tool with an accepted report, exercising the
+	// runtime's sink-preference gate through the real production path.
+	SubmitReport json.RawMessage `json:"submitReport,omitempty"`
 }
 
 // mockAgent implements acp.Agent and acp.AgentLoader with scripted behavior.
 type mockAgent struct {
-	conn    *acp.AgentSideConnection
-	replies []reply
-	state   string
+	conn     *acp.AgentSideConnection
+	replies  []reply
+	state    string
+	sinkPath string
+}
+
+// captureSink records the report-sink --out path from a session's registered
+// MCP servers so a scripted SubmitReport can be persisted there.
+func (m *mockAgent) captureSink(servers []acp.McpServer) {
+	for _, s := range servers {
+		if s.Stdio == nil {
+			continue
+		}
+		args := s.Stdio.Args
+		for i, a := range args {
+			if a == "--out" && i+1 < len(args) {
+				m.sinkPath = args[i+1]
+			}
+		}
+	}
+}
+
+// writeSubmitReport simulates an accepted submit_report tool call by writing
+// the scripted report JSON to the captured sink path.
+func (m *mockAgent) writeSubmitReport(r reply) {
+	if len(r.SubmitReport) == 0 || m.sinkPath == "" {
+		return
+	}
+	_ = os.WriteFile(m.sinkPath, r.SubmitReport, 0o644)
 }
 
 // nextIndex reads and increments the persistent prompt counter.
@@ -66,7 +97,8 @@ func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 	}, nil
 }
 
-func (m *mockAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	m.captureSink(params.McpServers)
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
 }
 
@@ -74,6 +106,7 @@ func (m *mockAgent) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.
 // replay updates simulate ACP adapters that emit prior session history before
 // the follow-up prompt request is sent.
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	m.captureSink(params.McpServers)
 	idx := m.currentIndex()
 	if idx >= len(m.replies) {
 		idx = len(m.replies) - 1
@@ -108,6 +141,9 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 	if err := m.emitToolCalls(ctx, params.SessionId, idx, "tc", r.ToolCalls); err != nil {
 		return acp.PromptResponse{}, err
 	}
+
+	// Simulate an accepted submit_report tool call for this turn (ADR-0021 D1).
+	m.writeSubmitReport(r)
 
 	if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: params.SessionId,

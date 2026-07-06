@@ -471,3 +471,69 @@ func TestEvalReportRendersMockRun(t *testing.T) {
 		}
 	}
 }
+
+// TestMockSidecarEpisodeSubmitReportSink drives the full production sidecar
+// path with the agent completing each turn via the report-sink instead of a
+// <ghx-report> text block (ADR-0021 D1/D2). The scripted agent writes an
+// accepted report to the sink path the runtime registered on the session; the
+// runtime must prefer that sink report over the (deliberately report-less)
+// turn text, with no missing-report anomaly and no retry.
+func TestMockSidecarEpisodeSubmitReportSink(t *testing.T) {
+	t.Setenv("GHX_EVAL_SUBJECT_MODEL", "mock-sonnet-subject")
+	bin := buildMockAgent(t)
+	sinkReport0 := map[string]any{
+		"answer":        "Middleware composition is implemented in src/compose.ts (submitted via the report sink).",
+		"verified":      []any{map[string]any{"summary": "compose() builds the dispatch chain", "evidence": "src/compose.ts"}},
+		"relevantFiles": []any{map[string]any{"path": "src/compose.ts", "reason": "defines compose()"}},
+		"backendsUsed":  []any{"remote"},
+	}
+	sinkReport1 := map[string]any{
+		"answer":       "Errors propagate through onError, wired in src/hono-base.ts (report sink).",
+		"backendsUsed": []any{"remote"},
+	}
+	writeScript(t, []map[string]any{
+		{
+			"toolCalls":    []string{"ghx tree honojs/hono src --depth 2"},
+			"text":         "Investigated compose; submitting via the report tool. No inline report block here.",
+			"submitReport": sinkReport0,
+		},
+		{
+			"replayOnLoad": []string{"ghx tree honojs/hono src --depth 2"},
+			"toolCalls":    []string{"ghx read honojs/hono src/hono-base.ts --grep onError"},
+			"text":         "Followed up on error handling; submitting via the report tool. No inline block.",
+			"submitReport": sinkReport1,
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cfg := RunConfig{AgentCmd: bin, SessionsDir: t.TempDir()}
+	ep, err := RunEpisode(ctx, cfg, honoTask(t), ProfileSidecar)
+	if err != nil {
+		t.Fatalf("episode failed: %v", err)
+	}
+
+	if ep.Report == nil {
+		t.Fatal("no final report — the sink report was not picked up")
+	}
+	if !strings.Contains(ep.Report.Answer, "report sink") {
+		t.Fatalf("final answer = %q, want the sink-submitted report", ep.Report.Answer)
+	}
+	for i, want := range []string{"src/compose.ts (submitted via the report sink)", "src/hono-base.ts (report sink)"} {
+		if ep.Turns[i].Report == nil || !strings.Contains(ep.Turns[i].Report.Answer, want) {
+			t.Fatalf("turn %d report = %+v, want sink answer containing %q", i, ep.Turns[i].Report, want)
+		}
+		if ep.Turns[i].ReportRetried {
+			t.Errorf("turn %d should not retry — the sink report was accepted", i)
+		}
+		if ep.Turns[i].ReportCoerced {
+			t.Errorf("turn %d sink report must not be coerced", i)
+		}
+	}
+	for _, a := range DetectAnomalies(ep) {
+		if a.Kind == AnomalySidecarReportMissing || a.Kind == AnomalySidecarReportUnparsed {
+			t.Errorf("unexpected anomaly on the sink path: %s", a.String())
+		}
+	}
+}
