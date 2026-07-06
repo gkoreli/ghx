@@ -52,7 +52,7 @@ func TestCloneArgsConstruction(t *testing.T) {
 
 func TestSHAFetchPlanConstruction(t *testing.T) {
 	sha := shaN(4)
-	plan := shaFetchPlan("https://github.com/o/r.git", sha, DefaultCloneStrategy(nil))
+	plan := SHAFetchPlan("https://github.com/o/r.git", sha, DefaultCloneStrategy(nil))
 	want := [][]string{
 		{"init", "--quiet"},
 		{"remote", "add", "origin", "https://github.com/o/r.git"},
@@ -60,7 +60,7 @@ func TestSHAFetchPlanConstruction(t *testing.T) {
 		{"checkout", "--quiet", "--detach", "FETCH_HEAD"},
 	}
 	if !reflect.DeepEqual(plan, want) {
-		t.Errorf("shaFetchPlan = %v, want %v", plan, want)
+		t.Errorf("SHAFetchPlan = %v, want %v", plan, want)
 	}
 }
 

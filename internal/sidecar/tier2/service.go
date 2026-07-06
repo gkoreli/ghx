@@ -305,7 +305,7 @@ func (s *Service) materialize(ctx context.Context, url string, req SnapshotReque
 		if err := os.MkdirAll(tmp, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", tmp, err)
 		}
-		for _, args := range shaFetchPlan(url, sha, strategy) {
+		for _, args := range SHAFetchPlan(url, sha, strategy) {
 			if len(strategy.SparsePaths) > 0 && args[0] == "checkout" {
 				if _, err := s.Git.Run(ctx, tmp, sparseCheckoutArgs(strategy.SparsePaths)...); err != nil {
 					return err

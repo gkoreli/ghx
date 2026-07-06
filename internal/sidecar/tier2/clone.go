@@ -90,17 +90,20 @@ func cloneArgs(url, dir, branch string, s CloneStrategy) []string {
 	return append(args, "--", url, dir)
 }
 
-// shaFetchPlan builds the argv sequence that materializes an exact commit SHA,
+// SHAFetchPlan builds the argv sequence that materializes an exact commit SHA,
 // used when the requested ref is itself a full SHA (git clone --branch cannot
-// take one). Each element runs with the snapshot temp dir as cwd:
+// take one). Each element runs with the target dir as cwd:
 //
 //	git init
 //	git remote add origin <url>
-//	git fetch --depth=1 --filter=blob:none [--no-tags] origin <sha>
+//	git fetch --depth=1 [--filter=<filter>] [--no-tags] origin <sha>
 //	git checkout --detach FETCH_HEAD
 //
 // Requires the server to allow SHA fetches (GitHub does for reachable SHAs).
-func shaFetchPlan(url, sha string, s CloneStrategy) [][]string {
+// Exported because the host-task eval provisioner
+// (internal/sidecar/evals/hosttask) reuses the same pinned-SHA
+// materialization plan for per-trial workspaces (ADR-0032.1 S1).
+func SHAFetchPlan(url, sha string, s CloneStrategy) [][]string {
 	fetch := []string{"fetch", fmt.Sprintf("--depth=%d", s.Depth)}
 	if s.Filter != "" {
 		fetch = append(fetch, "--filter="+s.Filter)
