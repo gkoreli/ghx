@@ -74,6 +74,12 @@ Entry format:
 - Trace: ~/.ghx/sessions/{letta-ai-letta, mastra-ai-mastra}/ (warning is on the ask's stderr, before the session stream).
 - Disposition: open — either configure the adapter so the warning path isn't triggered (PreToolUse hook / drop the bare name) or suppress/explain it in the ask output.
 
+## 2026-07-06 relevantFiles lose their repo after a scope drift — soft
+- Attempted: `sidecar ask --repo All-Hands-AI/OpenHands "how does agent delegation work..."` (ADR-0026 third wave).
+- Ground: the agent correctly discovered the code had moved (`README`: agent source lives in `OpenHands/software-agent-sdk`) and did all its digging there — good recon. But the report schema has no per-file repo qualifier: `relevantFiles` came back as bare paths (`openhands-tools/openhands/tools/delegate/impl.py`) while `meta.json` still pins `"repo": "All-Hands-AI/OpenHands"`. Any consumer resolving those paths against the session's repo gets 404s; the true repo is only recoverable by parsing prose in the `verified` items ("ghx read OpenHands/software-agent-sdk ..."). Discovery-tier reports already prefix paths with `owner/repo:` — the repo-scoped report format silently assumes the scope never drifts.
+- Trace: ~/.ghx/sessions/all-hands-ai-openhands/ (compare reports/1-*.json `relevantFiles` vs meta.json `repo`).
+- Disposition: open — add an optional `repo` qualifier to relevantFiles/evidence entries (or adopt the discovery tier's `owner/repo:path` convention everywhere) so cross-repo evidence stays resolvable.
+
 _Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
 "<question>"` directly or wire `ghx serve --recon` into your agent's MCP
