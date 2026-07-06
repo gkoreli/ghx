@@ -182,10 +182,15 @@ type ToolStatusTransition struct {
 
 // ToolCallTrace is the durable per-tool-call audit record captured from ACP.
 type ToolCallTrace struct {
-	ID                string                 `json:"id"`
-	Kind              string                 `json:"kind,omitempty"`
-	Title             string                 `json:"title,omitempty"`
-	RawInput          any                    `json:"rawInput,omitempty"`
+	ID       string `json:"id"`
+	Kind     string `json:"kind,omitempty"`
+	Title    string `json:"title,omitempty"`
+	RawInput any    `json:"rawInput,omitempty"`
+	// Locations lists the file paths the tool call reported touching (ACP
+	// tool-call locations). Captured for path-scope decisions: the host-arm
+	// write policy and the exploration/engineering attribution classifier
+	// (ADR-0032.1 S2). Empty when the adapter reports no locations.
+	Locations         []string               `json:"locations,omitempty"`
 	StatusTransitions []ToolStatusTransition `json:"statusTransitions,omitempty"`
 	OutputSize        int                    `json:"outputSize"`
 	OutputExcerpt     string                 `json:"outputExcerpt,omitempty"`

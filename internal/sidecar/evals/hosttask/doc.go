@@ -1,7 +1,9 @@
-// Package hosttask implements slice S1 of the combined-objective host-task
-// eval class (ADR-0032.1 D5): the workspace provisioner and the deterministic
-// outcome grader. It is self-contained — nothing here touches the eval
-// runner, profiles, gates, or persona (those are slices S2–S4).
+// Package hosttask implements slices S1 and S2 of the combined-objective
+// host-task eval class (ADR-0032.1 D5): the workspace provisioner, the
+// deterministic outcome grader (S1), and the workspace scope + structural
+// exploration/engineering token-attribution classifier (S2). Nothing here
+// touches the eval runner, profiles, gates, or persona (arm wiring and the
+// corpus are slices S3–S4).
 //
 // # Task fixture schema
 //
@@ -90,6 +92,19 @@
 // is a real grade.
 //
 // Docker being unavailable surfaces as ErrDockerUnavailable, a typed error
-// the eval layer (S2+) translates into a BLOCKED anomaly; S1 reports it
+// the eval layer (S3+) translates into a BLOCKED anomaly; S1 reports it
 // honestly and nothing more. No LLM is involved anywhere in this package.
+//
+// # Workspace scope and token attribution (S2)
+//
+// WorkspaceScope is the single owner of the "inside the trial workspace"
+// judgment: absolute paths, `..` cleaned, symlinks resolved through the
+// deepest existing ancestor (with documented TOCTOU limits). The evals
+// package's host write policy composes it to allow workspace-scoped writes
+// and deny everything outside (ADR-0032.1 D5.2); Classifier composes it to
+// attribute host tool calls to exploration vs engineering by tool identity
+// and path scope only, producing a per-episode AttributionTable whose
+// totals a human can recompute row by row (visibility tenet; ADR-0032
+// trap 6). Chars are the fallback accounting — real gen_ai.usage.* token
+// counts are the registered GH1-efficiency metric (ADR-0032.1 D2).
 package hosttask
