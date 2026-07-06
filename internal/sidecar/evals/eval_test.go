@@ -56,6 +56,12 @@ func TestEpisodes(t *testing.T) {
 		AgentCmd:    agentCmd,
 		SessionsDir: t.TempDir(),
 	}
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	currentIdentity, err := ProbeAgentIdentity(probeCtx, cfg)
+	probeCancel()
+	if err != nil {
+		t.Fatalf("probe agent identity: %v", err)
+	}
 	// Each invocation plans one trial of the full tasks × profiles matrix;
 	// multi-trial gate runs accumulating into one GHX_EVAL_RUN_DIR append a
 	// round per invocation, so the manifest carries the whole planned matrix
@@ -67,11 +73,29 @@ func TestEpisodes(t *testing.T) {
 		Tasks:    len(tasks),
 		Profiles: len(AllProfiles()),
 		Trials:   1,
-	}, agentIdentity(cfg, nil))
+	}, currentIdentity)
 	if err != nil {
 		t.Fatalf("record manifest round: %v", err)
 	}
 	expectedEpisodes := manifest.ExpectedEpisodes
+	var reuse *BaselineReuse
+	if priorRunDir := os.Getenv(BaselineReuseEnv); priorRunDir != "" {
+		var ok bool
+		var reason string
+		reuse, ok, reason, err = TryReuseBaselines(runDir, priorRunDir, cfg, tasks, "testdata/tasks", 1, currentIdentity, manifest.CreatedAt)
+		if err != nil {
+			t.Fatalf("baseline reuse: %v", err)
+		}
+		if ok {
+			manifest.BaselineReuse = reuse
+			if err := SaveRunManifest(runDir, *manifest); err != nil {
+				t.Fatalf("save baseline reuse manifest: %v", err)
+			}
+			t.Logf("baseline reuse: copied %d episodes from %s", len(reuse.Episodes), reuse.ReusedFromRunID)
+		} else {
+			t.Logf("%s", reason)
+		}
+	}
 
 	// ADR-0025 D3: bound episode-level parallelism. Each task × profile cell is
 	// a distinct subtest, so trials of the same cell never overlap within one
@@ -83,6 +107,9 @@ func TestEpisodes(t *testing.T) {
 	t.Run("episodes", func(t *testing.T) {
 		for _, task := range tasks {
 			for _, profile := range AllProfiles() {
+				if reuse != nil && (profile == ProfilePlain || profile == ProfileGhx) {
+					continue
+				}
 				t.Run(task.ID+"/"+string(profile), func(t *testing.T) {
 					if gate.enabled() {
 						t.Parallel()
@@ -146,6 +173,7 @@ func TestEpisodes(t *testing.T) {
 		t.Fatalf("update run manifest identity: %v", err)
 	}
 	verdict := EvaluateGates(eps)
+	LabelBaselineReused(&verdict, reuse)
 	// ADR-0025 D1: record the sequential-stopping recommendation next to the
 	// verdict. The runner never auto-stops — a human ends the loop.
 	stopping := ComputeStoppingBounds(eps, expectedEpisodes)
