@@ -115,11 +115,17 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 	w.stopIdleTimerLocked()
 	defer w.markIdleLocked()
 
+	// Live turn log (ADR-0022.1), opened per turn: the path is per-session and
+	// append-only, so reopening on every prompt is safe and keeps the file
+	// handle's lifetime bound to the turn rather than the warm worker.
+	live := NewLiveLog(opts.LiveLogPath)
+	defer live.Close()
+
 	if err := w.ensureStarted(ctx, opts); err != nil {
 		w.shutdownLocked()
 		return TurnResult{}, "", err
 	}
-	result, sessionID, err := w.configureSession(ctx, opts)
+	result, sessionID, err := w.configureSession(ctx, opts, live)
 	if err != nil {
 		if IsPeerClosedError(err) {
 			w.shutdownLocked()
@@ -210,9 +216,9 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 	return nil
 }
 
-func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions, live *LiveLog) (TurnResult, string, error) {
 	var result TurnResult
-	w.resetClient(&result)
+	w.resetClient(&result, live)
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = w.cfg.Cwd
@@ -312,11 +318,15 @@ func (w *AgentWorker) prompt(ctx context.Context, opts RunTurnOptions, sessionID
 	return result, nil
 }
 
-func (w *AgentWorker) resetClient(result *TurnResult) {
+// resetClient rebinds the warm client to a fresh turn: a new result, replay
+// accounting reset, and this turn's live log (nil-safe; closed by RunTurn when
+// the prompt returns).
+func (w *AgentWorker) resetClient(result *TurnResult, live *LiveLog) {
 	w.client.mu.Lock()
 	w.client.result = result
 	w.client.promptSent = false
 	w.client.closed = false
+	w.client.live = live
 	w.client.mu.Unlock()
 }
 

@@ -316,6 +316,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	// (session just initialized above) and backfills legacy sessions on write.
 	workspace := resolveSessionWorkspace(cfg, sessionsDir, req.Session, meta)
 	stderrLog := AgentStderrLogPath(sessionsDir, req.Session)
+	livePath := LiveLogPath(sessionsDir, req.Session)
 	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd)
 
 	ledger, err := LoadLedger(sessionsDir, req.Session)
@@ -371,7 +372,25 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	// than the eval path's per-turn ACP timing — see emit.go / the ADR gap note.
 	startedAt := time.Now().UTC()
 
-	turnResult, newSessionID, err := runTurnWithStaleSessionFallback(ctx, runner, RunTurnOptions{
+	// Runtime-owned live turn log (ADR-0022.1): the turn boundary events. The
+	// ACP client appends per-update activity to the same file via
+	// opts.LiveLogPath; append mode makes the two writers safe. The deferred
+	// turn.completed fires on EVERY exit path — right before (or instead of)
+	// emitTurnArtifacts-time — so a tail-follower always sees the turn close.
+	var turnResult TurnResult
+	var newSessionID string
+	liveLog := NewLiveLog(livePath)
+	defer func() {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		liveLog.TurnCompleted(err == nil, errMsg, len(turnResult.ToolCalls), len(turnResult.FullText))
+		liveLog.Close()
+	}()
+
+	liveLog.TurnStarted(req.Session, req.Repo, req.Question)
+	turnResult, newSessionID, err = runTurnWithStaleSessionFallback(ctx, runner, RunTurnOptions{
 		AgentCmd:        cfg.AgentCmd,
 		ACPSessionID:    acpSessionID,
 		Prompt:          prompt,
@@ -380,6 +399,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		SessionMeta:     sessionMeta,
 		ReportSinkPath:  sinkPath,
 		AgentStderrPath: stderrLog,
+		LiveLogPath:     livePath,
 	})
 
 	// Resume-as-recovery (ADR-0027 D1): the adapter's max-turns error is a
@@ -410,6 +430,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 				SessionMeta:     sessionMeta,
 				ReportSinkPath:  sinkPath,
 				AgentStderrPath: stderrLog,
+				LiveLogPath:     livePath,
 			})
 			// Fold the wrap-up's telemetry in on both outcomes: even a failed
 			// wrap-up attempt is part of this turn's auditable activity (D3).
@@ -511,6 +532,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			SessionMeta:     sessionMeta,
 			ReportSinkPath:  sinkPath,
 			AgentStderrPath: stderrLog,
+			LiveLogPath:     livePath,
 		})
 		if retryErr != nil {
 			break

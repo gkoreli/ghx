@@ -281,6 +281,10 @@ type denyClient struct {
 	// onActivity, when set, is invoked on every session update. It feeds the
 	// D2 liveness watchdog; it must not block.
 	onActivity func()
+	// live, when set, streams each new (non-replayed) session update to the
+	// session's live.jsonl as it happens (ADR-0022.1). LiveLog methods are
+	// nil-safe and best-effort, so this never fails or slows a turn.
+	live *LiveLog
 }
 
 // markPromptSent flips replay accounting to live-turn accounting.
@@ -506,6 +510,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 			}
 			os.Stdout.WriteString(text)
 			c.result.FullText += text
+			c.live.Text(len(text), text)
 		}
 	case u.AgentThoughtChunk != nil:
 		if u.AgentThoughtChunk.Content.Text != nil {
@@ -515,6 +520,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 				return nil
 			}
 			c.result.Thinking += text
+			c.live.Thought(len(text), text)
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
@@ -531,6 +537,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if !replayed {
 			c.result.ToolOutputChars += size
 			c.refreshToolSummaries()
+			c.live.ToolCall(string(tc.ToolCallId), tc.Title, string(tc.Kind), string(tc.Status))
 			entry := toolSummary(*tr)
 			fmt.Fprintf(os.Stderr, "  ▶ %s\n", entry)
 		}
@@ -555,6 +562,11 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if !replayed {
 			c.result.ToolOutputChars += size
 			c.refreshToolSummaries()
+			status := ""
+			if tcu.Status != nil {
+				status = string(*tcu.Status)
+			}
+			c.live.ToolUpdate(string(tcu.ToolCallId), status, size)
 		}
 	}
 	return nil
@@ -655,6 +667,13 @@ type RunTurnOptions struct {
 	// runtime reads its tail into turn-failure errors and the loud-WARN answer.
 	// Empty means stderr goes only to os.Stderr.
 	AgentStderrPath string
+	// LiveLogPath, when non-empty, is the per-session live turn log the ACP
+	// client appends realtime NDJSON activity events to as session updates
+	// arrive (ADR-0022.1) — text/thought chunks, tool calls, tool updates — so
+	// a caller can `tail -f` a running turn instead of waiting for the OTLP
+	// artifacts at Ask exit. Best-effort: an unopenable path degrades to a
+	// no-op. Empty means no live log.
+	LiveLogPath string
 }
 
 // ResolveReportSinkExe returns the ghx executable that will serve the
@@ -770,7 +789,13 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	lastActivity.Store(time.Now().UnixNano())
 	touch := func() { lastActivity.Store(time.Now().UnixNano()) }
 
-	client := &denyClient{result: &result, onActivity: touch}
+	// Live turn log (ADR-0022.1): stream this turn's session updates to the
+	// session's live.jsonl as they happen. Append mode makes the concurrent
+	// runtime-owned writer for the same path safe.
+	live := NewLiveLog(opts.LiveLogPath)
+	defer live.Close()
+
+	client := &denyClient{result: &result, onActivity: touch, live: live}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 
 	if liveness > 0 {

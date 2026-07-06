@@ -147,6 +147,40 @@ func TestDaemonAskReusesWarmMockAgent(t *testing.T) {
 	if !strings.Contains(string(logData), "LOAD mock-sess-1") {
 		t.Fatalf("second warm ask did not reload existing ACP session:\n%s", logData)
 	}
+
+	// ADR-0022.1: the daemon ask streamed realtime activity to the session's
+	// live.jsonl — turn boundaries from the runtime, per-update events from the
+	// warm worker's ACP client — every line valid NDJSON.
+	livePath := sidecar.LiveLogPath(cfg.SessionsDir, "warm")
+	liveData, err := os.ReadFile(livePath)
+	if err != nil {
+		t.Fatalf("live.jsonl missing after daemon ask: %v", err)
+	}
+	counts := map[string]int{}
+	completedOK := 0
+	for i, line := range strings.Split(strings.TrimSpace(string(liveData)), "\n") {
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("live.jsonl line %d is not valid JSON: %v\n%s", i+1, err, line)
+		}
+		event, _ := ev["event"].(string)
+		if event == "" || ev["ts"] == "" {
+			t.Fatalf("live.jsonl line %d missing ts/event: %s", i+1, line)
+		}
+		counts[event]++
+		if event == "turn.completed" && ev["ok"] == true {
+			completedOK++
+		}
+	}
+	if counts["turn.started"] == 0 {
+		t.Fatalf("live.jsonl has no turn.started line:\n%s", liveData)
+	}
+	if counts["text"] == 0 && counts["tool.call"] == 0 {
+		t.Fatalf("live.jsonl has no text or tool.call activity:\n%s", liveData)
+	}
+	if completedOK == 0 {
+		t.Fatalf("live.jsonl has no turn.completed with ok=true:\n%s", liveData)
+	}
 }
 
 func TestAskViaDaemonFallsBackWhenSpawnFails(t *testing.T) {
