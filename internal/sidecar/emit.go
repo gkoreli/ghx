@@ -50,6 +50,10 @@ type turnTelemetry struct {
 	Question    string
 	Result      TurnResult
 	Report      *Report
+	// TierDecision is the turn's recorded escalation policy evaluation
+	// (ADR-0024.2 D3), emitted as a ghx.tier.decision child span of the turn.
+	// Nil skips the span (callers outside the Ask runtime).
+	TierDecision *TierDecisionRecord
 	// Error carries the turn's failure (liveness watchdog, dead peer,
 	// unrecovered turn-cap). When set, the turn span is marked as an error and
 	// an error log record is written next to it (ADR-0027 D2/D3) — failed
@@ -146,6 +150,7 @@ func (t turnTelemetry) emitTurnSpan(parent context.Context, tracer trace.Tracer,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(t.turnAttributes()...),
 	)
+	t.emitTierDecisionSpan(turnCtx, tracer, start)
 	for _, tool := range t.Result.ToolTraces {
 		t.emitToolSpan(turnCtx, tracer, tool)
 	}
@@ -197,6 +202,51 @@ func (t turnTelemetry) sessionRecreatedLog(span trace.SpanContext, at time.Time)
 			attribute.String("reason", "acp_load_session_resource_not_found"),
 		},
 	}
+}
+
+// emitTierDecisionSpan writes the ghx.tier.decision span (ADR-0024.1
+// "Visibility Contract"; ADR-0024.2 D3), child of sidecar.turn, timestamped
+// at turn start so it precedes the tool spans in the timeline. Clone
+// attributes ride only when the decision carries parsed tier2 provenance
+// (best-effort, ADR-0024.2 D5) — an absent value is an honest gap, never a
+// guess.
+func (t turnTelemetry) emitTierDecisionSpan(parent context.Context, tracer trace.Tracer, at time.Time) {
+	if t.TierDecision == nil {
+		return
+	}
+	d := t.TierDecision
+	attrs := []attribute.KeyValue{
+		attribute.String("ghx.tier.policy.version", d.Decision.PolicyVersion),
+		attribute.String("ghx.tier.from", d.Decision.FromTier),
+		attribute.String("ghx.tier.to", d.Decision.ToTier),
+		attribute.Bool("ghx.tier.allowed", d.Decision.Allowed),
+		attribute.StringSlice("ghx.tier.signals", d.Decision.FiredSignals),
+		attribute.String("ghx.tier.reason", boundedStr(d.Decision.Reason, 512)),
+		attribute.String("ghx.tier.used", d.TierUsed),
+		attribute.String("ghx.tier.used_source", d.TierUsedSource),
+		attribute.Bool("ghx.tier.escalation_used", d.EscalationUsed),
+		attribute.String("ghx.repo.full_name", t.Repo),
+		attribute.Int("ghx.sidecar.turn", t.Turn),
+	}
+	if c := d.Clone; c != nil {
+		ref := c.Ref
+		if ref == "" {
+			ref = "HEAD"
+		}
+		attrs = append(attrs,
+			attribute.String("ghx.repo.ref", ref),
+			attribute.String("ghx.repo.sha", c.SHA),
+			attribute.String("ghx.clone.strategy", c.Strategy),
+			attribute.Bool("ghx.clone.cache_hit", c.CacheHit),
+			attribute.Int("ghx.clone.sparse_paths.count", len(c.SparsePaths)),
+		)
+	}
+	_, span := tracer.Start(parent, "ghx.tier.decision",
+		trace.WithTimestamp(at),
+		trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(attrs...),
+	)
+	span.End(trace.WithTimestamp(at))
 }
 
 func (t turnTelemetry) emitToolSpan(parent context.Context, tracer trace.Tracer, tool ToolCallTrace) {
