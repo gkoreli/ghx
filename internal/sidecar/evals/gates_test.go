@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ func mkEpisode(p Profile, corr, evid, safety float64, mainChars, totalChars int,
 	}
 	ep := &Episode{
 		TaskID:  "task-a",
+		Repo:    "o/r",
 		Profile: p,
 		Rewards: RewardBreakdown{Correctness: corr, Evidence: evid, Safety: safety},
 		Context: ContextAccounting{MainAgentChars: mainChars, TotalWorkflowChars: totalChars},
@@ -59,14 +61,19 @@ func passingEpisodes() []*Episode {
 }
 
 func TestEvaluateGatesAllPass(t *testing.T) {
-	v := EvaluateGates(passingEpisodes())
+	// A full pre-registered sample: thesisSupported requires DataSufficient
+	// (ADR-0016.8 D3), so the all-pass fixture must be at contract size.
+	v := EvaluateGates(gateRunEpisodes())
 	for _, g := range v.Gates {
 		if !g.Pass {
 			t.Errorf("%s failed unexpectedly: %s", g.ID, g.Detail)
 		}
 	}
 	if !v.ThesisSupported {
-		t.Error("thesis should be supported when all gates pass")
+		t.Error("thesis should be supported when all gates pass on a sufficient sample")
+	}
+	if v.Preliminary {
+		t.Error("a sufficient sample must not be preliminary")
 	}
 }
 
@@ -103,7 +110,7 @@ func TestG3FailsWhenReportTooLarge(t *testing.T) {
 }
 
 func TestG4FailureDoesNotOverturnThesis(t *testing.T) {
-	eps := passingEpisodes()
+	eps := gateRunEpisodes() // sufficient sample so only G4 gates the thesis
 	for _, ep := range eps {
 		if ep.Profile == ProfileSidecar && len(ep.Turns) > 1 {
 			ep.Turns[1].Resumed = false
@@ -150,7 +157,8 @@ func TestEvaluateGatesInsufficientData(t *testing.T) {
 }
 
 // gateRunEpisodes builds a full pre-registered sample: minGateRunTasks tasks
-// × minGateRunTrials trials × all profiles, first two tasks multi-turn.
+// across distinct repos × minGateRunTrials trials × all profiles, first two
+// tasks multi-turn.
 func gateRunEpisodes() []*Episode {
 	var eps []*Episode
 	for task := 0; task < minGateRunTasks; task++ {
@@ -162,6 +170,7 @@ func gateRunEpisodes() []*Episode {
 				mkEpisode(ProfilePlain, 0.5, 0.4, 1.0, 12000, 12000, multiTurn, true),
 			} {
 				e.TaskID = fmt.Sprintf("task-%d", task)
+				e.Repo = fmt.Sprintf("owner/repo-%d", task)
 				eps = append(eps, e)
 			}
 		}
@@ -174,12 +183,49 @@ func TestVerdictPreliminaryBelowSampleMinimum(t *testing.T) {
 	if v.DataSufficient {
 		t.Error("a single-task run must not be data-sufficient")
 	}
-	if !v.ThesisSupported {
-		t.Error("gate math itself should still pass on this sample")
+	if !v.Preliminary {
+		t.Error("preliminary must be explicit in the verdict JSON (ADR-0016.8 D3)")
+	}
+	if !thesisGatesPass(v.Gates) {
+		t.Errorf("gate math itself should still pass on this sample: %+v", v.Gates)
+	}
+	if v.ThesisSupported {
+		t.Error("thesisSupported must stay false below the gate-run sample even when gates pass (ADR-0016.8 D3)")
 	}
 	md := FormatVerdict(v)
 	if !strings.Contains(md, "PRELIMINARY") {
 		t.Error("verdict markdown must be labeled PRELIMINARY below the gate-run sample")
+	}
+	if !strings.Contains(md, "thesis gates pass, but the sample is below") {
+		t.Error("verdict markdown must say the gates passed on an insufficient sample, not imply gate failures")
+	}
+}
+
+// TestVerdictPreliminaryFieldSurvivesJSON pins the explicit preliminary bool
+// in verdict.json (ADR-0016.8 D3): machine consumers must not need to infer
+// PRELIMINARY from markdown.
+func TestVerdictPreliminaryFieldSurvivesJSON(t *testing.T) {
+	dir := t.TempDir()
+	v := EvaluateGates(passingEpisodes())
+	if _, err := SaveVerdict(dir, v); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dir + "/verdict.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Preliminary     *bool `json:"preliminary"`
+		ThesisSupported bool  `json:"thesisSupported"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Preliminary == nil || !*decoded.Preliminary {
+		t.Fatal("verdict.json must carry preliminary=true on a below-contract sample")
+	}
+	if decoded.ThesisSupported {
+		t.Fatal("verdict.json thesisSupported must be false on a below-contract sample")
 	}
 }
 
@@ -190,6 +236,56 @@ func TestVerdictSufficientAtGateRunSample(t *testing.T) {
 	}
 	if strings.Contains(FormatVerdict(v), "PRELIMINARY") {
 		t.Error("a sufficient sample must not be labeled PRELIMINARY")
+	}
+}
+
+// TestContaminatedEpisodeExcludedFromGates pins ADR-0016.8 D2: an episode
+// flagged answer_doc_contamination is excluded from gate aggregates and
+// listed in the verdict (note + anomaly table), like BLOCKED — without
+// invalidating the run.
+func TestContaminatedEpisodeExcludedFromGates(t *testing.T) {
+	eps := passingEpisodes()
+	contaminated := mkEpisode(ProfileGhx, 1.0, 1.0, 1.0, 9000, 9000, false, false)
+	contaminated.ID = "ghx-contaminated"
+	contaminated.Checks = TaskChecks{
+		ExpectedFiles:      []string{"internal/mapengine/types.go"},
+		ContaminationPaths: []string{"docs/adr/"},
+	}
+	contaminated.Turns[0].ToolCalls = []string{"ghx read gkoreli/ghx docs/adr/0013-ghx-map-command.md (completed)"}
+	eps = append(eps, contaminated)
+
+	v := EvaluateGates(eps)
+	if !v.Valid {
+		t.Fatalf("contamination must not invalidate the run: %v", v.Notes)
+	}
+	if got := v.Aggregates[ProfileGhx].Episodes; got != 5 {
+		t.Fatalf("ghx aggregate episodes = %d, want 5 (contaminated episode excluded)", got)
+	}
+	if !hasNote(v, "CONTAMINATION") || !hasNote(v, "ghx-contaminated") {
+		t.Fatalf("expected contamination exclusion note, got %v", v.Notes)
+	}
+	count := mustVerdictAnomalyCount(t, v.Anomalies, AnomalyAnswerDocContamination)
+	if count.Episodes != 1 || count.Severity != SeveritySoft {
+		t.Fatalf("contamination anomaly count = %+v", count)
+	}
+	if !strings.Contains(FormatVerdict(v), "answer_doc_contamination") {
+		t.Fatal("verdict markdown must list the contamination anomaly")
+	}
+}
+
+// TestSufficiencyRequiresThreeRepos pins ADR-0016.8 D4: six tasks on one
+// repo measure that repo, not the tool — the sample is insufficient.
+func TestSufficiencyRequiresThreeRepos(t *testing.T) {
+	eps := gateRunEpisodes()
+	for _, ep := range eps {
+		ep.Repo = "single/repo"
+	}
+	v := EvaluateGates(eps)
+	if v.DataSufficient {
+		t.Fatal("a single-repo run must not be data-sufficient")
+	}
+	if !hasNote(v, "distinct repos < gate-run minimum") {
+		t.Fatalf("expected repo-count sufficiency note, got %v", v.Notes)
 	}
 }
 
@@ -422,8 +518,10 @@ func TestSaveVerdictAndLoadRunEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(md), "THESIS SUPPORTED") {
-		t.Error("verdict markdown missing thesis line")
+	// passingEpisodes is a one-task sample: gates pass but the verdict is
+	// preliminary, so the thesis line must be the preliminary-pass variant.
+	if !strings.Contains(string(md), "THESIS NOT SUPPORTED") || !strings.Contains(string(md), "PRELIMINARY") {
+		t.Error("verdict markdown missing preliminary thesis line")
 	}
 
 	// verdict.json must not be loaded back as an episode.
