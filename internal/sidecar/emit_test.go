@@ -173,8 +173,19 @@ func TestAskContentCaptureDisabled(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(sess, "traces.jsonl")); err != nil {
 		t.Fatalf("traces.jsonl should still be written: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(sess, "logs.jsonl")); !os.IsNotExist(err) {
-		t.Fatalf("logs.jsonl should not exist when content capture is disabled (err=%v)", err)
+	// The route record (ADR-0030.1 D7) carries no message content and is
+	// written regardless of the capture setting, like the error log; only the
+	// GenAI content records must be suppressed.
+	logData, err := os.ReadFile(filepath.Join(sess, "logs.jsonl"))
+	if err != nil {
+		t.Fatalf("read logs.jsonl: %v", err)
+	}
+	if strings.Contains(string(logData), "gen_ai.input.messages") ||
+		strings.Contains(string(logData), "gen_ai.output.messages") {
+		t.Fatalf("logs.jsonl must not carry content records when capture is disabled: %s", logData)
+	}
+	if !strings.Contains(string(logData), "sidecar.route") {
+		t.Fatalf("logs.jsonl missing the sidecar.route record: %s", logData)
 	}
 }
 

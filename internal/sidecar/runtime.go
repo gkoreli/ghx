@@ -188,17 +188,19 @@ type AskRequest struct {
 // agent's output. If no report is found the turn still succeeds but the
 // returned report will have only an Answer field describing the failure.
 func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult, error) {
-	return askWithTurnRunner(ctx, cfg, req, runTurnWithOptions, true)
+	return askWithTurnRunner(ctx, cfg, req, runTurnWithOptions, true, nil)
 }
 
 // AskWithTurnRunner executes one Ask using a caller-owned turn runner. It is
 // used by the daemon worker pool so durable sidecar behavior stays centralized
-// while ACP process ownership moves out of the one-shot path.
-func AskWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner) (*Report, *TurnResult, error) {
-	return askWithTurnRunner(ctx, cfg, req, runner, false)
+// while ACP process ownership moves out of the one-shot path. route carries
+// the daemon's pre-computed routing decision (the daemon must route before it
+// can pick a per-session warm worker); nil means route here.
+func AskWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, route *RouteDecision) (*Report, *TurnResult, error) {
+	return askWithTurnRunner(ctx, cfg, req, runner, false, route)
 }
 
-func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool) (*Report, *TurnResult, error) {
+func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool, route *RouteDecision) (*Report, *TurnResult, error) {
 	sessionsDir := cfg.SessionsDir
 	if preflight {
 		if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
@@ -208,9 +210,14 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if runner == nil {
 		runner = runTurnWithOptions
 	}
-	if req.Session == "" {
-		req.Session = ResolveSessionName(req)
+	// Session routing (ADR-0030.1 D1): both the daemonless path and the
+	// daemon evaluate the same deterministic cascade; R1/R2 preserve the
+	// ADR-0019.1 precedence byte-for-byte.
+	if route == nil {
+		d := RouteQuestion(sessionsDir, req, RouteConfigFor(cfg))
+		route = &d
 	}
+	req.Session = route.Session
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		return nil, nil, err
 	}
@@ -224,7 +231,14 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 				scope = scope[:80]
 			}
 		}
-		if err := InitSession(sessionsDir, req.Session, req.Repo, scope); err != nil {
+		repo := req.Repo
+		if repo == "" {
+			// R2 fired on an owner/repo token in the question text: the new
+			// repo-slug session records that repo, exactly as a --repo ask
+			// would have created it.
+			repo = route.DetectedRepo
+		}
+		if err := InitSession(sessionsDir, req.Session, repo, scope, route.sessionNamedBy()); err != nil {
 			return nil, nil, fmt.Errorf("init session: %w", err)
 		}
 	}
@@ -364,6 +378,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		// policy evaluation over whatever activity was observed is part of
 		// the failure's audit trail. No report exists, so no backfill.
 		tierDecision := recordTierDecision(sessionsDir, req, turn, &turnResult, nil)
+		turnResult.Route = route
 		turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
 			SessionsDir:    sessionsDir,
 			Session:        req.Session,
@@ -373,6 +388,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			Question:       req.Question,
 			Result:         turnResult,
 			TierDecision:   tierDecision,
+			Route:          route,
 			Error:          err.Error(),
 			StartedAt:      startedAt,
 			EndedAt:        time.Now().UTC(),
@@ -464,6 +480,9 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if _, saveErr := SaveTurnReportArtifact(sessionsDir, req.Session, turn, ReportArtifact{
 		Report:              report,
 		ActualCommandLedger: actualCommandLedger(turnResult.ToolCalls),
+		// Persist the exact trace-derived commands the ledger consumed so
+		// replaying reports/ reproduces ledger.json (ADR-0030.1 D5).
+		TraceCommands: TraceCommandLedger(turnResult.ToolTraces),
 	}); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save report: %v\n", saveErr)
 	}
@@ -474,6 +493,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	// a stderr warning inside emitTurnArtifacts and never fail the ask. The
 	// returned ArtifactsRef travels back on the TurnResult so every response
 	// surface can point the caller at the audit trail.
+	turnResult.Route = route
 	turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
 		SessionsDir:    sessionsDir,
 		Session:        req.Session,
@@ -482,6 +502,7 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		Turn:           turn,
 		Question:       req.Question,
 		Result:         turnResult,
+		Route:          route,
 		Report:         report,
 		TierDecision:   tierDecision,
 		StartedAt:      startedAt,
@@ -490,18 +511,6 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	})
 
 	return report, &turnResult, nil
-}
-
-// ResolveSessionName applies the daemon-owned v1 routing rule: explicit
-// session, then repo slug, then a stable question slug for discovery.
-func ResolveSessionName(req AskRequest) string {
-	if strings.TrimSpace(req.Session) != "" {
-		return req.Session
-	}
-	if strings.TrimSpace(req.Repo) != "" {
-		return Slug(req.Repo, "repo")
-	}
-	return QuestionSlug(req.Question)
 }
 
 // Slug lowercases s and collapses every non-alphanumeric run into one dash.

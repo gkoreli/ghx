@@ -197,9 +197,13 @@ func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error
 		if err := json.Unmarshal(req.Params, &ask); err != nil {
 			return nil, err
 		}
-		ask.Session = ResolveSessionName(ask)
+		// Route before picking a runner: the warm-worker pool is keyed by the
+		// resolved session name (ADR-0030.1 D1; the decision rides into the
+		// ask so it is emitted exactly once).
+		decision := RouteQuestion(s.cfg.SessionsDir, ask, RouteConfigFor(s.cfg))
+		ask.Session = decision.Session
 		runner := s.pool.RunnerFor(ask.Session, s.cfg)
-		report, turn, err := AskWithTurnRunner(ctx, s.cfg, ask, runner)
+		report, turn, err := AskWithTurnRunner(ctx, s.cfg, ask, runner, &decision)
 		if err != nil {
 			return nil, err
 		}
@@ -223,6 +227,16 @@ func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error
 		}
 		reports, err := ListReports(s.cfg.SessionsDir, params.Name)
 		return map[string]any{"meta": meta, "reports": reports}, err
+	case "ghx.sidecar.Reroute":
+		var params RerouteParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return nil, err
+		}
+		// Retire the source session's warm worker first: its ACP conversation
+		// remembers the stray turn, and the on-disk ACPSessionID clear below
+		// must not be shadowed by a cached warm session (ADR-0030.1 D5).
+		s.pool.Drop(params.From)
+		return RerouteTurn(s.cfg.SessionsDir, params.From, params.Turn, params.To)
 	case "ghx.sidecar.Shutdown":
 		go s.Shutdown()
 		return map[string]string{"status": "shutting_down"}, nil
@@ -251,12 +265,16 @@ func ConfigDigest(cfg Config) string {
 		// 2026-07-06 F1) — a version-skewed sink is exactly the silent
 		// degradation the doctor check exists to prevent.
 		ReportSinkExe string `json:"reportSinkExe,omitempty"`
+		// Route covers the session-routing knobs (ADR-0030.1 v1 scope): a
+		// warm daemon must not keep routing on stale thresholds/windows
+		// after the config changes.
+		Route *RouteSettings `json:"route,omitempty"`
 	}
 	// Hash the explicit override only: an empty value means "own executable",
 	// which the version handshake already validates, and full resolution is
 	// process-dependent (a spawned daemon and a go-test client resolve
 	// differently, which would force restart loops).
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE")})
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -315,6 +333,45 @@ func AskViaDaemon(ctx context.Context, version string, cfg Config, req AskReques
 	fmt.Fprintf(os.Stderr, "warning: sidecar daemon unavailable (%v); using daemonless fallback\n", err)
 	report, turn, directErr := Ask(ctx, cfg, req)
 	return report, turn, false, directErr
+}
+
+// RerouteParams are the ghx.sidecar.Reroute RPC parameters (ADR-0030.1 D5):
+// move turn Turn of session From to session To and rebuild both ledgers.
+type RerouteParams struct {
+	// From is the source session name.
+	From string `json:"from"`
+	// Turn is the source turn number to move.
+	Turn int `json:"turn"`
+	// To is the destination session name (created when absent).
+	To string `json:"to"`
+}
+
+// RerouteViaDaemon performs a mis-route correction through the running daemon
+// when one is healthy — so the source session's warm ACP worker is retired
+// before the on-disk state changes — and directly on disk otherwise. It
+// returns whether the daemon path was used. A version-skewed daemon is asked
+// to shut down first (its warm workers would otherwise keep the stray ACP
+// conversation alive past the correction).
+func RerouteViaDaemon(ctx context.Context, version string, cfg Config, params RerouteParams) (*RerouteResult, bool, error) {
+	c := DaemonClient{Version: version}
+	if ping, err := c.ping(ctx); err == nil {
+		if ping.Version == version {
+			raw, err := c.call(ctx, "ghx.sidecar.Reroute", params)
+			if err != nil {
+				return nil, true, err
+			}
+			var res RerouteResult
+			data, _ := json.Marshal(raw)
+			if err := json.Unmarshal(data, &res); err != nil {
+				return nil, true, err
+			}
+			return &res, true, nil
+		}
+		_, _ = c.call(ctx, "ghx.sidecar.Shutdown", map[string]any{})
+		time.Sleep(150 * time.Millisecond)
+	}
+	res, err := RerouteTurn(cfg.SessionsDir, params.From, params.Turn, params.To)
+	return res, false, err
 }
 
 // ShutdownDaemon asks the active daemon to stop.

@@ -24,7 +24,7 @@ func stubHandshake(t *testing.T) {
 func TestAskFallbackPromptCarriesLedger(t *testing.T) {
 	stubHandshake(t)
 	dir := t.TempDir()
-	if err := InitSession(dir, "s", "o/r", "scope"); err != nil {
+	if err := InitSession(dir, "s", "o/r", "scope", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := ReadMeta(dir, "s")
@@ -87,7 +87,7 @@ func TestAskFallbackPromptCarriesLedger(t *testing.T) {
 func TestAskRecreatesStaleACPSessionOnce(t *testing.T) {
 	stubHandshake(t)
 	dir := t.TempDir()
-	if err := InitSession(dir, "s", "o/r", "scope"); err != nil {
+	if err := InitSession(dir, "s", "o/r", "scope", SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := ReadMeta(dir, "s")

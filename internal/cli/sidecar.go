@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
@@ -49,17 +50,19 @@ and reports under ~/.ghx that back the report.`,
 		depth, _ := cmd.Flags().GetString("depth")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		// Session naming (ADR-0019.1 D2): --session wins; with --repo the
-		// repo slug stands; with neither, derive a stable slug from the
-		// question. The chosen name is printed so the caller can resume it.
-		if session == "" {
-			if repo != "" {
-				session = defaultReconSession(repo)
-			} else {
-				session = questionSession(args[0])
+		// Session routing (ADR-0030.1): --session and --repo keep the exact
+		// ADR-0019.1 D2 behavior (R1/R2 — the name is deterministic, printed
+		// up front as before). With neither, the daemon routes the question
+		// through the R3-R5 cascade and the decision is printed after the
+		// ask, with its provenance.
+		routedByDaemon := session == "" && repo == ""
+		if !routedByDaemon {
+			name := session
+			if name == "" {
+				name = defaultReconSession(repo)
 			}
+			fmt.Fprintf(os.Stderr, "session: %s\n", name)
 		}
-		fmt.Fprintf(os.Stderr, "session: %s\n", session)
 
 		cfg := sidecar.LoadConfig()
 		report, turn, _, err := sidecar.AskViaDaemon(context.Background(), VERSION, cfg, sidecar.AskRequest{
@@ -72,15 +75,30 @@ and reports under ~/.ghx that back the report.`,
 			return err
 		}
 
+		var route *sidecar.RouteDecision
+		if routedByDaemon && turn != nil {
+			route = turn.Route
+		}
+		if route != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", route.Line())
+		}
+
 		artifacts := turn.Artifacts
 		if jsonOut {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			return enc.Encode(askEnvelope{Report: report, Artifacts: artifacts})
+			return enc.Encode(askEnvelope{Report: report, Artifacts: artifacts, Route: route})
 		}
 		printHumanReport(report)
+		if route != nil {
+			fmt.Printf("\n%s\n", route.Line())
+		}
 		if footer := artifacts.FooterLine(); footer != "" {
-			fmt.Printf("\n%s\n", footer)
+			if route != nil {
+				fmt.Printf("%s\n", footer)
+			} else {
+				fmt.Printf("\n%s\n", footer)
+			}
 		}
 		return nil
 	},
@@ -113,6 +131,10 @@ foreground to watch its logs; ` + "`--stop`" + ` asks a running daemon to shut d
 type askEnvelope struct {
 	Report    *sidecar.Report      `json:"report"`
 	Artifacts sidecar.ArtifactsRef `json:"artifacts"`
+	// Route carries the daemon's routing decision (ADR-0030.1 D7) when the
+	// ask had neither --session nor --repo; omitted otherwise so the
+	// flag-scoped envelope stays byte-identical to pre-routing behavior.
+	Route *sidecar.RouteDecision `json:"route,omitempty"`
 }
 
 // sidecarReportSinkCmd is a hidden, internal command: it serves the
@@ -320,6 +342,50 @@ session name from ` + "`sessions list`" + `.`,
 	},
 }
 
+// sidecarSessionsRerouteCmd corrects a mis-routed turn (ADR-0030.1 D5): it
+// moves the turn's report artifact to the destination session (created when
+// absent) and deterministically rebuilds BOTH ledgers by replaying their
+// remaining per-turn artifacts. The source session's ACP session ID is
+// cleared so its next turn reseeds from the corrected durable ledger
+// (the ADR-0027 stale-session path, pointed at a deliberately-retired one).
+var sidecarSessionsRerouteCmd = &cobra.Command{
+	Use:   "reroute <session> <turn> <dest>",
+	Short: "Move a mis-routed turn to another session and rebuild both ledgers",
+	Example: `  ghx sidecar sessions reroute honojs-hono 3 which-go-libraries-do-structured-conc-4be29e5c
+  ghx sidecar sessions reroute gin-gonic-gin 2 my-new-thread`,
+	Args: cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		turn, err := strconv.Atoi(args[1])
+		if err != nil || turn < 1 {
+			return fmt.Errorf("turn must be a positive integer, got %q", args[1])
+		}
+		cfg := sidecar.LoadConfig()
+		res, viaDaemon, err := sidecar.RerouteViaDaemon(context.Background(), VERSION, cfg, sidecar.RerouteParams{
+			From: args[0],
+			Turn: turn,
+			To:   args[2],
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Printf("moved turn %d of %s -> %s (as turn %d)\n", res.Turn, res.From, res.To, res.NewTurn)
+		for _, p := range res.MovedReports {
+			fmt.Printf("  report: %s\n", p)
+		}
+		if res.ToCreated {
+			fmt.Printf("created session: %s\n", res.To)
+		}
+		fmt.Printf("ledgers rebuilt by replay: %s, %s\n", res.From, res.To)
+		fmt.Printf("source ACP session cleared; next %s turn reseeds from the corrected ledger\n", res.From)
+		if viaDaemon {
+			fmt.Println("applied via the running daemon (warm worker retired)")
+		} else {
+			fmt.Println("applied directly on disk (no healthy daemon)")
+		}
+		return nil
+	},
+}
+
 // sidecarConfigCmd groups config subcommands.
 var sidecarConfigCmd = &cobra.Command{
 	Use:   "config",
@@ -385,6 +451,7 @@ func runSidecarConfigInit(claudeACP, force bool) error {
 	cfg := sidecar.NewDefaultConfig()
 	cfg.Model = existing.Model
 	cfg.Visibility = existing.Visibility
+	cfg.Route = existing.Route
 	cfg.AgentCmd = found[0]
 	if err := sidecar.SaveConfig(cfg); err != nil {
 		return err
@@ -404,6 +471,7 @@ func initClaudeACPConfig(force bool) error {
 	cfg := sidecar.NewDefaultConfig()
 	cfg.Model = existing.Model
 	cfg.Visibility = existing.Visibility
+	cfg.Route = existing.Route
 	cfg.AgentCmd = sidecar.ClaudeACPAgentCmd
 	if path, exists := sidecar.ConfigFileExists(); exists {
 		diff := sidecar.DiffConfigs(existing, cfg)
@@ -433,7 +501,7 @@ func initClaudeACPConfig(force bool) error {
 }
 
 func init() {
-	sidecarAskCmd.Flags().String("session", "", "Named session (default: repo slug, or a question-derived slug without --repo)")
+	sidecarAskCmd.Flags().String("session", "", "Advanced: pin a specific named session; normally omit — ghx routes for you (ADR-0030.1)")
 	sidecarAskCmd.Flags().String("repo", "", "GitHub repo owner/repo (optional scope; omit for cross-GitHub discovery)")
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
@@ -450,7 +518,7 @@ func init() {
 	sidecarConfigInitCmd.Flags().Bool("claude-acp", false, "Write the pinned Claude ACP adapter command (npx @agentclientprotocol/claude-agent-acp) instead of auto-detecting")
 	sidecarConfigInitCmd.Flags().Bool("force", false, "Overwrite an existing config (only with --claude-acp; a diff is shown first)")
 
-	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd)
+	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd, sidecarSessionsRerouteCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
 	sidecarEvalsCmd.AddCommand(sidecarEvalsExportCmd)
 	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarEvalsCmd, sidecarSessionsCmd, sidecarConfigCmd)

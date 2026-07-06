@@ -140,7 +140,7 @@ func TestAskRecreatesStaleACPSessionWithMockAgent(t *testing.T) {
 	promptLog := filepath.Join(dir, "prompts.log")
 	t.Setenv("MOCKAGENT_PROMPT_LOG", promptLog)
 
-	if err := sidecar.InitSession(dir, "s", "o/r", "scope"); err != nil {
+	if err := sidecar.InitSession(dir, "s", "o/r", "scope", sidecar.SessionNamedExplicit); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := sidecar.ReadMeta(dir, "s")
