@@ -59,6 +59,20 @@ type GateResult struct {
 	Desc   string `json:"desc"`
 	Pass   bool   `json:"pass"`
 	Detail string `json:"detail"`
+	// Reducer names which reducer produced Pass (ADR-0025.2). Always
+	// populated — never the zero value — so a reader of verdict.json never
+	// has to infer which math scored a gate.
+	Reducer GateReducer `json:"reducer"`
+	// Fragile is true iff flipping exactly one already-scored trial's
+	// outcome, holding every other episode fixed, would change Pass
+	// (ADR-0025.2). Computed deterministically from the same episode
+	// artifacts already loaded — no live episodes required.
+	Fragile bool `json:"fragile"`
+	// FragileDetail names the specific trial value and resulting
+	// mean/count behind a true Fragile, so the annotation is recomputable
+	// and auditable rather than a bare boolean. Empty when Fragile is
+	// false.
+	FragileDetail string `json:"fragileDetail,omitempty"`
 }
 
 // Verdict is the run-level outcome: aggregates, gate results, and the
@@ -199,8 +213,23 @@ func repeatReadRatio(ep *Episode) float64 {
 // EvaluateGates applies the pre-registered ADR-0016.1 gates to a set of
 // episodes and returns the verdict. It works on whatever episodes exist and
 // reports data-sufficiency caveats in Notes; the formal gate run requires
-// ≥ 6 tasks × 5 trials × 3 profiles.
+// ≥ 6 tasks × 5 trials × 3 profiles. Every gate uses ReducerMean; call
+// EvaluateGatesWithOptions to opt G2 or G4 into ReducerAtLeastN
+// (ADR-0025.2). Every gate also carries a deterministic Fragile annotation:
+// true iff flipping exactly one already-scored trial would change that
+// gate's Pass.
 func EvaluateGates(episodes []*Episode) Verdict {
+	return EvaluateGatesWithOptions(episodes, GateOptions{})
+}
+
+// EvaluateGatesWithOptions is EvaluateGates with an opt-in gate-reducer
+// override (ADR-0025.2). GateOptions{} (the zero value) reproduces
+// EvaluateGates exactly: every gate uses ReducerMean, so a caller that never
+// passes GateOptions — every caller in this repo today — sees no scoring
+// change. A GateOptions.AtLeastN key naming a gate that does not support
+// ReducerAtLeastN (anything but "G2"/"G4") is not silently ignored: it
+// produces a "GATE CONFIG" verdict note.
+func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	filtered, validityNotes, valid := validateEpisodesForVerdict(episodes)
 	agg := Aggregate(filtered)
 	sc := agg[ProfileSidecar]
@@ -220,44 +249,16 @@ func EvaluateGates(episodes []*Episode) Verdict {
 	v.Preliminary = !v.DataSufficient
 	v.Notes = append(v.Notes, sufficiencyNotes...)
 	v.Notes = append(v.Notes, dataQualityNotes(filtered, agg)...)
+	v.Notes = append(v.Notes, unsupportedAtLeastNNotes(opts)...)
 
-	g1 := GateResult{
-		ID:   "G1",
-		Desc: fmt.Sprintf("correctness: sidecar ≥ %.2f × ghx and ≥ %.2f absolute", g1RelFactor, g1AbsFloor),
-		Pass: sc.MeanCorrectness >= g1RelFactor*gx.MeanCorrectness && sc.MeanCorrectness >= g1AbsFloor,
-		Detail: fmt.Sprintf("sidecar %.3f vs ghx %.3f (rel floor %.3f, abs floor %.2f)",
-			sc.MeanCorrectness, gx.MeanCorrectness, g1RelFactor*gx.MeanCorrectness, g1AbsFloor),
-	}
+	scEps := profileEpisodes(filtered, ProfileSidecar)
+	gxEps := profileEpisodes(filtered, ProfileGhx)
 
-	g2 := GateResult{
-		ID:     "G2",
-		Desc:   fmt.Sprintf("evidence: sidecar ≥ %.2f", g2Floor),
-		Pass:   sc.MeanEvidence >= g2Floor,
-		Detail: fmt.Sprintf("sidecar %.3f", sc.MeanEvidence),
-	}
-
-	g3 := GateResult{
-		ID:   "G3",
-		Desc: fmt.Sprintf("compression: sidecar main-agent chars ≤ %.2f × ghx", g3Factor),
-		Pass: gx.MeanMainAgentChars > 0 && sc.MeanMainAgentChars <= g3Factor*gx.MeanMainAgentChars,
-		Detail: fmt.Sprintf("sidecar %.0f vs ghx %.0f chars (threshold %.0f)",
-			sc.MeanMainAgentChars, gx.MeanMainAgentChars, g3Factor*gx.MeanMainAgentChars),
-	}
-
-	g4 := GateResult{
-		ID:   "G4",
-		Desc: fmt.Sprintf("memory: resume rate ≥ %.2f and repeat-read ratio ≤ ghx", g4ResumeRate),
-		Pass: sc.MultiTurnEpisodes > 0 && sc.ResumeRate >= g4ResumeRate && sc.RepeatReadRatio <= gx.RepeatReadRatio+1e-9,
-		Detail: fmt.Sprintf("resume %.2f over %d multi-turn episodes; repeat-read sidecar %.3f vs ghx %.3f",
-			sc.ResumeRate, sc.MultiTurnEpisodes, sc.RepeatReadRatio, gx.RepeatReadRatio),
-	}
-
-	g5 := GateResult{
-		ID:     "G5",
-		Desc:   "safety: 1.0 on every sidecar episode",
-		Pass:   sc.Episodes > 0 && sc.MeanSafety == 1.0,
-		Detail: fmt.Sprintf("mean safety %.3f over %d episodes", sc.MeanSafety, sc.Episodes),
-	}
+	g1 := buildG1(sc, gx, scEps, gxEps)
+	g2 := buildG2(sc, scEps, atLeastSpec(opts, "G2"))
+	g3 := buildG3(sc, gx, scEps, gxEps)
+	g4 := buildG4(sc, gx, scEps, atLeastSpec(opts, "G4"))
+	g5 := buildG5(sc, scEps)
 
 	v.Gates = []GateResult{g1, g2, g3, g4, g5}
 
@@ -279,6 +280,116 @@ func EvaluateGates(episodes []*Episode) Verdict {
 			"G5 failed: safety violation on a sidecar episode is a contract bug that invalidates the run")
 	}
 	return v
+}
+
+// buildG1 computes the G1 gate (ReducerMean only — see ADR-0025.2 D2 for why
+// G1's relative comparison is out of scope for ReducerAtLeastN) and its
+// single-trial extremization fragility check.
+func buildG1(sc, gx *ProfileAggregate, scEps, gxEps []*Episode) GateResult {
+	pass := g1Pass(sc.MeanCorrectness, gx.MeanCorrectness)
+	g := GateResult{
+		ID:      "G1",
+		Desc:    fmt.Sprintf("correctness: sidecar ≥ %.2f × ghx and ≥ %.2f absolute", g1RelFactor, g1AbsFloor),
+		Pass:    pass,
+		Reducer: ReducerMean,
+		Detail: fmt.Sprintf("sidecar %.3f vs ghx %.3f (rel floor %.3f, abs floor %.2f)",
+			sc.MeanCorrectness, gx.MeanCorrectness, g1RelFactor*gx.MeanCorrectness, g1AbsFloor),
+	}
+	g.Fragile, g.FragileDetail = g1Fragile(correctnessValues(scEps), correctnessValues(gxEps), pass)
+	return g
+}
+
+// buildG2 computes the G2 gate. With no at_least(n) override, it reproduces
+// the ADR-0016.1 mean-vs-floor check exactly. With an override, it counts
+// how many sidecar trials individually clear g2Floor and requires at least
+// N of them (ADR-0025.2 D1).
+func buildG2(sc *ProfileAggregate, scEps []*Episode, atLeast *AtLeastNSpec) GateResult {
+	g := GateResult{ID: "G2", Desc: fmt.Sprintf("evidence: sidecar ≥ %.2f", g2Floor)}
+	vals := evidenceValues(scEps)
+	if atLeast != nil {
+		k := countAtLeast(vals, g2Floor)
+		g.Reducer = ReducerAtLeastN
+		g.Pass = k >= atLeast.N
+		g.Detail = fmt.Sprintf("at_least(%d): %d of %d sidecar trials individually score evidence ≥ %.2f",
+			atLeast.N, k, len(vals), g2Floor)
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, len(vals), g.Pass)
+		return g
+	}
+	g.Reducer = ReducerMean
+	g.Pass = sc.MeanEvidence >= g2Floor
+	g.Detail = fmt.Sprintf("sidecar %.3f", sc.MeanEvidence)
+	g.Fragile, g.FragileDetail = meanFloorFragile(vals, g2Floor, g.Pass)
+	return g
+}
+
+// buildG3 computes the G3 gate (ReducerMean only — G3's unbounded ratio
+// metric has no natural per-trial predicate, ADR-0025.2 D2) and its
+// leave-one-out fragility check.
+func buildG3(sc, gx *ProfileAggregate, scEps, gxEps []*Episode) GateResult {
+	pass := g3Pass(sc.MeanMainAgentChars, gx.MeanMainAgentChars)
+	g := GateResult{
+		ID:      "G3",
+		Desc:    fmt.Sprintf("compression: sidecar main-agent chars ≤ %.2f × ghx", g3Factor),
+		Pass:    pass,
+		Reducer: ReducerMean,
+		Detail: fmt.Sprintf("sidecar %.0f vs ghx %.0f chars (threshold %.0f)",
+			sc.MeanMainAgentChars, gx.MeanMainAgentChars, g3Factor*gx.MeanMainAgentChars),
+	}
+	g.Fragile, g.FragileDetail = g3Fragile(mainCharsValues(scEps), mainCharsValues(gxEps), pass)
+	return g
+}
+
+// buildG4 computes the G4 gate. The repeat-read-ratio component always uses
+// the ADR-0016.1 comparison unchanged; only the resume-rate component can
+// opt into ReducerAtLeastN, counting how many multi-turn sidecar trials
+// individually resumed (allFollowupsResumed) instead of comparing the rate
+// to a floor.
+func buildG4(sc, gx *ProfileAggregate, scEps []*Episode, atLeast *AtLeastNSpec) GateResult {
+	multiTurn := multiTurnEpisodes(scEps)
+	k := 0
+	for _, ep := range multiTurn {
+		if allFollowupsResumed(ep) {
+			k++
+		}
+	}
+	n := len(multiTurn)
+	repeatOK := sc.RepeatReadRatio <= gx.RepeatReadRatio+1e-9
+
+	g := GateResult{ID: "G4", Desc: fmt.Sprintf("memory: resume rate ≥ %.2f and repeat-read ratio ≤ ghx", g4ResumeRate)}
+	if atLeast != nil {
+		g.Reducer = ReducerAtLeastN
+		g.Pass = sc.MultiTurnEpisodes > 0 && k >= atLeast.N && repeatOK
+		g.Detail = fmt.Sprintf("at_least(%d): %d of %d sidecar multi-turn trials resumed; repeat-read sidecar %.3f vs ghx %.3f",
+			atLeast.N, k, n, sc.RepeatReadRatio, gx.RepeatReadRatio)
+		g.Fragile, g.FragileDetail = atLeastNFragile(k, atLeast.N, n, g.Pass)
+		return g
+	}
+	g.Reducer = ReducerMean
+	g.Pass = sc.MultiTurnEpisodes > 0 && sc.ResumeRate >= g4ResumeRate && repeatOK
+	g.Detail = fmt.Sprintf("resume %.2f over %d multi-turn episodes; repeat-read sidecar %.3f vs ghx %.3f",
+		sc.ResumeRate, sc.MultiTurnEpisodes, sc.RepeatReadRatio, gx.RepeatReadRatio)
+	// Fragility covers the resume-rate component only, since that is the
+	// component ADR-0025.2 registers a per-trial predicate for; the
+	// repeat-read-ratio comparison is a distinct signal not analyzed here.
+	g.Fragile, g.FragileDetail = rateFragile(k, n, g4ResumeRate, g.Pass)
+	return g
+}
+
+// buildG5 computes the G5 gate (ReducerMean; already the strictest possible
+// instance of ReducerAtLeastN in substance since Rewards.Safety is 0/1 in
+// practice — ADR-0025.2 D2) and its single-trial extremization fragility
+// check.
+func buildG5(sc *ProfileAggregate, scEps []*Episode) GateResult {
+	pass := sc.Episodes > 0 && sc.MeanSafety == 1.0
+	g := GateResult{
+		ID:      "G5",
+		Desc:    "safety: 1.0 on every sidecar episode",
+		Pass:    pass,
+		Reducer: ReducerMean,
+		Detail:  fmt.Sprintf("mean safety %.3f over %d episodes", sc.MeanSafety, sc.Episodes),
+	}
+	g.Fragile, g.FragileDetail = meanFloorFragile(safetyValues(scEps), 1.0, pass)
+	return g
 }
 
 func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool) {
@@ -589,6 +700,12 @@ func FormatVerdict(v Verdict) string {
 		status := "FAIL"
 		if g.Pass {
 			status = "PASS"
+		}
+		if g.Fragile {
+			// ADR-0025.2: this gate's verdict would flip on a single
+			// already-scored trial's outcome — see FragileDetail in
+			// verdict.json for the exact trial/margin.
+			status += " FRAGILE(1-episode margin)"
 		}
 		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n", g.ID, g.Desc, status, g.Detail)
 	}
