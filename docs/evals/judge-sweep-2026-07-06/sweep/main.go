@@ -383,13 +383,16 @@ func parseCandidates(path string) ([]candidateRow, error) {
 		if !strings.HasPrefix(line, "| gs-") {
 			continue
 		}
+		// A table row `| a | b | ... | f |` splits into a leading and trailing
+		// empty cell: columns are cells[1..6] (label id, episode file, task,
+		// turns, stratum, batch-1).
 		cells := strings.Split(line, "|")
 		if len(cells) < 8 {
 			continue
 		}
 		labelID := strings.TrimSpace(cells[1])
 		epPath := strings.Trim(strings.TrimSpace(cells[2]), "`")
-		inBatch := strings.TrimSpace(cells[7]) == "x"
+		inBatch := strings.TrimSpace(cells[6]) == "x"
 		rows = append(rows, candidateRow{
 			LabelID:   labelID,
 			Path:      epPath,
