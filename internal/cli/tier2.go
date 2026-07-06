@@ -67,13 +67,11 @@ func tier2SnapshotFlags(cmd *cobra.Command) {
 var tier2CodemapCmd = &cobra.Command{
 	Use:   "codemap <owner/repo>",
 	Short: "Cross-file structure via the absorbed codemap tool (backend local:codemap)",
-	Long: `Run the absorbed codemap tool over a cached snapshot to see cross-file structure:
-an overview by default, the JSON context envelope with ` + "`--context`" + ` (add ` + "`--compact`" + `
-to minimize tokens), fan-in importers of a file with ` + "`--importers`" + `, or dependency
-hubs and import chains with ` + "`--deps`" + `. This is Tier-2 local analysis — snapshot
-provenance (repo, ref, resolved SHA, cache hit) prints to stderr before any tool
-output. ` + "`--importers`" + ` and ` + "`--deps`" + ` need ast-grep on PATH; exit code 3 with an
-install hint if a required binary is missing.`,
+	Long: `Run the absorbed codemap tool over a cached snapshot for cross-file structure:
+overview by default, --context for the JSON envelope, --importers for fan-in and
+--deps for dependency flow (both need ast-grep on PATH). Snapshot provenance and
+the local:codemap backend line print to stderr before any output. Exit 3 when
+codemap is not installed (install hint included); no clone happens in that case.`,
 	Example: `  ghx tier2 codemap honojs/hono
   ghx tier2 codemap gin-gonic/gin --importers gin.go
   ghx tier2 codemap openai/openai-node --ref next --context --compact
@@ -139,6 +137,9 @@ install hint if a required binary is missing.`,
 var tier2AstGrepCmd = &cobra.Command{
 	Use:   "astgrep <owner/repo> [paths...]",
 	Short: "Structural AST pattern search via the absorbed ast-grep tool (backend local:ast-grep)",
+	Long: `Structural AST pattern search over a cached snapshot via the absorbed ast-grep
+tool (backend local:ast-grep). Exit 1 with [] means zero matches (grep parity);
+exit 3 when ast-grep is not installed. Patterns pass through to ast-grep verbatim.`,
 	Example: `  ghx tier2 astgrep honojs/hono --pattern 'compose($$$ARGS)' --lang ts
   ghx tier2 astgrep gin-gonic/gin --pattern 'func ($R $T) ServeHTTP($$$) { $$$ }' --lang go
   ghx tier2 astgrep openai/openai-node --pattern 'new Stream($$$)' --lang ts src
@@ -191,6 +192,10 @@ var tier2AstGrepCmd = &cobra.Command{
 var tier2RepomapCmd = &cobra.Command{
 	Use:   "repomap <owner/repo>",
 	Short: "Rank the files that matter via graph centrality under a token budget (backend local:repomap)",
+	Long: `Rank the files that matter most for a concern: definition/reference/import-graph
+centrality (repomap-style PageRank, algorithm credited to aider) under a strict
+token budget — deterministic for a given snapshot. Backend local:repomap; no
+external binary required.`,
 	Example: `  ghx tier2 repomap honojs/hono
   ghx tier2 repomap gin-gonic/gin --query route --query middleware
   ghx tier2 repomap openai/openai-node --budget 512 --query streaming
