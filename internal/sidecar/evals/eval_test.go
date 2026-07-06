@@ -21,7 +21,7 @@ import (
 //	go test ./internal/sidecar/evals -tags=agent_e2e -run TestEpisodes -count=5
 //
 // The agent command comes from GHX_EVAL_AGENT, falling back to the sidecar
-// config (~/.ghx-sidecar/config.json). Requires a GitHub token and network
+// config (~/.ghx/config.json). Requires a GitHub token and network
 // access; the test skips with a preflight diagnostic when the environment
 // is not ready, and fails when the agent itself cannot complete an episode.
 func TestEpisodes(t *testing.T) {

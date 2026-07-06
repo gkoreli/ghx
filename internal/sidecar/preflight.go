@@ -33,7 +33,7 @@ func RunPreflight(ctx context.Context) PreflightResult {
 // RunPreflightForAgent runs the same checks but probes agentCmd instead of
 // the configured agent when agentCmd is non-empty. Eval runs pass
 // GHX_EVAL_AGENT here so the handshake checks the agent actually under
-// test, not whatever ~/.ghx-sidecar/config.json points at.
+// test, not whatever ~/.ghx/config.json points at.
 func RunPreflightForAgent(ctx context.Context, agentCmd string) PreflightResult {
 	type fn func(context.Context) PreflightCheck
 	cfg := preflightAgentConfig(agentCmd)

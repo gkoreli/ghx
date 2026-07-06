@@ -17,7 +17,7 @@ type RunConfig struct {
 	// AgentCmd is the ACP agent binary spawned for every profile.
 	AgentCmd string
 	// SessionsDir is the sidecar session store for this run. Use a
-	// per-run temporary directory so episodes never touch ~/.ghx-sidecar.
+	// per-run temporary directory so episodes never touch ~/.ghx.
 	SessionsDir string
 }
 

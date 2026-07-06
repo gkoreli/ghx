@@ -136,3 +136,75 @@ item from the M6 row.
 - ADR-0016.4 — OTLP JSON file transport decision.
 - ADR-0021 — persisted reports join the session artifact set (D2).
 - AGENTS.md "Open Source Leverage" — official formats exactly.
+
+## Implementation Notes (2026-07-05)
+
+Implemented across two commits: `refactor(telemetry)` (D1) and
+`feat(sidecar)` (D2–D5).
+
+**D1 — shared package seam.** The generic OTLP machinery moved to
+`internal/sidecar/telemetry`: the trace file exporter (`NewTraceExporter`,
+hex-ID transcoding), `NewTracerProvider` (honours `OTEL_EXPORTER_OTLP_ENDPOINT`),
+`WriteLogs`, `WriteMetrics`, and the metric builders (`HistogramMetric`,
+`HistogramPoint`, `SumMetric`, `IntPoint`, `AppendAttrs`, `UnixNano`). The
+neutral seam is deliberately *low-level* — the shared writers take
+`(path, resourceAttrs, scopeName, scopeVersion, records|metrics)`, not any
+`evals.Episode` — so both stacks build their own domain attributes on top and
+neither leaks into the other. Package `evals` kept every eval-specific attribute
+builder (`resourceAttributes`, `episodeAttributes`, `turnAttributes`,
+`toolAttributes`, reward spans, `gen_ai.evaluation.result`/check/penalty events,
+reward/anomaly/report-size metrics, GenAI content records) and now calls the
+shared package for transport. The extraction was a pure move: eval artifact
+output is byte-identical because the protobuf conversion, resource attributes,
+and instrumentation scope (`…/internal/sidecar/evals` @ `1.41.0`) are unchanged.
+The two generic exporter tests moved to the telemetry package with assertions
+untouched; the three eval-specific exporter tests stayed in `evals` and pass
+unchanged. `go test ./... -count=1` and `go vet ./...` both pass (exit 0).
+
+**D2 — production emission.** `internal/sidecar/emit.go` adds a neutral
+`turnTelemetry` adapter (session/turn identifiers + `TurnResult` + report +
+timing, no eval type). Every `sidecar.Ask` turn now emits a
+`sidecar.ask` → `sidecar.turn` → `tool.<kind>` span tree, GenAI content logs,
+and duration/token/`ghx.sidecar.report.size` metrics into
+`sessions/<name>/`, and persists the accepted report to
+`reports/<turn>-<ts>.json` (via new `SaveTurnReport`; `ListReports` reads both
+the new subdir and the legacy flat files). Production resource label is
+`service.name=ghx-sidecar`; scope is `…/internal/sidecar` @ `1.41.0`.
+Emission is best-effort: `emitTurnArtifacts` warns to stderr and never returns
+an error into `Ask`.
+
+**Honest gaps (production vs evals).** (1) *Token counts are character-length
+proxies* — the same proxy evals already uses; neither path has real
+tokenizer/usage numbers from ACP, so `gen_ai.usage.*` and
+`gen_ai.client.token.usage` carry `len(text)`, not tokens. (2) *Duration is
+coarser in production*: the eval path records per-turn ACP `DurationMs`, while
+`Ask` measures one wall-clock window across the whole invocation including
+corrective retries. (3) Tool-span timing uses ACP `StatusTransitions`
+timestamps; when a trace lacks them the span collapses to a zero-width point at
+emit time. These are labelled in code comments, not silently smoothed.
+
+**D3 — storage root.** `newRoot()` = `$GHX_HOME` or `~/.ghx`; `SaveConfig`
+always writes there. `LoadConfig` read-falls-back to `~/.ghx-sidecar` only when
+neither `$GHX_HOME` nor `~/.ghx` exists and the legacy dir is present, printing
+a one-line stderr notice once per process (`sync.Once`). `config init` starts
+from `NewDefaultConfig()` (rooted at the new location) and carries over any
+existing model/visibility, so it migrates rather than pinning the legacy path —
+read-fallback, not a file mover. All tests use temp dirs via injected
+`SessionsDir` or `GHX_HOME`; none touch the real home.
+
+**D4 — content capture.** `Config.CaptureContent()` returns true by default and
+false when `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false` or
+`visibility.captureContent=false`. The eval path's stricter env gating
+(`captureGenAIMessageContent`, opt-in) is untouched.
+
+**D5 — viewer guidance.** `ghx sidecar doctor` prints `ArtifactsHint`, naming
+the session artifact files and pointing at the ADR-0018 "Live validation"
+replay recipe rather than duplicating it.
+
+**Sample production artifact** (from a mockagent unit test through the real
+`Ask` path) — one `traces.jsonl` `tool.read` span carries spec hex IDs
+(`traceId` 32 hex, `spanId` 16 hex, `parentSpanId` = the turn span) with
+`service.name=ghx-sidecar` and `gen_ai.operation.name=execute_tool`; the
+accepted report was persisted as `reports/1-<unixmillis>.json`. Covered by
+`TestAskEmitsSessionArtifacts` and `TestAskContentCaptureDisabled` in
+`internal/sidecar/emit_test.go`.
