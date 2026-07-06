@@ -144,7 +144,14 @@ modular, and reused across both.
    exactly what ghx did and why. Control mirrors visibility: anticipation
    level, escalation policy, budgets — all configurable at every scope, with
    defaults that just work. Reconnaissance is abstracted away; awareness
-   never is.
+   never is. Sharpened 2026-07-05: the **main agent is a first-class
+   consumer** of both halves — visibility means an agent reads `~/.ghx`
+   session artifacts (reports, traces, ledgers) as an API surface, and
+   control means the consumption model itself (skill, MCP tool, future
+   A2A) exposes the dials (depth, anticipation, budgets) with smart
+   agentic defaults, so a main agent steers its sidecar without a human
+   in the loop. SAF ergonomics are measured against the main agent's
+   experience, not only the founder's.
 4. **Dogfooding is the ergonomics bar.** The founder uses ghx-with-sidecar
    for daily development instead of the bare CLI. Friction found while
    dogfooding outranks speculative features.
