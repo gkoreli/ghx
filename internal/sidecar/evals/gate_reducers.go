@@ -14,9 +14,11 @@ import (
 // (minGateRunTrials = 5), a mean-vs-threshold reducer can flip PASS to FAIL
 // because of a single thin-margin trial (TRUST.md H6). This file adds:
 //
-//   - ReducerAtLeastN: an opt-in second reducer for G2 and G4 that counts how
-//     many trials individually clear the gate's own per-trial threshold,
-//     instead of averaging trials first.
+//   - ReducerAtLeastN: an opt-in second reducer that counts how many trials
+//     (or, for G1, paired task cells) individually clear the gate's per-trial
+//     threshold, instead of averaging trials first. G2 and G4 landed with
+//     ADR-0025.2; the residuals closure added G1 (paired task cells) and G3
+//     (pre-registered absolute char ceiling).
 //   - Fragility: a deterministic annotation, computed for every gate on
 //     every call, reporting whether flipping exactly one already-scored
 //     trial's outcome would change that gate's Pass value.
@@ -38,20 +40,34 @@ const (
 	// unless GateOptions opts it into ReducerAtLeastN.
 	ReducerMean GateReducer = "mean"
 
-	// ReducerAtLeastN requires at least N of the gate's evaluated trials to
-	// individually clear the gate's per-trial threshold. Only G2 and G4
-	// support this reducer (ADR-0025.2 D2) — G1's relative comparison and
-	// G3's unbounded ratio metric have no natural per-trial predicate
-	// without further design work, and G5 is already the strictest
-	// possible instance of this reducer (n == N) under ReducerMean.
+	// ReducerAtLeastN requires at least N of the gate's evaluated units to
+	// individually clear the gate's per-unit threshold. The unit is the
+	// individual trial for G2 (evidence ≥ g2Floor), G3 (main-agent chars ≤
+	// the spec's pre-registered CharCeiling), and G4 (allFollowupsResumed);
+	// for G1 the unit is the paired task cell (same task, sidecar and ghx
+	// task-level mean correctness compared by g1Pass), because nothing in
+	// the episode model pairs one sidecar trial to "its" ghx trial
+	// (ADR-0025.2 D2 + residuals closure). G5 does not take this reducer:
+	// it is already the strictest possible instance (n == N) under
+	// ReducerMean.
 	ReducerAtLeastN GateReducer = "at_least_n"
 )
 
 // AtLeastNSpec configures the at_least(n) reducer for one gate: N of the
-// gate's evaluated trials must individually clear its per-trial threshold.
+// gate's evaluated units (trials, or paired task cells for G1) must
+// individually clear its per-unit threshold.
 type AtLeastNSpec struct {
-	// N is the minimum number of trials that must individually pass.
+	// N is the minimum number of units that must individually pass.
 	N int
+	// CharCeiling is the pre-registered per-episode main-agent chars
+	// ceiling used only by G3's at_least(n) form (ADR-0025.2 residuals):
+	// a sidecar trial individually passes iff its MainAgentChars is at or
+	// under this ceiling. G3's ratio metric is unbounded, so its at_least
+	// form needs an explicit absolute budget — a G3 spec without a
+	// positive CharCeiling is rejected with a GATE CONFIG verdict note,
+	// never silently defaulted. Ignored (with a verdict note) on any
+	// other gate.
+	CharCeiling int
 }
 
 // GateOptions is the opt-in override surface for EvaluateGatesWithOptions.
@@ -59,19 +75,23 @@ type AtLeastNSpec struct {
 // existing gate configs keep their current semantics unless they opt into
 // at_least(n)).
 type GateOptions struct {
-	// AtLeastN maps a gate ID ("G2" or "G4") to an at_least(n) override.
-	// Gate IDs absent from this map keep ReducerMean. A key for any other
-	// gate ID is not silently ignored: EvaluateGatesWithOptions records a
-	// verdict note that the override was not applied (ADR-0025.2 D2).
+	// AtLeastN maps a gate ID ("G1", "G2", "G3", or "G4") to an
+	// at_least(n) override. Gate IDs absent from this map keep
+	// ReducerMean. A key for any other gate ID, or a G3 key without a
+	// positive CharCeiling, is not silently ignored:
+	// EvaluateGatesWithOptions records a verdict note that the override
+	// was not applied (ADR-0025.2 D2 + residuals closure).
 	AtLeastN map[string]AtLeastNSpec
 }
 
-// atLeastNSupportedGates are the only gate IDs ReducerAtLeastN is wired for
-// in this landing (ADR-0025.2 D2).
-var atLeastNSupportedGates = map[string]bool{"G2": true, "G4": true}
+// atLeastNSupportedGates are the gate IDs ReducerAtLeastN is wired for:
+// G2/G4 from the ADR-0025.2 landing, G1 (paired task cells) and G3
+// (pre-registered char ceiling) from the residuals closure. G5 stays
+// ReducerMean — it is already the strictest possible at_least instance.
+var atLeastNSupportedGates = map[string]bool{"G1": true, "G2": true, "G3": true, "G4": true}
 
-// atLeastSpec looks up a gate's at_least(n) override, or nil if the gate
-// keeps ReducerMean.
+// atLeastSpec looks up a gate's raw at_least(n) override, or nil if the
+// gate has no entry in GateOptions.
 func atLeastSpec(opts GateOptions, id string) *AtLeastNSpec {
 	if opts.AtLeastN == nil {
 		return nil
@@ -84,23 +104,55 @@ func atLeastSpec(opts GateOptions, id string) *AtLeastNSpec {
 	return &out
 }
 
-// unsupportedAtLeastNNotes reports a verdict note for every GateOptions key
-// naming a gate that does not support ReducerAtLeastN, so a caller cannot
-// believe an override took effect when EvaluateGatesWithOptions silently
-// left it as ReducerMean.
-func unsupportedAtLeastNNotes(opts GateOptions) []string {
+// effectiveAtLeastSpec returns the at_least(n) spec that will actually be
+// applied for gate id, or nil when the gate keeps ReducerMean: no override,
+// an unsupported gate, or an incomplete G3 spec missing its pre-registered
+// char ceiling. gateConfigNotes reports every rejected override, so the two
+// functions must stay in agreement.
+func effectiveAtLeastSpec(opts GateOptions, id string) *AtLeastNSpec {
+	if !atLeastNSupportedGates[id] {
+		return nil
+	}
+	spec := atLeastSpec(opts, id)
+	if spec == nil {
+		return nil
+	}
+	if id == "G3" && spec.CharCeiling <= 0 {
+		return nil
+	}
+	return spec
+}
+
+// gateConfigNotes reports a verdict note for every GateOptions entry that
+// EvaluateGatesWithOptions will not apply as written — an unsupported gate
+// ID, a G3 override missing its pre-registered char ceiling, or a char
+// ceiling on a gate that does not take one — so a caller cannot believe an
+// override took effect when it did not (ADR-0025.2 D2, visibility tenet).
+func gateConfigNotes(opts GateOptions) []string {
 	var ids []string
 	for id := range opts.AtLeastN {
-		if !atLeastNSupportedGates[id] {
-			ids = append(ids, id)
-		}
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	var notes []string
 	for _, id := range ids {
-		notes = append(notes, fmt.Sprintf(
-			"GATE CONFIG: at_least(n) requested for %s but %s does not support this reducer (ADR-0025.2) — %s uses ReducerMean",
-			id, id, id))
+		spec := opts.AtLeastN[id]
+		if !atLeastNSupportedGates[id] {
+			notes = append(notes, fmt.Sprintf(
+				"GATE CONFIG: at_least(n) requested for %s but %s does not support this reducer (ADR-0025.2) — %s uses ReducerMean",
+				id, id, id))
+			continue
+		}
+		if id == "G3" && spec.CharCeiling <= 0 {
+			notes = append(notes,
+				"GATE CONFIG: at_least(n) requested for G3 without a positive per-episode char ceiling (AtLeastNSpec.CharCeiling) — the ceiling must be pre-registered before use (ADR-0025.2 residuals); G3 uses ReducerMean")
+			continue
+		}
+		if id != "G3" && spec.CharCeiling != 0 {
+			notes = append(notes, fmt.Sprintf(
+				"GATE CONFIG: CharCeiling set for %s but only G3 takes a char ceiling (ADR-0025.2 residuals) — the ceiling was ignored",
+				id))
+		}
 	}
 	return notes
 }
@@ -116,29 +168,43 @@ func countAtLeast(vals []float64, floor float64) int {
 	return k
 }
 
+// countAtMost counts how many values individually stay at or under ceiling
+// (G3's at_least(n) per-trial predicate against its pre-registered char
+// ceiling).
+func countAtMost(vals []float64, ceiling float64) int {
+	k := 0
+	for _, v := range vals {
+		if v <= ceiling {
+			k++
+		}
+	}
+	return k
+}
+
 // atLeastNFragile is the closed-form fragility check for ReducerAtLeastN
 // (and for any boolean-rate gate, e.g. G4's default resume-rate reducer):
-// k of n trials individually pass, and the gate requires at least req. If
-// currently passing (k >= req), the gate is fragile iff k == req exactly —
-// one pass-to-fail flip would drop below req. If currently failing
-// (k < req), it is fragile iff k == req-1 — one fail-to-pass flip would
-// reach req.
-func atLeastNFragile(k, req, total int, passNow bool) (bool, string) {
+// k of n units individually pass, and the gate requires at least req. The
+// unit names what is being counted in FragileDetail — "trials" for
+// G2/G3/G4, "paired task cells" for G1. If currently passing (k >= req),
+// the gate is fragile iff k == req exactly — one pass-to-fail flip would
+// drop below req. If currently failing (k < req), it is fragile iff
+// k == req-1 — one fail-to-pass flip would reach req.
+func atLeastNFragile(k, req, total int, unit string, passNow bool) (bool, string) {
 	if total == 0 {
 		return false, ""
 	}
 	if passNow {
 		if k == req {
 			return true, fmt.Sprintf(
-				"exactly %d of %d trials pass — one trial flipping from pass to fail would drop below the required %d",
-				k, total, req)
+				"exactly %d of %d %s pass — one flipping from pass to fail would drop below the required %d",
+				k, total, unit, req)
 		}
 		return false, ""
 	}
 	if req > 0 && k == req-1 {
 		return true, fmt.Sprintf(
-			"%d of %d trials pass, one short of the required %d — one trial flipping from fail to pass would clear it",
-			k, total, req)
+			"%d of %d %s pass, one short of the required %d — one flipping from fail to pass would clear it",
+			k, total, unit, req)
 	}
 	return false, ""
 }
@@ -312,6 +378,68 @@ func g1Fragile(scVals, gxVals []float64, passNow bool) (bool, string) {
 			gxVals[j], newGx, scMean)
 	}
 	return false, ""
+}
+
+// g1TaskPair is one paired task cell for G1's at_least(n) reducer
+// (ADR-0025.2 residuals): the same task's mean correctness under the
+// sidecar and ghx profiles. Pairing happens at the task-cell level, not the
+// individual-trial level — trial counts can differ per profile and nothing
+// in the episode model pairs one sidecar trial to "its" ghx trial, but a
+// task cell is comparable by construction (same task, both profiles).
+type g1TaskPair struct {
+	// TaskID is the shared task the two profile cells ran.
+	TaskID string
+	// ScMean is the mean sidecar correctness over the task's sidecar trials.
+	ScMean float64
+	// GxMean is the mean ghx correctness over the task's ghx trials.
+	GxMean float64
+}
+
+// pass reports whether this paired task cell individually satisfies the G1
+// bound — the exact g1Pass comparison the ReducerMean gate uses, applied to
+// task-level means instead of run-level means.
+func (p g1TaskPair) pass() bool {
+	return g1Pass(p.ScMean, p.GxMean)
+}
+
+// g1TaskPairs builds the paired task cells present in BOTH profiles, sorted
+// by task ID for deterministic output, plus the IDs of unpaired tasks
+// (episodes in only one profile) so the verdict reports them instead of
+// silently dropping them.
+func g1TaskPairs(scEps, gxEps []*Episode) (pairs []g1TaskPair, unpaired []string) {
+	scByTask := correctnessByTask(scEps)
+	gxByTask := correctnessByTask(gxEps)
+	ids := map[string]bool{}
+	for id := range scByTask {
+		ids[id] = true
+	}
+	for id := range gxByTask {
+		ids[id] = true
+	}
+	var all []string
+	for id := range ids {
+		all = append(all, id)
+	}
+	sort.Strings(all)
+	for _, id := range all {
+		sc, scOK := scByTask[id]
+		gx, gxOK := gxByTask[id]
+		if !scOK || !gxOK {
+			unpaired = append(unpaired, id)
+			continue
+		}
+		pairs = append(pairs, g1TaskPair{TaskID: id, ScMean: mean(sc), GxMean: mean(gx)})
+	}
+	return pairs, unpaired
+}
+
+// correctnessByTask groups per-episode correctness rewards by task ID.
+func correctnessByTask(eps []*Episode) map[string][]float64 {
+	out := map[string][]float64{}
+	for _, ep := range eps {
+		out[ep.TaskID] = append(out[ep.TaskID], ep.Rewards.Correctness)
+	}
+	return out
 }
 
 // g3Pass is the G3 gate condition, factored out so the fragility check
