@@ -313,7 +313,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 |---|---|---|
 | C1 | Eval kernel, gates, validity hardening (= M3, M4) | Done — M4 THESIS SUPPORTED |
 | C2 | Run economics: sequential stopping + bounded parallelism (ADR-0025 D1/D3) | Done; D2 baseline reuse + D4 haiku arm pending (pre-register before build) |
-| C3 | Measurement fidelity: union scoring, contamination guard, sufficiency honesty (ADR-0016.8) | Done 2026-07-06 — first measured verdict in flight |
+| C3 | Measurement fidelity: union scoring, contamination guard, sufficiency honesty (ADR-0016.8) | **Done 2026-07-06 — measured**: gate-run-2026-07-06-fixbatch THESIS SUPPORTED citable, all 5 gates, G1 ratio 0.983, 16.6× compression; contamination guard fired 7×, honesty machinery forced top-ups to contract (`docs/evals/gate-run-2026-07-06-fixbatch/`) |
 | C4 | Judge layer: offline machinery + cross-family client done; gold-set labeling + κ ≥ 0.6 calibration pending (ADR-0023.1) | ← frontier — founder labeling session unlocks it |
 | C5 | Discovery-class eval tasks (ADR-0019.1 D5) | Future (ADR before build) |
 | C6 | Continuous evaluation: judged production sessions, self-reflective improvement loop (observability tenet) | Future (gated on C4 calibration) |
