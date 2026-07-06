@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,6 +123,8 @@ type Service struct {
 	Git GitRunner
 	// Codemap is the absorbed codemap adapter.
 	Codemap *Codemap
+	// AstGrep is the absorbed ast-grep adapter.
+	AstGrep *AstGrep
 	// Version is the ghx version recorded in snapshot metadata.
 	Version string
 	// now is the clock, swapped in tests.
@@ -140,6 +143,7 @@ func NewService(ghxRoot, version string) *Service {
 		Cache:   NewCache(ghxRoot),
 		Git:     ExecGit{},
 		Codemap: NewCodemap(),
+		AstGrep: NewAstGrep(),
 		Version: version,
 		now:     time.Now,
 		active:  map[string]bool{},
@@ -306,6 +310,37 @@ func (s *Service) RunCodemap(ctx context.Context, snap Snapshot, req CodemapRequ
 	}
 	s.recordToolArtifact(snap.Dir, req.ArtifactKey(), run.Stdout)
 	return run, nil
+}
+
+// RunAstGrep executes one structural pattern search over the snapshot,
+// records the stdout hash in the snapshot's tool artifact ledger when the
+// search ran (matches or clean zero-match), and returns the ToolRun evidence
+// record. Failures return the populated ToolRun plus the error — a failed
+// invocation is evidence, not a silent retry.
+func (s *Service) RunAstGrep(ctx context.Context, snap Snapshot, req AstGrepRequest) (ToolRun, error) {
+	run, err := s.AstGrep.Run(ctx, snap.Dir, req)
+	if err != nil {
+		return run, err
+	}
+	s.recordToolArtifact(snap.Dir, req.ArtifactKey(), run.Stdout)
+	return run, nil
+}
+
+// RunRepomap collects file facts from the snapshot working tree, runs the
+// pure ranking function, records the canonical JSON hash in the snapshot's
+// tool artifact ledger, and returns the budgeted ranking. The recomputable
+// evidence command is the ghx invocation itself (`ghx tier2 repomap ...`) —
+// there is no external binary behind local:repomap.
+func (s *Service) RunRepomap(ctx context.Context, snap Snapshot, req RepomapRequest) (RepomapResult, error) {
+	facts, err := CollectFileFacts(ctx, snap.Dir)
+	if err != nil {
+		return RepomapResult{}, fmt.Errorf("collect repomap facts in %s: %w", snap.Dir, err)
+	}
+	result := RankFiles(facts, req)
+	if data, merr := json.Marshal(result); merr == nil {
+		s.recordToolArtifact(snap.Dir, req.ArtifactKey(), string(data))
+	}
+	return result, nil
 }
 
 // recordToolArtifact stores sha256(stdout) under key in the snapshot

@@ -1,12 +1,10 @@
 package tier2
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -46,6 +44,8 @@ const (
 	// CodemapContext runs `codemap context`: the universal JSON ContextEnvelope.
 	CodemapContext CodemapMode = "context"
 	// CodemapImporters runs `codemap --importers <file>`: fan-in for one file.
+	// Requires the ast-grep binary (item 3): codemap shells out to it for
+	// fan-in resolution.
 	CodemapImporters CodemapMode = "importers"
 	// CodemapDeps runs `codemap --deps .`: dependency flow / import chains.
 	// Requires the ast-grep binary; its absence surfaces as tool failure
@@ -100,61 +100,23 @@ func (r CodemapRequest) ArtifactKey() string {
 	return key
 }
 
-// ToolRun is the evidence record of one structural tool invocation: exactly
-// what ran, where, and what came back. A failed run is first-class evidence
-// (ADR-0024.1: "a failed codemap/ast-grep invocation is evidence and must be
-// reported as uncertainty or a blocked Tier-2 path").
-type ToolRun struct {
-	// Backend is the canonical backend ID, e.g. "local:codemap".
-	Backend string
-	// Binary is the resolved tool path that ran.
-	Binary string
-	// Args is the argv after the binary name.
-	Args []string
-	// Dir is the snapshot directory the tool ran in.
-	Dir string
-	// Started is when the invocation began (UTC).
-	Started time.Time
-	// Duration is the wall time of the invocation.
-	Duration time.Duration
-	// ExitCode is the process exit code (0 on success, -1 if it never ran).
-	ExitCode int
-	// Stdout is the captured tool output (the evidence payload).
-	Stdout string
-	// Stderr is the captured error stream (diagnostic evidence on failure).
-	Stderr string
-}
-
-// Command renders the recomputable command line for evidence citations, e.g.
-// "codemap --json .".
-func (t ToolRun) Command() string {
-	return strings.Join(append([]string{codemapBinary}, t.Args...), " ")
-}
-
 // Codemap is the subprocess adapter for the absorbed codemap tool. Discovery,
-// invocation, and evidence capture live here — the rest of ghx sees only
-// domain types (single-owner rule, AGENTS.md Engineering Tenets).
+// invocation, and evidence capture live in the embedded subprocessAdapter —
+// the rest of ghx sees only domain types (single-owner rule, AGENTS.md
+// Engineering Tenets).
 type Codemap struct {
-	// lookPath resolves the binary; swapped in tests. Defaults to exec.LookPath.
-	lookPath func(string) (string, error)
-	// runTimeout bounds one invocation.
-	runTimeout time.Duration
+	subprocessAdapter
 }
 
 // NewCodemap returns the adapter with production discovery (PATH lookup).
 func NewCodemap() *Codemap {
-	return &Codemap{lookPath: exec.LookPath, runTimeout: 2 * time.Minute}
-}
-
-// Discover resolves the codemap binary on PATH. Absence returns
-// ErrCodemapNotInstalled (wrapped) so callers can fall back gracefully and
-// print CodemapInstallHint.
-func (c *Codemap) Discover() (string, error) {
-	path, err := c.lookPath(codemapBinary)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrCodemapNotInstalled, err)
-	}
-	return path, nil
+	return &Codemap{subprocessAdapter{
+		binary:          codemapBinary,
+		backend:         BackendCodemap,
+		errNotInstalled: ErrCodemapNotInstalled,
+		lookPath:        exec.LookPath,
+		runTimeout:      2 * time.Minute,
+	}}
 }
 
 // Run executes one codemap invocation inside snapshotDir and returns the
@@ -162,42 +124,9 @@ func (c *Codemap) Discover() (string, error) {
 // missing, the request is invalid, or the process exited non-zero — the
 // ToolRun is still populated in the exit-code case so failures stay auditable.
 func (c *Codemap) Run(ctx context.Context, snapshotDir string, req CodemapRequest) (ToolRun, error) {
-	run := ToolRun{Backend: BackendCodemap, Dir: snapshotDir, ExitCode: -1}
 	args, err := req.args()
 	if err != nil {
-		return run, err
+		return c.newRun(snapshotDir, nil), err
 	}
-	run.Args = args
-	binary, err := c.Discover()
-	if err != nil {
-		return run, err
-	}
-	run.Binary = binary
-
-	if c.runTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.runTimeout)
-		defer cancel()
-	}
-	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Dir = snapshotDir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	run.Started = time.Now().UTC()
-	err = cmd.Run()
-	run.Duration = time.Since(run.Started)
-	run.Stdout = stdout.String()
-	run.Stderr = stderr.String()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			run.ExitCode = exitErr.ExitCode()
-			return run, fmt.Errorf("%s exited %d: %s", run.Command(), run.ExitCode, strings.TrimSpace(run.Stderr))
-		}
-		return run, fmt.Errorf("run %s: %w", run.Command(), err)
-	}
-	run.ExitCode = 0
-	return run, nil
+	return c.exec(ctx, snapshotDir, args)
 }

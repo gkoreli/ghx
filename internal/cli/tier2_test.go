@@ -31,6 +31,90 @@ func TestTier2CommandShape(t *testing.T) {
 	}
 }
 
+func TestTier2AstGrepCommandShape(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"tier2", "astgrep"})
+	if err != nil {
+		t.Fatalf("Find tier2 astgrep: %v", err)
+	}
+	if cmd != tier2AstGrepCmd {
+		t.Fatalf("RootCmd tier2 astgrep = %v, want tier2AstGrepCmd", cmd)
+	}
+	if tier2AstGrepCmd.Use != "astgrep <owner/repo> [paths...]" {
+		t.Fatalf("Use = %q", tier2AstGrepCmd.Use)
+	}
+	// The ADR-0024.1 smoke repos should appear as examples so evidence
+	// citations stay recomputable.
+	if !strings.Contains(tier2AstGrepCmd.Example, "ghx tier2 astgrep honojs/hono") {
+		t.Fatalf("tier2 astgrep examples missing hono smoke: %q", tier2AstGrepCmd.Example)
+	}
+	for _, name := range []string{"pattern", "lang", "ref", "sparse"} {
+		if tier2AstGrepCmd.Flag(name) == nil {
+			t.Fatalf("tier2 astgrep flag %q not registered", name)
+		}
+	}
+}
+
+func TestTier2RepomapCommandShape(t *testing.T) {
+	cmd, _, err := RootCmd.Find([]string{"tier2", "repomap"})
+	if err != nil {
+		t.Fatalf("Find tier2 repomap: %v", err)
+	}
+	if cmd != tier2RepomapCmd {
+		t.Fatalf("RootCmd tier2 repomap = %v, want tier2RepomapCmd", cmd)
+	}
+	if !strings.Contains(tier2RepomapCmd.Example, "ghx tier2 repomap honojs/hono") {
+		t.Fatalf("tier2 repomap examples missing hono smoke: %q", tier2RepomapCmd.Example)
+	}
+	for _, name := range []string{"query", "budget", "ref", "sparse"} {
+		if tier2RepomapCmd.Flag(name) == nil {
+			t.Fatalf("tier2 repomap flag %q not registered", name)
+		}
+	}
+	if def := tier2RepomapCmd.Flag("budget").DefValue; def != "1024" {
+		t.Fatalf("budget default = %q, want the pre-registered 1024", def)
+	}
+}
+
+// TestTier2AstGrepMissingBinaryFallsBackBeforeClone proves the graceful
+// fallback ordering for item 3: with no ast-grep on PATH the command fails
+// with the typed not-installed error and the upstream exit code, before any
+// network or clone work (an empty PATH would break git too if it were
+// reached).
+func TestTier2AstGrepMissingBinaryFallsBackBeforeClone(t *testing.T) {
+	t.Setenv("GHX_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // no ast-grep, no git
+
+	RootCmd.SetArgs([]string{"tier2", "astgrep", "gin-gonic/gin", "--pattern", "func main() { $$$ }"})
+	defer RootCmd.SetArgs(nil)
+	err := RootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected ast-grep-not-installed error")
+	}
+	if !errors.Is(err, tier2.ErrAstGrepNotInstalled) {
+		t.Fatalf("error = %v, want ErrAstGrepNotInstalled", err)
+	}
+	if got := CodeForError(err); got != ExitUpstreamFailure {
+		t.Fatalf("exit code = %d, want %d", got, ExitUpstreamFailure)
+	}
+}
+
+// TestTier2RepomapInvalidRepoFailsBeforeNetwork: repomap needs no external
+// binary, so its first guard is snapshot validation.
+func TestTier2RepomapInvalidRepoFailsBeforeNetwork(t *testing.T) {
+	t.Setenv("GHX_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // no git: any network/clone attempt would fail differently
+
+	RootCmd.SetArgs([]string{"tier2", "repomap", "not-a-repo"})
+	defer RootCmd.SetArgs(nil)
+	err := RootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "invalid repo") {
+		t.Fatalf("error = %v, want invalid repo rejection", err)
+	}
+	if got := CodeForError(err); got != ExitUpstreamFailure {
+		t.Fatalf("exit code = %d, want %d", got, ExitUpstreamFailure)
+	}
+}
+
 // TestTier2CodemapMissingBinaryFallsBackBeforeClone proves the graceful
 // fallback ordering: with no codemap on PATH the command fails with the
 // typed not-installed error and the upstream exit code, before any network
