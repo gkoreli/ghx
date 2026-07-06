@@ -199,6 +199,43 @@ attribution and stewardship (MIT in, MIT out). Binding rules:
 - **Be vocal about inspiration.** Credit upstream projects in docs and
   README; hiding influences is both bad stewardship and bad marketing.
 
+## Engineering Tenets (core tenet — code quality)
+
+Agents write **production-grade code**: modular, reusable, declarative, with
+no bandaids (Goga, 2026-07-06). Binding rules:
+
+- **Define proper domain models.** Similar domain logic and its data objects
+  live together as named types with methods — never plain maps/anonymous
+  structs passed around with the same helper logic hand-rolled at every call
+  site. If a concept appears in two places, it deserves a type; the type is
+  what makes the code understandable.
+- **Encapsulate domain logic in services.** One authoritative owner per
+  domain concern (e.g. a single session store, a single report validator, a
+  single telemetry writer) — construct it once and inject/share it rather
+  than scattering the same responsibility across packages. Decouple code
+  whose responsibilities do not belong together; a caller should not inherit
+  a dependency it never uses.
+- **Composition or inheritance by use case, never dogma.** In Go that means:
+  interfaces + embedding + functional options chosen for the actual shape of
+  the problem; in the JS/TS surfaces (codemode types, npm wrappers), classes
+  or composition as the use case demands. Pick deliberately, don't default.
+- **Declarative, documented APIs.** Every exported type, function, and field
+  carries a doc comment stating contract and units (godoc in Go; JSDoc type
+  comments in JS/TS). Prefer declarative tables/config over imperative
+  branching where the repo already does (anomaly detectors are the model).
+- **No legacy maintenance, no compatibility junk.** We are the only
+  consumers of this product today. When refactoring architecture, do not
+  keep deprecated shims, dual code paths, renamed-but-kept functions, or
+  "for backwards compatibility" branches. Temporary breaking changes while
+  the refactor is in flight are fine; the end state must be the clean
+  design with **no regressions** — verified by the test suite, not by
+  keeping the old path alive. (Deliberate external-facing exceptions —
+  e.g. the `~/.ghx-sidecar` read-fallback — must be justified in an ADR,
+  not habitual.)
+- **Refactor cleanly or not at all.** A refactor that leaves both the old
+  and new pattern in the tree is worse than no refactor: it doubles the
+  surface every future agent must understand.
+
 ## Tool Economy
 
 Match the tool to the information, not to what is available (incident:
