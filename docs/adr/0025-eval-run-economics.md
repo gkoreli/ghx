@@ -106,6 +106,50 @@ exercised; this paragraph is not citable.
 - **Unbounded parallelism** — rate-limit cascade risk (observed M4-era),
   duration-metric pollution.
 
+## Implementation Notes (2026-07-05 — D1 and D3 shipped; port-reconciled)
+
+Built on a worktree during the live gate run (measurement stack
+untouched), then semantically ported onto the post-ADR-0022 telemetry
+refactor. The escalated ADR add/add (the build worker had recreated this
+spec from an older base) was resolved by keeping this spec verbatim and
+adapting the notes here.
+
+- **D3 parallelism**: `parallel.go` (`GHX_EVAL_PARALLEL`, default 3;
+  `<1`→1 so a typo never fans out), counting-semaphore-gated
+  `t.Parallel()` cells nested under one parent subtest; cell exclusivity
+  is structural (trials come from separate invocations).
+  `ghx.eval.parallel=true` marks episode JSON, metrics, and spans;
+  rate-limit-shaped failures record the soft anomaly
+  `eval_parallel_rate_limited` (substring detector — declarative, so the
+  taxonomy widens without re-running agents).
+- **The race fix moved to the shared layer** (port decision): the
+  per-path locked `AppendJSONLine` lives in
+  `internal/sidecar/telemetry/jsonl_writer.go` and serializes ALL
+  shared-file appends — eval logs/metrics/trace exports AND production
+  session emission (`emit.go` funnels through the same writers). The
+  pre-existing bug it fixes: each episode built a fresh trace exporter
+  with a per-instance mutex over the same `traces.jsonl`, which never
+  serialized concurrent episodes. `-race` coverage: 64 goroutines × 20KB
+  lines, line-validity asserted.
+- **D1 sequential stopping**: `stopping.go` `ComputeStoppingBounds` with
+  per-gate monotonicity encoded honestly — G1/G2 lock both directions;
+  G3 (unbounded char metric) never locks early; G4 excluded (multi-turn
+  denominator not derivable mid-run); G5 futility-locks on any
+  violation, success-locks only at completion. `verdict.md` gains a
+  `## Sequential stopping` section with CONTINUE / STOP-FUTILITY /
+  STOP-SUCCESS-LOCKED; the runner never auto-stops — a human ends the
+  loop. Insight-mining result recorded here per D5's honesty rule: on
+  the M4 data, worst-case success-locks fire only in rounds 4–5 — D1
+  does not speed up thin-margin passing runs; the wall-clock wins come
+  from D3 and (future) D2.
+
+Deliberately not built: auto-stop; D2 baseline-reuse hashes (own
+pre-registered slice — touches identity/decontamination, ADR-0016.5).
+Known limitation: multi-round runs must set `GHX_EVAL_EXPECTED_EPISODES`
+to the whole planned total or D1's remaining-count math degrades;
+folding trials into the manifest is the follow-up (also fixes the
+stale-manifest audit major).
+
 ## Cross-references
 
 - ADR-0016.1 (gates/thresholds bounded by D1), 0016.3 (the ladder this
