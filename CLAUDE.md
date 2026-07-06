@@ -192,3 +192,13 @@ Before handing work back:
 - public docs updated when behavior changed, following `AGENTS.md`
 - release/version rules followed, following `AGENTS.md`
 - delegated outputs were verified, not blindly trusted
+
+## Eval Run Shapes (Goga, 2026-07-06 — binding)
+
+The 90-episode full-matrix run is a **seeding shape, now retired**: after
+the first run that records `identityHashes` (gate-run-2026-07-06-persona),
+confirmatory runs reuse baselines and cost ~30 sidecar episodes; anything
+larger needs Goga's explicit sign-off with a reason reuse cannot serve.
+Sidecar-only deltas (persona, report contract) get sidecar-only spot
+checks (2-9 episodes) for direction before any confirmatory run. Never
+launch a full-matrix run to demonstrate momentum.
