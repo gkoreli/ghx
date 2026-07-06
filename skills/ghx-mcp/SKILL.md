@@ -1,7 +1,7 @@
 ---
 name: ghx-mcp
 description: "Use when exploring GitHub repositories through the ghx MCP server: choose direct tools for simple lookups, or the code meta-tool for composed reconnaissance."
-version: 1.1.0
+version: 1.2.0
 author: ghx contributors
 license: MIT
 metadata:
@@ -12,7 +12,13 @@ metadata:
 
 # ghx MCP — GitHub Code Exploration via MCP
 
-7 tools for GitHub exploration. 5 direct tools for simple queries. 1 `code` meta-tool for complex multi-step operations. 1 `search_tools` for discovery.
+> **This is the power-user/tool layer** — for driving exploration yourself.
+> If you just want answers about a repo, connect to `ghx serve --recon`
+> instead: it exposes a single `recon(question, repo, session?)` tool that
+> returns an evidence report, and `ghx skill --recon` prints its concise
+> skill. You then need zero knowledge of the tools below.
+
+7 tools for GitHub exploration (served by `ghx serve`). 5 direct tools for simple queries. 1 `code` meta-tool for complex multi-step operations. 1 `search_tools` for discovery.
 
 ## Tools
 
@@ -65,7 +71,7 @@ type TreeInput = { repo: string; path?: string; depth?: number }
 
 declare const codemode: {
   explore: (input: ExploreInput) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapEngine?: string; mapWarnings?: string[] }[];
+  read: (input: ReadInput) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number; mapEngine?: string; mapWarnings?: string[] }[];
   repos: (input: ReposInput) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: SearchInput) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: TreeInput) => string[];
@@ -155,7 +161,7 @@ explore({ repo: "owner/repo" })                            → Structure + READM
 
 **Then drill in — map before reading, grep before full read:**
 ```
-read({ repo: "...", paths: "f1,f2", map: true })           → Signatures of many files (92% fewer tokens)
+read({ repo: "...", paths: "f1,f2", map: true })           → Signatures of many files (~92% fewer tokens; measured: a 15.3 KB Go file maps to 0.9 KB)
 read({ repo: "...", paths: "f1", grep: "pattern" })        → Just the matching lines
 read({ repo: "...", paths: "f1" })                         → Full file (only when needed)
 ```

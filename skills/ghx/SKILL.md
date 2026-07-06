@@ -1,7 +1,7 @@
 ---
 name: ghx
 description: "Use when exploring GitHub repositories from a shell with the ghx CLI: read files, search code, map symbols, inspect trees, discover repos, or compose multi-step reconnaissance with codemode."
-version: 1.1.0
+version: 1.2.0
 author: ghx contributors
 license: MIT
 metadata:
@@ -12,41 +12,54 @@ metadata:
 
 # ghx — GitHub Code Exploration for AI Agents
 
+> **This is the power-user/tool layer** — for driving exploration yourself.
+> If you just want answers about a repo, delegate the whole question to the
+> recon service instead: `ghx serve --recon` exposes a single `recon` MCP
+> tool, and `ghx skill --recon` prints its concise skill. You then need zero
+> knowledge of the commands below.
+
 Use `ghx` via `execute_bash` for anything on GitHub — repos, files, code search, codemode. Authenticated via `gh` CLI, structured output, zero context overhead.
 
 ## Commands
 
 ```bash
-ghx explore <owner/repo>                    # Branch + tree + README in 1 API call
+ghx explore <owner/repo>                    # Branch + tree + README in 1 API call (budgeted orientation)
 ghx explore <owner/repo> <path>             # Subdirectory listing
+ghx explore <owner/repo> --full             # Complete explore output, no budget compaction
 ghx read <owner/repo> <f1> [f2] [f3]       # Read 1-10 files in 1 API call (GraphQL batching)
 ghx read <owner/repo> <dir>                 # Directory path → returns file listing (not "not found")
 ghx read <owner/repo> "src/**/*.ts" --map   # Glob patterns: auto-expands via tree (2 API calls)
-ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map: signatures, imports, types (~92% token reduction)
+ghx read <owner/repo> --map <f1> [f2]       # Parser-backed structural map: signatures, imports, types (~92% token reduction on typical source files)
 ghx read <owner/repo> --map --kind func <f> # Map only function/method signatures
 ghx read <owner/repo> --map --kind type <f> # Map only types/structs/interfaces/classes
 ghx read <owner/repo> --map --level minimal <f> # Symbol names only — methods show as UserService.GetUser
 ghx read <owner/repo> --grep "pat" <f>      # Read file, show only matching lines (2 lines context, regex)
 ghx read <owner/repo> --lines 42-80 <f>     # Read specific line range
+ghx read <owner/repo> <f> --full            # Force complete contents (skip the budget fallback)
+ghx grep <owner/repo> "<pattern>"           # Repo code search, grep-style flags: --path, --glob, --limit
 ghx repos "<query>"                         # Search repos with README preview in 1 GraphQL call
-ghx search "<query>"                        # Code search (AND matching, shows matching lines)
+ghx search <owner/repo> "<query>"           # Repo-first code search (--lang, --glob filters)
+ghx search "<query>"                        # Advanced form: raw GitHub query with qualifiers
 ghx search --full "<query>"                 # Code search without line truncation
 ghx tree <owner/repo> [path]                # Full recursive tree (default: all files, no depth limit)
 ghx tree <owner/repo> [path] --depth N      # Tree limited to N levels (includes dirs with /)
 ghx code "<js>"                             # Execute JS with access to all ghx tools
 ghx code -                                  # Read code from stdin
 ghx code --list                             # List available tools with type stubs
+ghx --version                               # Version (also: ghx version)
 ```
 
-**Exit codes:** 0 = success, 1 = no results, 2 = usage error.
+**Exit codes:** 0 = success, 1 = no results, 2 = usage error, 3 = upstream/API failure.
+
+**Budgeted output.** `explore`, `read`, and `search` share a `--budget CHARS` dial (default 12000). A full-file `read` over budget (without `--map`/`--lines`/`--grep`) returns the structural map plus a hint naming the narrowing flags instead of flooding output; every truncation names the flag that lifts it (`--full`).
 
 ## Chain of Thought: Pick Your Entry Point
 
 **Don't follow a sequence. Pick the right starting point based on what you already know.**
 
-**Know what you're looking for?** Start with `search` or direct `read`:
+**Know what you're looking for?** Start with `grep`/`search` or direct `read`:
 ```
-ghx search "pattern repo:owner/repo"         → Find files by content
+ghx grep owner/repo "pattern" --path src     → Find files by content (grep-style)
 ghx read owner/repo path/to/file --map       → Read it (works for files AND directories)
 ghx read owner/repo "src/**/*.ts" --map      → Glob to scan many files at once
 ```
@@ -58,7 +71,7 @@ ghx explore owner/repo                       → Structure + README (orientation
 
 **Then drill in — map before reading, grep before full read:**
 ```
-ghx read owner/repo "src/**/*.ts" --map      → Signatures of many files (92% fewer tokens)
+ghx read owner/repo "src/**/*.ts" --map      → Signatures of many files (~92% fewer tokens; measured: a 15.3 KB Go file maps to 0.9 KB)
 ghx read owner/repo --grep "X" f             → Just the matching lines
 ghx read owner/repo f                        → Full file (only when needed)
 ```
@@ -94,7 +107,7 @@ ghx code --list   # See all available tools with type stubs
 ```typescript
 declare const codemode: {
   explore: (input: { repo: string; path?: string }) => { description: string; branch: string; files: { name: string; type: string }[]; readme: string };
-  read: (input: { repo: string; files: string[]; grep?: string; lines?: string; map?: boolean; level?: "outline" | "minimal" | "compact" | "standard"; kind?: "func" | "type" | "import" | "const" | "var" | "package"; mapEngine?: "auto" | "regex" | "tree-sitter" }) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapEngine?: string; mapWarnings?: string[] }[];
+  read: (input: { repo: string; files: string[]; grep?: string; lines?: string; map?: boolean; level?: "outline" | "minimal" | "compact" | "standard"; kind?: "func" | "type" | "import" | "const" | "var" | "package"; mapEngine?: "auto" | "regex" | "tree-sitter" }) => { path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number; mapEngine?: string; mapWarnings?: string[] }[];
   repos: (input: { query: string; limit?: number }) => { results: { nameWithOwner: string; description: string; stars: number; language: string; readmePreview: string }[]; total: number };
   search: (input: { query: string; limit?: number; fullMode?: boolean }) => { total: number; incomplete: boolean; matches: { repo: string; path: string; fragment: string }[] };
   tree: (input: { repo: string; path?: string; depth?: number }) => string[];
@@ -106,18 +119,18 @@ declare const codemode: {
 - Write plain JavaScript, not TypeScript (no type annotations)
 - `codemode.*` calls are synchronous — no `await` needed
 - Must `return` a value — bare expressions don't auto-return (except simple identifiers)
-- Must `return` a value — bare expressions don't auto-return (except simple identifiers)
 - Console output goes to stderr, return value goes to stdout
 - Max 20 tool calls per execution, 64KB code size limit
 
 ## Search Query Syntax
 
-`ghx search` searches **inside file contents** — use it to find code patterns, not to discover repos. To discover repos by topic, use `ghx repos`.
+`ghx search` and `ghx grep` search **inside file contents** — use them to find code patterns, not to discover repos. To discover repos by topic, use `ghx repos`. When you know the repo, prefer the simple forms: `ghx grep owner/repo "pattern"` or `ghx search owner/repo "query"` — the raw-query form below is the advanced mode.
 
 | Want to find... | Use |
 |---|---|
 | Repos about "slack bot" | `ghx repos "slack bot go"` |
-| Code containing "useState" | `ghx search "useState repo:vercel/next.js"` |
+| Code containing "useState" | `ghx search vercel/next.js useState` |
+| Same, with grep muscle memory | `ghx grep vercel/next.js useState --glob "src/**/*.ts"` |
 | Files named "go.mod" | `ghx search "filename:go.mod repo:owner/repo"` |
 
 Every word is AND'd — a file must contain ALL words to match. More words = fewer results, not better results. Search 1-2 terms, not 5.
@@ -141,11 +154,12 @@ ghx search '"exact phrase" repo:plausible/analytics'      # Exact phrase (shell 
 
 1. **Web-only qualifiers silently degrade.** `symbol:`, `OR`, `NOT` are treated as literal text. ghx warns on stderr.
 2. **`gh search code` wraps in quotes.** `gh search code "foo bar"` = exact phrase. `ghx search "foo bar"` = AND. Use ghx.
-3. **Flag ordering in `read`.** `ghx read owner/repo file --map` works. `ghx read --map owner/repo file` does NOT.
-4. **Not all repos use `main`.** ghx handles this automatically.
-5. **Unknown flags are rejected.** Exit 2 with clear error. Intentional — prevents silent query corruption.
+3. **Not all repos use `main`.** ghx handles this automatically.
+4. **Wrong flags fail with a teaching error.** Exit 2, naming the nearest real flag plus one corrected example (e.g. `--start` → `use --lines START-END, e.g. ghx read owner/repo main.go --lines 40-80`). Read the error; it hands you the fix.
+5. **Big full reads fall back to a map.** Over `--budget` (default 12000 chars) without `--map`/`--lines`/`--grep`, `read` returns the structural map + a narrowing hint. Add `--full` if you truly need everything.
 6. **`--grep` uses ERE regex.** Use `|` for alternation, not `\|`. Example: `--grep "ref|defs|definition"`.
 7. **Glob + grep skips non-matching files.** Like `grep -r --include`, only files with hits are shown.
+8. **`ghx grep --glob` maps to GitHub `path:`.** It is backed by GitHub code search (indexing lag applies), not a local ripgrep over the tree.
 
 ## Anti-Patterns
 
@@ -164,4 +178,4 @@ ghx search '"exact phrase" repo:plausible/analytics'      # Exact phrase (shell 
 - **Map before reading.** `--map` first, then `--grep` or `--lines` for specifics.
 - **Refine search, don't paginate.** Add qualifiers instead of fetching page 2.
 - **Use `ghx code` for multi-step workflows.** One round-trip beats three sequential commands.
-- **Check exit codes.** 0 = results, 1 = no results (broaden query), 2 = usage error (fix command).
+- **Check exit codes.** 0 = results, 1 = no results (broaden query), 2 = usage error (fix command — the error text shows how), 3 = upstream/API failure (retry or check `gh auth status`).
