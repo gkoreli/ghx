@@ -304,7 +304,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | B5 | Discovery tier: repo optional, GitHub-wide reconnaissance (ADR-0019.1) | Done 2026-07-06 |
 | B6 | Always-on runtime: warm daemon shared across entrypoints, no cold starts (§4) | Future |
 | B7 | Session routing: sidecar routes questions to the right active session; main agent never sees sessions (§4 end state) | Future (after B6) |
-| B8 | Persona proficiency: mining-driven persona revisions, each pre-registered before the next gate run | Standing (miner findings 2026-07-06 → first batch) |
+| B8 | Persona proficiency: mining-driven persona revisions, each pre-registered before the next gate run | Standing; first batch implemented 2026-07-06 (ADR-0029 persona revision 1) |
 | B9 | Escalation tiers sidecar-decided (= M7 brain half); eager anticipation (= M8) | Future (B6 prerequisite for M8) |
 
 **C. SAF Evals (SAFE)** — the proof machinery.
@@ -312,7 +312,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | # | Sub-milestone | Status |
 |---|---|---|
 | C1 | Eval kernel, gates, validity hardening (= M3, M4) | Done — M4 THESIS SUPPORTED |
-| C2 | Run economics: sequential stopping + bounded parallelism (ADR-0025 D1/D3) | Done; D2 baseline reuse + D4 haiku arm pending (pre-register before build) |
+| C2 | Run economics: sequential stopping + bounded parallelism + baseline reuse (ADR-0025 D1/D2/D3) | Done for D1/D2/D3; D4 haiku arm pending (pre-register before build) |
 | C3 | Measurement fidelity: union scoring, contamination guard, sufficiency honesty (ADR-0016.8) | **Done 2026-07-06 — measured**: gate-run-2026-07-06-fixbatch THESIS SUPPORTED citable, all 5 gates, G1 ratio 0.983, 16.6× compression; contamination guard fired 7×, honesty machinery forced top-ups to contract (`docs/evals/gate-run-2026-07-06-fixbatch/`) |
 | C4 | Judge layer: offline machinery + cross-family client done; gold-set labeling + κ ≥ 0.6 calibration pending (ADR-0023.1) | ← frontier — founder labeling session unlocks it |
 | C5 | Discovery-class eval tasks (ADR-0019.1 D5) | Future (ADR before build) |

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -84,6 +85,10 @@ func DecodeReportStrict(data []byte) (*Report, error) {
 // no evidence by definition.
 const blockedAnswerPrefix = "BLOCKED"
 
+const maxReportAnswerChars = 700
+
+var markdownHeadingRE = regexp.MustCompile(`(?m)^\s{0,3}#{1,6}\s+`)
+
 // ValidateReportEvidence enforces the evidence contract on the strict
 // submit_report path (ADR-0027 D4): a non-BLOCKED report is accepted only when
 // it carries ALL of — at least one verified claim with non-empty evidence, at
@@ -104,6 +109,12 @@ func ValidateReportEvidence(r *Report) error {
 		return nil
 	}
 	var missing []string
+	if markdownHeadingRE.MatchString(answer) {
+		missing = append(missing, `answer: Markdown headings are not allowed; put the direct answer first without headings`)
+	}
+	if len(answer) > maxReportAnswerChars {
+		missing = append(missing, fmt.Sprintf(`answer: compact answer required; got %d characters, limit is %d`, len(answer), maxReportAnswerChars))
+	}
 	if !hasVerifiedClaimWithEvidence(r.Verified) {
 		missing = append(missing, `verified: at least one verified claim with a non-empty "evidence" field is required`)
 	}
@@ -112,6 +123,9 @@ func ValidateReportEvidence(r *Report) error {
 	}
 	if !hasCommandRun(r.CommandsRun) {
 		missing = append(missing, `commandsRun: at least one command you actually ran is required`)
+	}
+	for _, bad := range scratchEvidenceSources(r) {
+		missing = append(missing, bad)
 	}
 	if len(missing) == 0 {
 		return nil
@@ -145,6 +159,43 @@ func hasCommandRun(commands []string) bool {
 		}
 	}
 	return false
+}
+
+func scratchEvidenceSources(r *Report) []string {
+	var bad []string
+	check := func(field, value string) {
+		if citesScratchSource(value) {
+			bad = append(bad, fmt.Sprintf(`%s: evidence must cite ghx-auditable repo paths/commands, not local scratch files: %q`, field, value))
+		}
+	}
+	for i, c := range r.Verified {
+		check(fmt.Sprintf("verified[%d].evidence", i), c.Evidence)
+	}
+	for i, c := range r.Inferred {
+		check(fmt.Sprintf("inferred[%d].evidence", i), c.Evidence)
+	}
+	for i, c := range r.Unverified {
+		check(fmt.Sprintf("unverified[%d].evidence", i), c.Evidence)
+	}
+	for i, e := range r.Evidence {
+		check(fmt.Sprintf("evidence[%d].source", i), e.Source)
+	}
+	return bad
+}
+
+func citesScratchSource(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return false
+	}
+	lower := strings.ToLower(v)
+	return strings.HasPrefix(lower, "/tmp/") ||
+		strings.HasPrefix(lower, "tmp/") ||
+		strings.HasPrefix(lower, "file:///tmp/") ||
+		strings.HasPrefix(lower, "/var/folders/") ||
+		strings.Contains(lower, " /tmp/") ||
+		strings.Contains(lower, " file:///tmp/") ||
+		strings.Contains(lower, " /var/folders/")
 }
 
 // ValidateReport enforces the semantic minimum shared by the strict submission
@@ -184,7 +235,7 @@ func reportInputSchema() json.RawMessage {
 // reportFieldDescriptions annotates the top-level Report fields with model-facing
 // hints. These are documentation only; validation lives in DecodeReportStrict.
 var reportFieldDescriptions = map[string]string{
-	"answer":        "Direct answer to the question, at most 3 sentences.",
+	"answer":        "Direct answer to the question, at most 2 sentences and no Markdown headings.",
 	"verified":      "Claims backed by evidence you gathered: [{summary, evidence}].",
 	"inferred":      "Claims you inferred but did not directly verify: [{summary, evidence}].",
 	"unverified":    "Open claims you could not confirm: [{summary, evidence}].",

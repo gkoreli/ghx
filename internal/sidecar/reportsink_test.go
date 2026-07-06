@@ -202,6 +202,70 @@ func TestDecodeReportStrict_EvidenceRequired(t *testing.T) {
 	}
 }
 
+func TestDecodeReportStrict_ADR0029ReportShapeValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{
+			name:   "markdown heading rejected",
+			mutate: func(args map[string]any) { args["answer"] = "# Heading\nThe router lives in router.go." },
+			want:   "Markdown headings",
+		},
+		{
+			name: "long answer rejected",
+			mutate: func(args map[string]any) {
+				args["answer"] = strings.Repeat("a", maxReportAnswerChars+1)
+			},
+			want: "compact answer required",
+		},
+		{
+			name: "tmp claim evidence rejected",
+			mutate: func(args map[string]any) {
+				args["verified"] = []any{map[string]any{"summary": "x", "evidence": "/tmp/sidecar-evidence.txt"}}
+			},
+			want: "local scratch files",
+		},
+		{
+			name: "tmp evidence source rejected",
+			mutate: func(args map[string]any) {
+				args["evidence"] = []any{map[string]any{"source": "/tmp/ghx-output.txt", "summary": "scratch output"}}
+			},
+			want: "local scratch files",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := validReportArgs()
+			tc.mutate(args)
+			data, _ := json.Marshal(args)
+			_, err := DecodeReportStrict(data)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want rejection containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+
+	if _, err := DecodeReportStrict(mustJSON(t, validReportArgs())); err != nil {
+		t.Fatalf("compact valid report must pass: %v", err)
+	}
+	blocked := map[string]any{"answer": "# BLOCKED\nstill not a normal answer"}
+	blocked["answer"] = "BLOCKED: could not start ghx; /tmp/diagnostic is not cited as evidence."
+	if _, err := DecodeReportStrict(mustJSON(t, blocked)); err != nil {
+		t.Fatalf("BLOCKED report remains exempt from evidence/shape checks: %v", err)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestReportInputSchema_DerivedFromType(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal(reportInputSchema(), &schema); err != nil {
