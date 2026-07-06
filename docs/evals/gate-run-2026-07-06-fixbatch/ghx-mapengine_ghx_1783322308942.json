@@ -1,0 +1,457 @@
+{
+  "id": "ghx-mapengine_ghx_1783322308942",
+  "taskId": "ghx-mapengine",
+  "repo": "gkoreli/ghx",
+  "profile": "ghx",
+  "checks": {
+    "expectedFiles": [
+      "internal/mapengine/types.go",
+      "internal/mapengine/goast.go",
+      "internal/mapengine/treesitter.go"
+    ],
+    "expectedSymbols": [
+      "mapAuto",
+      "EngineAuto"
+    ],
+    "avoidPaths": [
+      "_test.go"
+    ],
+    "contaminationPaths": [
+      "docs/adr/",
+      "docs/evals/"
+    ]
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "question": "Where is the structural map engine implemented, and how is the parser engine selected per file?",
+      "text": "The README already points to `internal/mapengine/`. Let me look at its structure and the routing logic in detail.This confirms the exact selection logic. Now let me check where `Map` is called from (the CLI/read command) and verify the treesitter language table for completeness.Good — confirms `internal/ghx/read.go` is the call site. Let me check that plus the CLI flag wiring in `internal/cli/ghx.go`.Good, that confirms the wiring. Let me get the CLI flag definitions too.I have everything needed to answer. This all comes directly from reading the actual source in the repo via `ghx`, no cloning involved.\n\n## Structural map engine\n\n**Package:** `internal/mapengine/` (Go, ~24KB across 5 files)\n\n| File | Role |\n|---|---|\n| `types.go` | Shared types (`Engine`, `Level`, `Kind`, `Options`, `Result`, `Symbol`, `Mapper` interface) and the **dispatch logic**: `Map()`, `mapAuto()`, `mapTreeSitterWithFallback()`, `buildResultFromSymbols()` |\n| `goast.go` | `GoASTMapper` — parses Go via stdlib `go/ast` + `go/parser`/`go/token` |\n| `treesitter.go` | `TreeSitterMapper` — uses [gotreesitter](https://github.com/odvcencio/gotreesitter) grammars/tagger for TS/JS/Python/Rust |\n| `regex.go` | `RegexMapper` — line-pattern fallback (`regexRules` map keyed by extension) for everything else |\n| `regex_test.go` | Tests for the regex mapper |\n\nConfirmed by `ghx read --map` output showing exactly these function signatures in each file (`internal/mapengine/types.go:125` `func Map(...)`, `:143` `func mapAuto(...)`, etc.) and by ADR `docs/adr/0013-ghx-map-command.md`, which states: *\"`internal/mapengine` owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback, and output formatting.\"*\n\n## Engine selection per file\n\nSelection happens in `mapAuto()` at `internal/mapengine/types.go:143-157`, keyed on `filepath.Ext(path)`:\n\n```go\nfunc mapAuto(path string, content []byte, opts Options) (Result, error) {\n\tswitch strings.ToLower(filepath.Ext(path)) {\n\tcase \".go\":\n\t\tresult, err := GoASTMapper{}.Map(path, content, opts)\n\t\tif err == nil { return result, nil }\n\t\tfallback, _ := RegexMapper{}.Map(path, content, opts)   // Go parse error → regex fallback\n\t\tfallback.Fallback = true\n\t\treturn fallback, nil\n\tcase \".ts\", \".tsx\", \".js\", \".jsx\", \".py\", \".rs\":\n\t\treturn mapTreeSitterWithFallback(path, content, opts, false)\n\tdefault:\n\t\treturn RegexMapper{}.Map(path, content, opts)\n\t}\n}\n```\n\n- **`.go`** → `GoASTMapper` (stdlib `go/ast`), falls back to regex on a parse error.\n- **`.ts`/`.tsx`/`.js`/`.jsx`/`.py`/`.rs`** → `TreeSitterMapper` via `mapTreeSitterWithFallback()` (`types.go:160`), which tries tree-sitter first and falls back to `RegexMapper` on `ErrUnsupportedLanguage` or any other error.\n- **Everything else** → `RegexMapper` directly.\n\nThis is the `auto` case of the outer `Map()` dispatcher (`types.go:125-141`), which also supports forcing an engine explicitly:\n```go\nswitch opts.Engine {\ncase EngineRegex:      return RegexMapper{}.Map(...)\ncase EngineTreeSitter: return mapTreeSitterWithFallback(..., true)\ncase EngineAuto:       return mapAuto(...)\ndefault:               /* unknown engine string → regex fallback with warning */\n}\n```\n\n**Call chain to the CLI:**\n- `internal/ghx/read.go:187-196` calls `mapengine.Map(path, content, mapengine.Options{Engine: opts.MapEngine, Level: ..., Kind: ...})` when `opts.Map` is true, and stores `result.MapEngine` in the read result for reporting.\n- `internal/cli/ghx.go:112,211` defines the `--map-engine` flag (default `\"auto\"`) on the `read` command and passes it through as `ReadOpts.MapEngine` — so `auto` is the default and only overridden if the user passes `--map-engine regex|tree-sitter`.\n- The MCP server (`internal/cli/serve.go`) exposes the same choice as a `mapEngine` string parameter (`auto|regex|tree-sitter`).\n\n### Not verified\n- I did not read the full body of `treesitter.go`'s `languageConfigs()`/`defaultTreeSitterLanguageConfigs()` (lines 121-333) in detail, so I can't confirm exact per-language tag-query differences (e.g. Python's custom signature formatting) beyond the function names seen in the map.\n- I did not inspect the `gotreesitter` dependency itself (external repo) — its grammar/tagging internals are out of scope and unverified here.\n- I did not run the binary; all conclusions are from static reading of source via `ghx read`/`search`, not execution.",
+      "toolCalls": [
+        "execute: ghx explore gkoreli/ghx (completed)",
+        "execute: ghx tree gkoreli/ghx internal/mapengine --depth 3 (completed)",
+        "execute: ghx read gkoreli/ghx --map internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go (completed)",
+        "execute: ghx read gkoreli/ghx internal/mapengine/types.go --lines 1,180 (completed)",
+        "execute: ghx read gkoreli/ghx internal/mapengine/types.go --lines 1-180 (completed)",
+        "execute: ghx search \"mapengine.Map( repo:gkoreli/ghx\"\necho ---\nghx read gkoreli/ghx --grep \"mapengine\\.\" internal/cli 2\u003e/dev/null\necho ---\nghx tree gkoreli/ghx internal/cli --depth 2 (completed)",
+        "execute: ghx read gkoreli/ghx --grep \"mapengine\\.\" \"internal/**/*.go\" (completed)",
+        "execute: ghx search \"mapengine.Map repo:gkoreli/ghx\"\necho ---\nghx search \"\\\"mapengine\\\" repo:gkoreli/ghx\" (completed)",
+        "execute: ghx read gkoreli/ghx --grep \"mapengine\\.|MapEngine|Options\\{\" internal/ghx/read.go\necho ===CLI===\nghx read gkoreli/ghx --grep \"map-engine|mapEngine|mapengine\" internal/cli/ghx.go (failed)",
+        "execute: ghx read gkoreli/ghx --grep \"map-engine\" internal/cli/ghx.go (completed)"
+      ],
+      "toolTraces": [
+        {
+          "id": "toolu_01Aaxxxu2aoYCeSZQp7rM5CK",
+          "kind": "execute",
+          "title": "ghx explore gkoreli/ghx",
+          "rawInput": {
+            "command": "ghx explore gkoreli/ghx"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:18:33.272927Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:18:35.456385Z"
+            }
+          ],
+          "outputSize": 42365,
+          "outputExcerpt": "```console\ndescription: Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\nbranch: mainline\nfiles:\n  .claude-plugin/\n  .claude/\n  .envrc.example\n  .github/\n  .gitignore\n  .goreleaser.yml\n  .mise.toml\n  AGENTS.md\n  CLAUDE.md\n  LICENSE\n  README.md\n  cmd/\n  docs/\n  experiments/\n  go.mod\n  go.sum\n  install.sh\n  internal/\n  npm/\n  package.json\n  pnpm-lock.yaml\n  scripts/\n  skills/\n\nREADME:\n# ghx — the code-reconnaissance sidecar for AI agents\n\n**Expensive main agents shouldn't burn frontier tokens on tree/grep/read loops.**\nghx is a cheap, specialized **sidecar agent** that a main agent delegates code\nreconnaissance to. Ask it a repo question in plain English; it explores GitHub\nunder the hood and hands back a **schema-validated evidence report** — claims\nwith citations, the commands it ran, and what it could not confirm — while every\nartifact of the investigation lands on disk under `~/.ghx/sessions/` for you or\nthe parent agent to inspect.\n\nThis is the first public cut of the **Agent Sidecar Framework**: a main agent\ndelegates a whole competence domain to a proficient specialist instead of loading\nthat domain's tools and doctrine into its own context. ghx is the proof — the\ncode-reconnaissance sidecar — and, underneath it, a sharp standalone GitHub\nexploration CLI. The durable vision lives in\n[docs/NORTH_STAR.md](docs/NORTH_STAR.md).\n\n\u003e ghx is two products in one binary: a **sidecar brain** you delegate to (this\n\u003e README's lead), and the **classic exploration CLI** it drives under the hood\n\u003e (documented in full further down). Use whichever fits; they share one core.\n\n## Why a sidecar\n\nWhen a main agent stops mid-task to explore code, the real cost is not the API\ncalls — it is the context. Exploration output floods the window, the agent loses\nthe thread of the engineering work, and the ~400 lines of tool doctrine it needs\nto explore well are dead weight it re-pays every sessi"
+        },
+        {
+          "id": "toolu_015EKFJFnRUMzTMpPnAPkvCs",
+          "kind": "execute",
+          "title": "ghx tree gkoreli/ghx internal/mapengine --depth 3",
+          "rawInput": {
+            "command": "ghx tree gkoreli/ghx internal/mapengine --depth 3"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:18:38.926731Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:18:41.703914Z"
+            }
+          ],
+          "outputSize": 123,
+          "outputExcerpt": "```console\ngoast.go\nregex.go\nregex_test.go\ntreesitter.go\ntypes.go\n```goast.go\nregex.go\nregex_test.go\ntreesitter.go\ntypes.go"
+        },
+        {
+          "id": "toolu_01CozpJmPNMGktQWN4xjbNA2",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx --map internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx --map internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:18:45.011376Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:18:48.159795Z"
+            }
+          ],
+          "outputSize": 9083,
+          "outputExcerpt": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\n1: package mapengine\n3: import (\n11: type Engine string\n13: const (\n20: type Level string\n22: const (\n29: type Kind string\n31: const (\n41: type Options struct {\n47: type Mapper interface {\n51: type Result struct {\n61: type Symbol struct {\n71: var ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n73: func NormalizeOptions(opts Options) Options {\n80: func normalizeEngine(engine Engine) Engine {\n91: func normalizeLevel(level Level) Level {\n104: func normalizeKind(kind Kind) Kind {\n125: func Map(path string, content []byte, opts Options) (Result, error) {\n143: func mapAuto(path string, content []byte, opts Options) (Result, error) {\n160: func mapTreeSitterWithFallback(path string, content []byte, opts Options, warnUnsupported bool) (Result, error) {\n174: func buildResultFromSymbols(engine Engine, path string, content []byte, opts Options, symbols []Symbol) Result {\n220: func symbolKey(symbol Symbol) string {\n224: func kindSortRank(kind Kind) int {\n# map: 971/5583 chars (~1395 tokens full, ~242 tokens map)\n\n=== internal/mapengine/goast.go (4678 bytes) ===\n1: package mapengine\n3: import (\n11: type GoASTMapper struct{}\n13: func (GoASTMapper) Map(path string, content []byte, opts Options) (Result, error) {\n26: func goASTSymbols(fset *token.FileSet, f *ast.File, content []byte) []Symbol {\n52: func goGenDeclSymbols(fset *token.FileSet, d *ast.GenDecl, content []byte) []Symbol {\n111: func goTypeSymbol(fset *token.FileSet, ts *ast.TypeSpec, content []byte) Symbol {\n140: func goFuncDeclSymbol(fset *token.FileSet, d *ast.FuncDecl, content []byte) Symbol {\n169: func receiverTypeName(expr ast.Expr) string {\n183: func goSlice(content []byte, fset *token.FileSet, start, end token.Pos) string {\n# map: 637/4678 chars (~1169 tokens full, ~159 tokens map)\n\n=== internal/mapengine/treesitter.go (9063 bytes) ===\n1: package mapengine\n3: import (\n12: type TreeSitterMapper struct {\n16: type TreeSitterLanguageConfig struct {\n25: func (m TreeSitterMapper) Map(path strin"
+        },
+        {
+          "id": "toolu_01Vpaui714ey39scSP7Uswop",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1,180",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1,180"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:18:51.40313Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:18:52.255331Z"
+            }
+          ],
+          "outputSize": 111,
+          "outputExcerpt": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\n```=== internal/mapengine/types.go (5583 bytes) ==="
+        },
+        {
+          "id": "toolu_01PAE63CG5s9Ds4pNEw2jzqL",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1-180",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1-180"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:18:56.487863Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:18:57.50886Z"
+            }
+          ],
+          "outputSize": 8285,
+          "outputExcerpt": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\npackage mapengine\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n)\n\ntype Engine string\n\nconst (\n\tEngineAuto       Engine = \"auto\"\n\tEngineGoAST      Engine = \"go-ast\"\n\tEngineRegex      Engine = \"regex\"\n\tEngineTreeSitter Engine = \"tree-sitter\"\n)\n\ntype Level string\n\nconst (\n\tLevelCompact  Level = \"compact\"\n\tLevelMinimal  Level = \"minimal\"\n\tLevelOutline  Level = \"outline\"\n\tLevelStandard Level = \"standard\"\n)\n\ntype Kind string\n\nconst (\n\tKindFunc    Kind = \"func\"\n\tKindType    Kind = \"type\"\n\tKindImport  Kind = \"import\"\n\tKindConst   Kind = \"const\"\n\tKindVar     Kind = \"var\"\n\tKindPackage Kind = \"package\"\n\tKindOther   Kind = \"other\"\n)\n\ntype Options struct {\n\tEngine Engine\n\tLevel  Level\n\tKind   Kind\n}\n\ntype Mapper interface {\n\tMap(path string, content []byte, opts Options) (Result, error)\n}\n\ntype Result struct {\n\tSymbols       []Symbol\n\tLines         []string\n\tEngine        Engine\n\tFallback      bool\n\tWarnings      []string\n\tOriginalChars int\n\tMappedChars   int\n}\n\ntype Symbol struct {\n\tKind      Kind\n\tName      string\n\tSignature string\n\tLine      int\n\tEndLine   int\n\tParent    string\n\tDoc       string\n}\n\nvar ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n\nfunc NormalizeOptions(opts Options) Options {\n\topts.Engine = normalizeEngine(opts.Engine)\n\topts.Level = normalizeLevel(opts.Level)\n\topts.Kind = normalizeKind(opts.Kind)\n\treturn opts\n}\n\nfunc normalizeEngine(engine Engine) Engine {\n\tswitch Engine(strings.ToLower(strings.TrimSpace(string(engine)))) {\n\tcase EngineRegex:\n\t\treturn EngineRegex\n\tcase EngineTreeSitter:\n\t\treturn EngineTreeSitter\n\tdefault:\n\t\treturn EngineAuto\n\t}\n}\n\nfunc normalizeLevel(level Level) Level {\n\tswitch Level(strings.ToLower(strings.TrimSpace(string(level)))) {\n\tcase LevelOutline:\n\t\treturn LevelOutline\n\tcase LevelMinimal:\n\t\treturn LevelMinimal\n\tcase LevelStandard:\n\t\treturn LevelStandard\n\tdefault:\n\t\treturn LevelCompact\n\t}\n}\n\nfunc normalizeKind(kind Kind) Kind {\n\tswitch Kind(strings.ToLower(strings.TrimSpace(string(kind)"
+        },
+        {
+          "id": "toolu_01Uuk5zG5jGMTSyfR1GJccEK",
+          "kind": "execute",
+          "title": "ghx search \"mapengine.Map( repo:gkoreli/ghx\"\necho ---\nghx read gkoreli/ghx --grep \"mapengine\\.\" internal/cli 2\u003e/dev/null\necho ---\nghx tree gkoreli/ghx internal/cli --depth 2",
+          "rawInput": {
+            "command": "ghx search \"mapengine.Map( repo:gkoreli/ghx\"\necho ---\nghx read gkoreli/ghx --grep \"mapengine\\.\" internal/cli 2\u003e/dev/null\necho ---\nghx tree gkoreli/ghx internal/cli --depth 2"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:00.419873Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:19:05.636316Z"
+            }
+          ],
+          "outputSize": 671,
+          "outputExcerpt": "```console\n0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n=== internal/cli (directory, 6 entries) ===\n  code.go\n  ghx.go\n  serve.go\n  sidecar.go\n  sidecar_test.go\n  sidecar_view.go\n→ use: ghx read gkoreli/ghx \"internal/cli/*\" --map\n\n---\ncode.go\nghx.go\nserve.go\nsidecar.go\nsidecar_test.go\nsidecar_view.go\n```0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n=== internal/cli (directory, 6 entries) ===\n  code.go\n  ghx.go\n  serve.go\n  sidecar.go\n  sidecar_test.go\n  sidecar_view.go\n→ use: ghx read gkoreli/ghx \"internal/cli/*\" --map\n\n---\ncode.go\nghx.go\nserve.go\nsidecar.go\nsidecar_test.go\nsidecar_view.go"
+        },
+        {
+          "id": "toolu_01NUmUiN1g2mZoNdH1V9Bhhs",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx --grep \"mapengine\\.\" \"internal/**/*.go\"",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx --grep \"mapengine\\.\" \"internal/**/*.go\""
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:08.888102Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:19:12.784442Z"
+            }
+          ],
+          "outputSize": 327,
+          "outputExcerpt": "```console\n# glob \"internal/**/*.go\" matched 116 files (reading first 10)\n\n→ glob \"internal/**/*.go\" matched 116 files, showing 10. Narrow the pattern to see others.\n```# glob \"internal/**/*.go\" matched 116 files (reading first 10)\n\n→ glob \"internal/**/*.go\" matched 116 files, showing 10. Narrow the pattern to see others."
+        },
+        {
+          "id": "toolu_01Bf2p7UsWpazFB6qBS2PAjA",
+          "kind": "execute",
+          "title": "ghx search \"mapengine.Map repo:gkoreli/ghx\"\necho ---\nghx search \"\\\"mapengine\\\" repo:gkoreli/ghx\"",
+          "rawInput": {
+            "command": "ghx search \"mapengine.Map repo:gkoreli/ghx\"\necho ---\nghx search \"\\\"mapengine\\\" repo:gkoreli/ghx\""
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:16.325657Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:19:18.257944Z"
+            }
+          ],
+          "outputSize": 6183,
+          "outputExcerpt": "```console\n0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n17 results (showing 17)\ngkoreli/ghx internal/mapengine/goast.go: package mapengine import ( \"fmt\" \"go/ast\" \"go/parser\" \"go/token\"\ngkoreli/ghx AGENTS.md: internal/cli/ — CLI commands (cobra) internal/ghx/ — core library (explore, read, search, repos, tree, glob) internal/codemode/ — JS executor (goja sandbox, esbuild transpilation, type generatio…\ngkoreli/ghx internal/ghx/register.go: Func: wrapRead, Returns: \"{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line:…\ngkoreli/ghx skills/ghx-mcp/SKILL.md: | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call | | `read` | `repo` + `paths` (required), `grep`, `lines`, `map`, `level`, `kind`, `mapEngine` | Read 1-10 files in 1 …\ngkoreli/ghx README.md: internal/cli/ — CLI frontend (cobra) + MCP server commands internal/ghx/ — core library (Explore, Read, Search, Repos, Tree, Glob) internal/codemode/ — JS executor (goja sandbox, TS transpilatio…\ngkoreli/ghx docs/adr/0013-ghx-map-command.md: All items shipped as of 2026-04-14: 1. ✓ `internal/mapengine` owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback, and output formatting. 2. ✓ `internal/ghx/read.go` calls `ma…\ngkoreli/ghx internal/mapengine/regex.go: package mapengine import ( \"fmt\" \"path/filepath\" \"regexp\" \"strings\"\ngkoreli/ghx docs/adr/0016.1-sidecar-eval-implementation.md: 6. **Task ground truth**: `hono-middleware` and `openai-node-streaming` come from the saved manual runs in `experiments/ghx-sidecar/`; `ghx-mapengine` was verified directly against this repo (`interna…\ngkoreli/ghx internal/mapengine/types.go: package mapengine import ( \"errors\" \"fmt\" \"path/filepath\" \"sort\"\ngkoreli/ghx skills/ghx/SKILL.md: ```typescript declare const codemode: { explore: (input: { repo: string; path?: string }) =\u003e { description: string; branch: str"
+        },
+        {
+          "id": "toolu_0168pV7u31sJjh36LtGsyFQP",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx --grep \"mapengine\\.|MapEngine|Options\\{\" internal/ghx/read.go\necho ===CLI===\nghx read gkoreli/ghx --grep \"map-engine|mapEngine|mapengine\" internal/cli/ghx.go",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx --grep \"mapengine\\.|MapEngine|Options\\{\" internal/ghx/read.go\necho ===CLI===\nghx read gkoreli/ghx --grep \"map-engine|mapEngine|mapengine\" internal/cli/ghx.go"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:21.575543Z"
+            },
+            {
+              "status": "failed",
+              "at": "2026-07-06T07:19:24.29257Z"
+            }
+          ],
+          "outputSize": 3140,
+          "outputExcerpt": "```\nExit code 1\n=== internal/ghx/read.go (9012 bytes) ===\n  8: \n  9: \t\"github.com/cli/go-gh/v2/pkg/api\"\n\u003e 10: \t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n  11: )\n  12: \n--\n  26: \tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n  27: \tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\u003e 28: \tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n  29: \tMapWarnings []string    `json:\"mapWarnings,omitempty\"` // fallback/quality warnings from mapper\n  30: \tGlobPattern string      `json:\"globPattern,omitempty\"` // the glob that matched this file (empty for exact paths)\n--\n  37: \tMapLevel  string // map detail level: outline|minimal|compact|standard\n  38: \tMapKind   string // map symbol kind filter: func|type|import|const|var\n\u003e 39: \tMapEngine string // map engine: auto|regex|tree-sitter\n  40: \n  41: \t// Output: populated after Read() when globs are used\n--\n  185: \t\tresult.Content = extractLines(text, opts.Lines)\n  186: \t} else if opts.Map {\n\u003e 187: \t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n\u003e 188: \t\t\tEngine: mapengine.Engine(opts.MapEngine),\n\u003e 189: \t\t\tLevel:  mapengine.Level(opts.MapLevel),\n\u003e 190: \t\t\tKind:   mapengine.Kind(opts.MapKind),\n  191: \t\t})\n  192: \t\tresult.MapLines = mapResult.Lines\n  193: \t\tresult.MapChars = mapResult.OriginalChars\n\u003e 194: \t\tresult.MapEngine = string(mapResult.Engine)\n  195: \t\tresult.MapWarnings = mapResult.Warnings\n  196: \t\tif err != nil {\n\n(eval):2: ==CLI=== not found\n```Exit code 1\n=== internal/ghx/read.go (9012 bytes) ===\n  8: \n  9: \t\"github.com/cli/go-gh/v2/pkg/api\"\n\u003e 10: \t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n  11: )\n  12: \n--\n  26: \tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n  27: \tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\u003e 28: \tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n  "
+        },
+        {
+          "id": "toolu_017yGqSdqYcXj3rXbjFFFwya",
+          "kind": "execute",
+          "title": "ghx read gkoreli/ghx --grep \"map-engine\" internal/cli/ghx.go",
+          "rawInput": {
+            "command": "ghx read gkoreli/ghx --grep \"map-engine\" internal/cli/ghx.go"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:27.214607Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:19:29.166147Z"
+            }
+          ],
+          "outputSize": 1159,
+          "outputExcerpt": "```console\n=== internal/cli/ghx.go (8624 bytes) ===\n  110: \t\tmapLevel, _ := cmd.Flags().GetString(\"level\")\n  111: \t\tmapKind, _ := cmd.Flags().GetString(\"kind\")\n\u003e 112: \t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n  113: \n  114: \t\topts := \u0026ghxlib.ReadOpts{\n--\n  209: \treadCmd.Flags().String(\"level\", \"compact\", \"Map detail level: outline|minimal|compact|standard\")\n  210: \treadCmd.Flags().String(\"kind\", \"\", \"Map symbol kind filter: func|type|import|const|var|package\")\n\u003e 211: \treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n  212: }\n  213:\n```=== internal/cli/ghx.go (8624 bytes) ===\n  110: \t\tmapLevel, _ := cmd.Flags().GetString(\"level\")\n  111: \t\tmapKind, _ := cmd.Flags().GetString(\"kind\")\n\u003e 112: \t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n  113: \n  114: \t\topts := \u0026ghxlib.ReadOpts{\n--\n  209: \treadCmd.Flags().String(\"level\", \"compact\", \"Map detail level: outline|minimal|compact|standard\")\n  210: \treadCmd.Flags().String(\"kind\", \"\", \"Map symbol kind filter: func|type|import|const|var|package\")\n\u003e 211: \treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n  212: }\n  213:"
+        }
+      ],
+      "resumed": false,
+      "toolOutputChars": 71447,
+      "durationMs": 75899
+    }
+  ],
+  "actions": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01Aaxxxu2aoYCeSZQp7rM5CK",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx explore gkoreli/ghx",
+      "at": "2026-07-06T07:18:33.272927Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_015EKFJFnRUMzTMpPnAPkvCs",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx tree gkoreli/ghx internal/mapengine --depth 3",
+      "at": "2026-07-06T07:18:38.926731Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01CozpJmPNMGktQWN4xjbNA2",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx --map internal/mapengine/types.go internal/mapengine/goast.go internal/mapengine/treesitter.go internal/mapengine/regex.go",
+      "at": "2026-07-06T07:18:45.011376Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01Vpaui714ey39scSP7Uswop",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1,180",
+      "at": "2026-07-06T07:18:51.40313Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01PAE63CG5s9Ds4pNEw2jzqL",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx internal/mapengine/types.go --lines 1-180",
+      "at": "2026-07-06T07:18:56.487863Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01Uuk5zG5jGMTSyfR1GJccEK",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx search \"mapengine.Map( repo:gkoreli/ghx\"\necho ---\nghx read gkoreli/ghx --grep \"mapengine\\.\" internal/cli 2\u003e/dev/null\necho ---\nghx tree gkoreli/ghx internal/cli --depth 2",
+      "at": "2026-07-06T07:19:00.419873Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01NUmUiN1g2mZoNdH1V9Bhhs",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx --grep \"mapengine\\.\" \"internal/**/*.go\"",
+      "at": "2026-07-06T07:19:08.888102Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01Bf2p7UsWpazFB6qBS2PAjA",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx search \"mapengine.Map repo:gkoreli/ghx\"\necho ---\nghx search \"\\\"mapengine\\\" repo:gkoreli/ghx\"",
+      "at": "2026-07-06T07:19:16.325657Z"
+    },
+    {
+      "actionIndex": 8,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_0168pV7u31sJjh36LtGsyFQP",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx --grep \"mapengine\\.|MapEngine|Options\\{\" internal/ghx/read.go\necho ===CLI===\nghx read gkoreli/ghx --grep \"map-engine|mapEngine|mapengine\" internal/cli/ghx.go",
+      "at": "2026-07-06T07:19:21.575543Z"
+    },
+    {
+      "actionIndex": 9,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_017yGqSdqYcXj3rXbjFFFwya",
+      "kind": "execute",
+      "name": "execute",
+      "input": "ghx read gkoreli/ghx --grep \"map-engine\" internal/cli/ghx.go",
+      "at": "2026-07-06T07:19:27.214607Z"
+    }
+  ],
+  "observations": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "toolCallId": "toolu_01Aaxxxu2aoYCeSZQp7rM5CK",
+      "text": "```console\ndescription: Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\nbranch: mainline\nfiles:\n  .claude-plugin/\n  .claude/\n  .envrc.example\n  .github/\n  .gitignore\n  .goreleaser.yml\n  .mise.toml\n  AGENTS.md\n  CLAUDE.md\n  LICENSE\n  README.md\n  cmd/\n  docs/\n  experiments/\n  go.mod\n  go.sum\n  install.sh\n  internal/\n  npm/\n  package.json\n  pnpm-lock.yaml\n  scripts/\n  skills/\n\nREADME:\n# ghx — the code-reconnaissance sidecar for AI agents\n\n**Expensive main agents shouldn't burn frontier tokens on tree/grep/read loops.**\nghx is a cheap, specialized **sidecar agent** that a main agent delegates code\nreconnaissance to. Ask it a repo question in plain English; it explores GitHub\nunder the hood and hands back a **schema-validated evidence report** — claims\nwith citations, the commands it ran, and what it could not confirm — while every\nartifact of the investigation lands on disk under `~/.ghx/sessions/` for you or\nthe parent agent to inspect.\n\nThis is the first public cut of the **Agent Sidecar Framework**: a main agent\ndelegates a whole competence domain to a proficient specialist instead of loading\nthat domain's tools and doctrine into its own context. ghx is the proof — the\ncode-reconnaissance sidecar — and, underneath it, a sharp standalone GitHub\nexploration CLI. The durable vision lives in\n[docs/NORTH_STAR.md](docs/NORTH_STAR.md).\n\n\u003e ghx is two products in one binary: a **sidecar brain** you delegate to (this\n\u003e README's lead), and the **classic exploration CLI** it drives under the hood\n\u003e (documented in full further down). Use whichever fits; they share one core.\n\n## Why a sidecar\n\nWhen a main agent stops mid-task to explore code, the real cost is not the API\ncalls — it is the context. Exploration output floods the window, the agent loses\nthe thread of the engineering work, and the ~400 lines of tool doctrine it needs\nto explore well are dead weight it re-pays every sessi",
+      "outputSize": 42365,
+      "at": "2026-07-06T07:18:35.456385Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "toolCallId": "toolu_015EKFJFnRUMzTMpPnAPkvCs",
+      "text": "```console\ngoast.go\nregex.go\nregex_test.go\ntreesitter.go\ntypes.go\n```goast.go\nregex.go\nregex_test.go\ntreesitter.go\ntypes.go",
+      "outputSize": 123,
+      "at": "2026-07-06T07:18:41.703914Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "toolCallId": "toolu_01CozpJmPNMGktQWN4xjbNA2",
+      "text": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\n1: package mapengine\n3: import (\n11: type Engine string\n13: const (\n20: type Level string\n22: const (\n29: type Kind string\n31: const (\n41: type Options struct {\n47: type Mapper interface {\n51: type Result struct {\n61: type Symbol struct {\n71: var ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n73: func NormalizeOptions(opts Options) Options {\n80: func normalizeEngine(engine Engine) Engine {\n91: func normalizeLevel(level Level) Level {\n104: func normalizeKind(kind Kind) Kind {\n125: func Map(path string, content []byte, opts Options) (Result, error) {\n143: func mapAuto(path string, content []byte, opts Options) (Result, error) {\n160: func mapTreeSitterWithFallback(path string, content []byte, opts Options, warnUnsupported bool) (Result, error) {\n174: func buildResultFromSymbols(engine Engine, path string, content []byte, opts Options, symbols []Symbol) Result {\n220: func symbolKey(symbol Symbol) string {\n224: func kindSortRank(kind Kind) int {\n# map: 971/5583 chars (~1395 tokens full, ~242 tokens map)\n\n=== internal/mapengine/goast.go (4678 bytes) ===\n1: package mapengine\n3: import (\n11: type GoASTMapper struct{}\n13: func (GoASTMapper) Map(path string, content []byte, opts Options) (Result, error) {\n26: func goASTSymbols(fset *token.FileSet, f *ast.File, content []byte) []Symbol {\n52: func goGenDeclSymbols(fset *token.FileSet, d *ast.GenDecl, content []byte) []Symbol {\n111: func goTypeSymbol(fset *token.FileSet, ts *ast.TypeSpec, content []byte) Symbol {\n140: func goFuncDeclSymbol(fset *token.FileSet, d *ast.FuncDecl, content []byte) Symbol {\n169: func receiverTypeName(expr ast.Expr) string {\n183: func goSlice(content []byte, fset *token.FileSet, start, end token.Pos) string {\n# map: 637/4678 chars (~1169 tokens full, ~159 tokens map)\n\n=== internal/mapengine/treesitter.go (9063 bytes) ===\n1: package mapengine\n3: import (\n12: type TreeSitterMapper struct {\n16: type TreeSitterLanguageConfig struct {\n25: func (m TreeSitterMapper) Map(path strin",
+      "outputSize": 9083,
+      "at": "2026-07-06T07:18:48.159795Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "toolCallId": "toolu_01Vpaui714ey39scSP7Uswop",
+      "text": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\n```=== internal/mapengine/types.go (5583 bytes) ===",
+      "outputSize": 111,
+      "at": "2026-07-06T07:18:52.255331Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "toolCallId": "toolu_01PAE63CG5s9Ds4pNEw2jzqL",
+      "text": "```console\n=== internal/mapengine/types.go (5583 bytes) ===\npackage mapengine\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n)\n\ntype Engine string\n\nconst (\n\tEngineAuto       Engine = \"auto\"\n\tEngineGoAST      Engine = \"go-ast\"\n\tEngineRegex      Engine = \"regex\"\n\tEngineTreeSitter Engine = \"tree-sitter\"\n)\n\ntype Level string\n\nconst (\n\tLevelCompact  Level = \"compact\"\n\tLevelMinimal  Level = \"minimal\"\n\tLevelOutline  Level = \"outline\"\n\tLevelStandard Level = \"standard\"\n)\n\ntype Kind string\n\nconst (\n\tKindFunc    Kind = \"func\"\n\tKindType    Kind = \"type\"\n\tKindImport  Kind = \"import\"\n\tKindConst   Kind = \"const\"\n\tKindVar     Kind = \"var\"\n\tKindPackage Kind = \"package\"\n\tKindOther   Kind = \"other\"\n)\n\ntype Options struct {\n\tEngine Engine\n\tLevel  Level\n\tKind   Kind\n}\n\ntype Mapper interface {\n\tMap(path string, content []byte, opts Options) (Result, error)\n}\n\ntype Result struct {\n\tSymbols       []Symbol\n\tLines         []string\n\tEngine        Engine\n\tFallback      bool\n\tWarnings      []string\n\tOriginalChars int\n\tMappedChars   int\n}\n\ntype Symbol struct {\n\tKind      Kind\n\tName      string\n\tSignature string\n\tLine      int\n\tEndLine   int\n\tParent    string\n\tDoc       string\n}\n\nvar ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n\nfunc NormalizeOptions(opts Options) Options {\n\topts.Engine = normalizeEngine(opts.Engine)\n\topts.Level = normalizeLevel(opts.Level)\n\topts.Kind = normalizeKind(opts.Kind)\n\treturn opts\n}\n\nfunc normalizeEngine(engine Engine) Engine {\n\tswitch Engine(strings.ToLower(strings.TrimSpace(string(engine)))) {\n\tcase EngineRegex:\n\t\treturn EngineRegex\n\tcase EngineTreeSitter:\n\t\treturn EngineTreeSitter\n\tdefault:\n\t\treturn EngineAuto\n\t}\n}\n\nfunc normalizeLevel(level Level) Level {\n\tswitch Level(strings.ToLower(strings.TrimSpace(string(level)))) {\n\tcase LevelOutline:\n\t\treturn LevelOutline\n\tcase LevelMinimal:\n\t\treturn LevelMinimal\n\tcase LevelStandard:\n\t\treturn LevelStandard\n\tdefault:\n\t\treturn LevelCompact\n\t}\n}\n\nfunc normalizeKind(kind Kind) Kind {\n\tswitch Kind(strings.ToLower(strings.TrimSpace(string(kind)",
+      "outputSize": 8285,
+      "at": "2026-07-06T07:18:57.50886Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "toolCallId": "toolu_01Uuk5zG5jGMTSyfR1GJccEK",
+      "text": "```console\n0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n=== internal/cli (directory, 6 entries) ===\n  code.go\n  ghx.go\n  serve.go\n  sidecar.go\n  sidecar_test.go\n  sidecar_view.go\n→ use: ghx read gkoreli/ghx \"internal/cli/*\" --map\n\n---\ncode.go\nghx.go\nserve.go\nsidecar.go\nsidecar_test.go\nsidecar_view.go\n```0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n=== internal/cli (directory, 6 entries) ===\n  code.go\n  ghx.go\n  serve.go\n  sidecar.go\n  sidecar_test.go\n  sidecar_view.go\n→ use: ghx read gkoreli/ghx \"internal/cli/*\" --map\n\n---\ncode.go\nghx.go\nserve.go\nsidecar.go\nsidecar_test.go\nsidecar_view.go",
+      "outputSize": 671,
+      "at": "2026-07-06T07:19:05.636316Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "toolCallId": "toolu_01NUmUiN1g2mZoNdH1V9Bhhs",
+      "text": "```console\n# glob \"internal/**/*.go\" matched 116 files (reading first 10)\n\n→ glob \"internal/**/*.go\" matched 116 files, showing 10. Narrow the pattern to see others.\n```# glob \"internal/**/*.go\" matched 116 files (reading first 10)\n\n→ glob \"internal/**/*.go\" matched 116 files, showing 10. Narrow the pattern to see others.",
+      "outputSize": 327,
+      "at": "2026-07-06T07:19:12.784442Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "toolCallId": "toolu_01Bf2p7UsWpazFB6qBS2PAjA",
+      "text": "```console\n0 results (showing 0)\n→ To search repos by topic, use: ghx repos \"\u003cquery\u003e\"\n---\n17 results (showing 17)\ngkoreli/ghx internal/mapengine/goast.go: package mapengine import ( \"fmt\" \"go/ast\" \"go/parser\" \"go/token\"\ngkoreli/ghx AGENTS.md: internal/cli/ — CLI commands (cobra) internal/ghx/ — core library (explore, read, search, repos, tree, glob) internal/codemode/ — JS executor (goja sandbox, esbuild transpilation, type generatio…\ngkoreli/ghx internal/ghx/register.go: Func: wrapRead, Returns: \"{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line:…\ngkoreli/ghx skills/ghx-mcp/SKILL.md: | `explore` | `repo` (required), `path` | Branch, file tree, README in 1 API call | | `read` | `repo` + `paths` (required), `grep`, `lines`, `map`, `level`, `kind`, `mapEngine` | Read 1-10 files in 1 …\ngkoreli/ghx README.md: internal/cli/ — CLI frontend (cobra) + MCP server commands internal/ghx/ — core library (Explore, Read, Search, Repos, Tree, Glob) internal/codemode/ — JS executor (goja sandbox, TS transpilatio…\ngkoreli/ghx docs/adr/0013-ghx-map-command.md: All items shipped as of 2026-04-14: 1. ✓ `internal/mapengine` owns `Mapper`, `Options`, `Result`, `Symbol`, engine selection, fallback, and output formatting. 2. ✓ `internal/ghx/read.go` calls `ma…\ngkoreli/ghx internal/mapengine/regex.go: package mapengine import ( \"fmt\" \"path/filepath\" \"regexp\" \"strings\"\ngkoreli/ghx docs/adr/0016.1-sidecar-eval-implementation.md: 6. **Task ground truth**: `hono-middleware` and `openai-node-streaming` come from the saved manual runs in `experiments/ghx-sidecar/`; `ghx-mapengine` was verified directly against this repo (`interna…\ngkoreli/ghx internal/mapengine/types.go: package mapengine import ( \"errors\" \"fmt\" \"path/filepath\" \"sort\"\ngkoreli/ghx skills/ghx/SKILL.md: ```typescript declare const codemode: { explore: (input: { repo: string; path?: string }) =\u003e { description: string; branch: str",
+      "outputSize": 6183,
+      "at": "2026-07-06T07:19:18.257944Z"
+    },
+    {
+      "actionIndex": 8,
+      "turn": 0,
+      "toolCallId": "toolu_0168pV7u31sJjh36LtGsyFQP",
+      "text": "```\nExit code 1\n=== internal/ghx/read.go (9012 bytes) ===\n  8: \n  9: \t\"github.com/cli/go-gh/v2/pkg/api\"\n\u003e 10: \t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n  11: )\n  12: \n--\n  26: \tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n  27: \tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\u003e 28: \tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n  29: \tMapWarnings []string    `json:\"mapWarnings,omitempty\"` // fallback/quality warnings from mapper\n  30: \tGlobPattern string      `json:\"globPattern,omitempty\"` // the glob that matched this file (empty for exact paths)\n--\n  37: \tMapLevel  string // map detail level: outline|minimal|compact|standard\n  38: \tMapKind   string // map symbol kind filter: func|type|import|const|var\n\u003e 39: \tMapEngine string // map engine: auto|regex|tree-sitter\n  40: \n  41: \t// Output: populated after Read() when globs are used\n--\n  185: \t\tresult.Content = extractLines(text, opts.Lines)\n  186: \t} else if opts.Map {\n\u003e 187: \t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n\u003e 188: \t\t\tEngine: mapengine.Engine(opts.MapEngine),\n\u003e 189: \t\t\tLevel:  mapengine.Level(opts.MapLevel),\n\u003e 190: \t\t\tKind:   mapengine.Kind(opts.MapKind),\n  191: \t\t})\n  192: \t\tresult.MapLines = mapResult.Lines\n  193: \t\tresult.MapChars = mapResult.OriginalChars\n\u003e 194: \t\tresult.MapEngine = string(mapResult.Engine)\n  195: \t\tresult.MapWarnings = mapResult.Warnings\n  196: \t\tif err != nil {\n\n(eval):2: ==CLI=== not found\n```Exit code 1\n=== internal/ghx/read.go (9012 bytes) ===\n  8: \n  9: \t\"github.com/cli/go-gh/v2/pkg/api\"\n\u003e 10: \t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n  11: )\n  12: \n--\n  26: \tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n  27: \tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\u003e 28: \tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n  ",
+      "outputSize": 3140,
+      "at": "2026-07-06T07:19:24.29257Z"
+    },
+    {
+      "actionIndex": 9,
+      "turn": 0,
+      "toolCallId": "toolu_017yGqSdqYcXj3rXbjFFFwya",
+      "text": "```console\n=== internal/cli/ghx.go (8624 bytes) ===\n  110: \t\tmapLevel, _ := cmd.Flags().GetString(\"level\")\n  111: \t\tmapKind, _ := cmd.Flags().GetString(\"kind\")\n\u003e 112: \t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n  113: \n  114: \t\topts := \u0026ghxlib.ReadOpts{\n--\n  209: \treadCmd.Flags().String(\"level\", \"compact\", \"Map detail level: outline|minimal|compact|standard\")\n  210: \treadCmd.Flags().String(\"kind\", \"\", \"Map symbol kind filter: func|type|import|const|var|package\")\n\u003e 211: \treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n  212: }\n  213:\n```=== internal/cli/ghx.go (8624 bytes) ===\n  110: \t\tmapLevel, _ := cmd.Flags().GetString(\"level\")\n  111: \t\tmapKind, _ := cmd.Flags().GetString(\"kind\")\n\u003e 112: \t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n  113: \n  114: \t\topts := \u0026ghxlib.ReadOpts{\n--\n  209: \treadCmd.Flags().String(\"level\", \"compact\", \"Map detail level: outline|minimal|compact|standard\")\n  210: \treadCmd.Flags().String(\"kind\", \"\", \"Map symbol kind filter: func|type|import|const|var|package\")\n\u003e 211: \treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n  212: }\n  213:",
+      "outputSize": 1159,
+      "at": "2026-07-06T07:19:29.166147Z"
+    }
+  ],
+  "identity": {
+    "agentCommand": "/Users/goga/Documents/goga/ghx/scripts/eval-agent-acp.sh",
+    "adapterName": "@agentclientprotocol/claude-agent-acp",
+    "adapterVersion": "0.55.0",
+    "subjectModel": "claude-sonnet-5",
+    "wrapperSha256": "30cb9d7258c2c08862d2c592d58a8e3f242ea2032a0495646441399e1e71b98d"
+  },
+  "context": {
+    "mainAgentChars": 75825,
+    "sidecarInternalChars": 0,
+    "totalWorkflowChars": 75825
+  },
+  "rewards": {
+    "correctness": 0.6666666666666666,
+    "evidence": 1,
+    "trajectory": 0.9333333333333333,
+    "compression": 0,
+    "memory": 0,
+    "memoryApplies": false,
+    "safety": 1,
+    "overall": 0.72
+  },
+  "startedAt": "2026-07-06T07:18:28.942458Z",
+  "endedAt": "2026-07-06T07:19:45.750075Z",
+  "parallel": true
+}

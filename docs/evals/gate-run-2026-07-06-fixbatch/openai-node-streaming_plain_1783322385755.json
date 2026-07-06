@@ -1,0 +1,743 @@
+{
+  "id": "openai-node-streaming_plain_1783322385755",
+  "taskId": "openai-node-streaming",
+  "repo": "openai/openai-node",
+  "profile": "plain",
+  "checks": {
+    "expectedFiles": [
+      "src/core/streaming.ts",
+      "src/lib/responses/ResponseStream.ts"
+    ],
+    "expectedSymbols": [
+      "ResponseStream",
+      "AssistantStream"
+    ],
+    "avoidPaths": [
+      "tests/",
+      "examples/"
+    ]
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "question": "Where are streaming responses implemented, and which public API methods route into the streaming implementation?",
+      "text": "I'll investigate the openai-node repository structure using the GitHub API via gh CLI, without cloning it.There's a `streaming.ts` and `lib` directory. Let me look at both plus how resources use them.So `core/streaming.ts` is a file, not a directory. Let's fetch it.Now let's look at how resources (chat, responses, beta.assistants, etc.) invoke streaming — search for `Stream.fromSSEResponse` usage and `stream: true` handling across resources.Excellent, this gives clear API surface for chat completions: `create()` with `stream: true`, `runTools()`, and `.stream()`. Now let's check `responses.ts` (Responses API) and `beta/assistants` / `beta/threads` for their streaming methods.Now let's check `beta/threads` (Assistants API) for streaming methods, and confirm `AssistantStream.ts`.I have enough evidence now to compose a complete answer.I now have complete evidence to answer.\n\n## Streaming implementation in `openai/openai-node`\n\n### Core low-level implementation\n**`src/core/streaming.ts`** (re-exported for back-compat via the now-deprecated `src/streaming.ts`) is where raw HTTP streaming lives:\n- `class Stream\u003cItem\u003e` — the async-iterable wrapper the SDK returns for any streamed API call. Provides `[Symbol.asyncIterator]`, `.tee()`, `.toReadableStream()`.\n- `Stream.fromSSEResponse()` — parses a `fetch` `Response` as Server-Sent-Events (via the internal `_iterSSEMessages` generator + `SSEDecoder`/`LineDecoder`), yielding parsed JSON chunks. Used for Chat Completions, Responses, Assistants/Runs, and transcription streaming.\n- `Stream.fromReadableStream()` — builds a `Stream` from a plain newline-delimited `ReadableStream`; used internally by the higher-level helper streams (`ChatCompletionStream`, `AssistantStream`) once they've done their own request plumbing.\n\n### Where streaming is triggered generically\n**`src/internal/parse.ts`**, function `defaultParseResponse()` — this is the single chokepoint all API calls pass through. If `FinalRequestOptions.stream` is true, it calls either a custom `options.__streamClass.fromSSEResponse(...)` (if the resource specified one) or falls back to `Stream.fromSSEResponse(...)` from `core/streaming.ts`. This is *the* place that \"routes into\" streaming — every `.create()`-style method that sets `stream: true` on its request options ends up here.\n\n### Higher-level, ergonomic stream wrappers (`src/lib/`)\nBuilt on top of the core `Stream`/SSE plumbing, exposing an `EventEmitter`-style API (`src/lib/EventStream.ts` is the shared base class):\n- **`src/lib/ChatCompletionStream.ts`** — `ChatCompletionStream` (extends `AbstractChatCompletionRunner`), accumulates chunks into a full `ChatCompletion`, emits `content`, `chunk`, `message`, etc.\n- **`src/lib/ChatCompletionStreamingRunner.ts`** / **`AbstractChatCompletionRunner.ts`** / **`ChatCompletionRunner.ts`** — power the tool-calling \"runner\" helpers.\n- **`src/lib/responses/ResponseStream.ts`** — `ResponseStream`, with `ResponseAccumulator.ts` (accumulates `ResponseStreamEvent`s into a final `Response`) and `EventTypes.ts`.\n- **`src/lib/AssistantStream.ts`** — `AssistantStream` for the (beta) Assistants/Runs streaming API.\n\n### Public API methods that route into streaming\n| Method | File | Mechanism |\n|---|---|---|\n| `client.chat.completions.create({ stream: true })` | `src/resources/chat/completions/completions.ts:61-79` | sets `stream: body.stream ?? false` on the request → `defaultParseResponse` → `Stream.fromSSEResponse` → `Stream\u003cChatCompletionChunk\u003e` |\n| `client.chat.completions.stream(body)` | same file, `:221-225` | calls `ChatCompletionStream.createChatCompletion(...)` |\n| `client.chat.completions.runTools(body)` when `body.stream` | same file, `:196-215` | delegates to `ChatCompletionStreamingRunner.runTools(...)` |\n| `client.responses.create({ stream: true })` | `src/resources/responses/responses.ts:96-122` | same `stream:` flag → core `Stream\u003cResponseStreamEvent\u003e` |\n| `client.responses.retrieve({ stream: true })` | same file, `:137-168` | same pattern (retrieving a streamed in-progress response) |\n| `client.responses.stream(body)` | same file, `:201-205` | calls `ResponseStream.createResponse(...)` |\n| `client.beta.threads.runs.create(threadId, { stream: true })` | `src/resources/beta/threads/runs/runs.ts:57-82` | core `Stream\u003cAssistantStreamEvent\u003e` |\n| `client.beta.threads.runs.stream(...)` / deprecated `createAndStream(...)` | same file, `:161-233` | `AssistantStream.createAssistantStream(...)` |\n| `client.beta.threads.runs.submitToolOutputs({ stream: true })` / `.submitToolOutputsStream(...)` | same file, `:246-299` | core `Stream` or `AssistantStream.createToolAssistantStream(...)` |\n| `client.beta.threads.createAndRun({ stream: true })` / `.createAndRunStream(...)` | `src/resources/beta/threads/threads.ts:143-183` | core `Stream` or `AssistantStream.createThreadAssistantStream(...)` |\n| `client.audio.transcriptions.create({ stream: true })` | `src/resources/audio/transcriptions.ts:43-62` | core `Stream\u003cTranscriptionStreamEvent\u003e` (SSE); explicitly not supported for `whisper-1` per doc comment |\n\nEvery one of these methods just forwards `stream: \u003cbool\u003e` into `this._client.post(...)`/`.get(...)`, and the actual branching to SSE parsing happens centrally in `defaultParseResponse` (`src/internal/parse.ts`), which calls into `src/core/streaming.ts`.\n\n### What I did not verify\n- I did not check the **Realtime API** (`src/realtime/`, `src/resources/realtime/`) in depth — that uses WebSocket-based streaming, a materially different transport from the SSE/`ReadableStream` mechanism described above, and was out of scope for this pass.\n- I did not inspect `src/client.ts`'s `post`/`get`/request-building code to trace exactly how the `stream` option becomes `FinalRequestOptions.stream` (I confirmed the consuming side in `parse.ts`, not the option-plumbing side in the base client).\n- I read files via the GitHub Contents API against the default branch; I did not check git blame/history or verify these are unchanged as of a specific commit SHA.\n- I did not exhaustively check every resource file (e.g., `containers`, `evals`, `videos`) for possible additional streaming methods beyond the ones surfaced by grep — the ones listed above are the ones I found evidence for.",
+      "toolCalls": [
+        "execute: gh api repos/openai/openai-node/contents/src --jq '.[].name' 2\u003e\u00261 (completed)",
+        "execute: echo \"=== streaming.ts ===\"\ngh api repos/openai/openai-node/contents/src/streaming.ts --jq '.content' | base64 -d\n (completed)",
+        "execute: echo \"=== core dir ===\"\ngh api repos/openai/openai-node/contents/src/core --jq '.[].name' 2\u003e\u00261\necho \"=== core/streaming (if dir) ===\"\ngh api repos/openai/openai-node/contents/src/core/streaming --jq '.[].name' 2\u003e\u00261\n (failed)",
+        "execute: gh api repos/openai/openai-node/contents/src/core/streaming.ts --jq '.content' | base64 -d (completed)",
+        "execute: echo \"=== lib dir ===\"\ngh api repos/openai/openai-node/contents/src/lib --jq '.[].name' 2\u003e\u00261\n (completed)",
+        "execute: echo \"=== lib/responses dir ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses --jq '.[].name' 2\u003e\u00261\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/resources --jq '.[].name' 2\u003e\u00261\necho \"---\"\ngh search code \"fromSSEResponse\" --repo openai/openai-node --json path,repository -L 50 2\u003e\u00261\n (completed)",
+        "execute: gh api \"search/code?q=fromSSEResponse+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261 (completed)",
+        "execute: echo \"=== src/internal/parse.ts ===\"\ngh api repos/openai/openai-node/contents/src/internal/parse.ts --jq '.content' | base64 -d\n (completed)",
+        "execute: gh api \"search/code?q=__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---client.ts stream handling---\"\ngh api repos/openai/openai-node/contents/src/client.ts --jq '.content' | base64 -d \u003e /tmp/client.ts\nwc -l /tmp/client.ts\ngrep -n \"stream\" /tmp/client.ts | head -60\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/resources/chat/completions/completions.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/chat_completions.ts\nwc -l /tmp/chat_completions.ts\ngrep -n \"stream\\|Stream\" /tmp/chat_completions.ts | head -80\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/resources/responses/responses.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/responses.ts\nwc -l /tmp/responses.ts\ngrep -n \"stream\\|Stream\" /tmp/responses.ts | head -60\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/resources/beta --jq '.[].name' 2\u003e\u00261\necho \"---beta/threads---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads --jq '.[].name' 2\u003e\u00261\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/resources/beta/threads/runs/runs.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/runs.ts\nwc -l /tmp/runs.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/runs.ts | head -60\necho \"---threads.ts (beta)---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads/threads.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/beta_threads.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/beta_threads.ts | head -60\n (completed)",
+        "execute: gh api repos/openai/openai-node/contents/src/lib/EventStream.ts --jq '.content' | base64 -d \u003e /tmp/EventStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\" /tmp/EventStream.ts | head -30\necho \"=== ChatCompletionStream.ts imports/class defs ===\"\ngh api repos/openai/openai-node/contents/src/lib/ChatCompletionStream.ts --jq '.content' | base64 -d \u003e /tmp/ChatCompletionStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ChatCompletionStream.ts | head -30\necho \"=== ResponseStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses/ResponseStream.ts --jq '.content' | base64 -d \u003e /tmp/ResponseStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ResponseStream.ts | head -30\necho \"=== AssistantStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/AssistantStream.ts --jq '.content' | base64 -d \u003e /tmp/AssistantStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/AssistantStream.ts | head -30\n (completed)",
+        "execute: gh api \"search/code?q=Stream.fromSSEResponse+OR+__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---audio transcriptions---\"\ngh api repos/openai/openai-node/contents/src/resources/audio/transcriptions.ts --jq '.content' 2\u003e/dev/null | base64 -d | grep -n \"stream\\|Stream\" | head -30\n (completed)",
+        "execute: sed -n '55,90p' /tmp/chat_completions.ts\necho \"---\"\nsed -n '190,235p' /tmp/chat_completions.ts (completed)"
+      ],
+      "toolTraces": [
+        {
+          "id": "toolu_01CPbB2AkE1pPzQrNKjHQMLw",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src --jq '.[].name' 2\u003e\u00261",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src --jq '.[].name' 2\u003e\u00261",
+            "description": "List top-level src directory contents"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:19:50.721478Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:19:57.257107Z"
+            }
+          ],
+          "outputSize": 470,
+          "outputExcerpt": "List top-level src directory contents```console\n_vendor\napi-promise.ts\nauth\nazure.ts\nbedrock.ts\nbeta\nclient.ts\ncore\nerror.ts\nhelpers\nindex.ts\ninternal\nlib\npagination.ts\nproviders\nrealtime\nresource.ts\nresources.ts\nresources\nstreaming.ts\nuploads.ts\nversion.ts\n```_vendor\napi-promise.ts\nauth\nazure.ts\nbedrock.ts\nbeta\nclient.ts\ncore\nerror.ts\nhelpers\nindex.ts\ninternal\nlib\npagination.ts\nproviders\nrealtime\nresource.ts\nresources.ts\nresources\nstreaming.ts\nuploads.ts\nversion.ts"
+        },
+        {
+          "id": "toolu_01PpZyhvrvd3ARZBBEtKnCNv",
+          "kind": "execute",
+          "title": "echo \"=== streaming.ts ===\"\ngh api repos/openai/openai-node/contents/src/streaming.ts --jq '.content' | base64 -d\n",
+          "rawInput": {
+            "command": "echo \"=== streaming.ts ===\"\ngh api repos/openai/openai-node/contents/src/streaming.ts --jq '.content' | base64 -d\n",
+            "description": "Fetch and decode src/streaming.ts"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:00.366657Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:01.297051Z"
+            }
+          ],
+          "outputSize": 268,
+          "outputExcerpt": "Fetch and decode src/streaming.ts```console\n=== streaming.ts ===\n/** @deprecated Import from ./core/streaming instead */\nexport * from './core/streaming';\n```=== streaming.ts ===\n/** @deprecated Import from ./core/streaming instead */\nexport * from './core/streaming';"
+        },
+        {
+          "id": "toolu_01AB8gUemvnU8qAYvQeGYusW",
+          "kind": "execute",
+          "title": "echo \"=== core dir ===\"\ngh api repos/openai/openai-node/contents/src/core --jq '.[].name' 2\u003e\u00261\necho \"=== core/streaming (if dir) ===\"\ngh api repos/openai/openai-node/contents/src/core/streaming --jq '.[].name' 2\u003e\u00261\n",
+          "rawInput": {
+            "command": "echo \"=== core dir ===\"\ngh api repos/openai/openai-node/contents/src/core --jq '.[].name' 2\u003e\u00261\necho \"=== core/streaming (if dir) ===\"\ngh api repos/openai/openai-node/contents/src/core/streaming --jq '.[].name' 2\u003e\u00261\n",
+            "description": "Inspect core directory and core/streaming"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:03.735922Z"
+            },
+            {
+              "status": "failed",
+              "at": "2026-07-06T07:20:07.376989Z"
+            }
+          ],
+          "outputSize": 673,
+          "outputExcerpt": "Inspect core directory and core/streaming```\nExit code 1\n=== core dir ===\nEventEmitter.ts\nREADME.md\napi-promise.ts\nerror.ts\npagination.ts\nresource.ts\nstreaming.ts\nuploads.ts\n=== core/streaming (if dir) ===\n{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}gh: Not Found (HTTP 404)\n```Exit code 1\n=== core dir ===\nEventEmitter.ts\nREADME.md\napi-promise.ts\nerror.ts\npagination.ts\nresource.ts\nstreaming.ts\nuploads.ts\n=== core/streaming (if dir) ===\n{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}gh: Not Found (HTTP 404)"
+        },
+        {
+          "id": "toolu_011f5fWcRyXC3iT9XxjjrwZ3",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/core/streaming.ts --jq '.content' | base64 -d",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/core/streaming.ts --jq '.content' | base64 -d",
+            "description": "Fetch and decode src/core/streaming.ts"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:09.79986Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:11.007439Z"
+            }
+          ],
+          "outputSize": 19567,
+          "outputExcerpt": "Fetch and decode src/core/streaming.ts```console\nimport { OpenAIError } from './error';\nimport { type ReadableStream } from '../internal/shim-types';\nimport { makeReadableStream } from '../internal/shims';\nimport { findDoubleNewlineIndex, LineDecoder } from '../internal/decoders/line';\nimport { ReadableStreamToAsyncIterable } from '../internal/shims';\nimport { isAbortError } from '../internal/errors';\nimport { encodeUTF8 } from '../internal/utils/bytes';\nimport { loggerFor } from '../internal/utils/log';\nimport type { OpenAI } from '../client';\n\nimport { APIError } from './error';\n\ntype Bytes = string | ArrayBuffer | Uint8Array | null | undefined;\n\nexport type ServerSentEvent = {\n  event: string | null;\n  data: string;\n  raw: string[];\n};\n\nexport class Stream\u003cItem\u003e implements AsyncIterable\u003cItem\u003e {\n  controller: AbortController;\n  #client: OpenAI | undefined;\n\n  constructor(\n    private iterator: () =\u003e AsyncIterator\u003cItem\u003e,\n    controller: AbortController,\n    client?: OpenAI,\n  ) {\n    this.controller = controller;\n    this.#client = client;\n  }\n\n  static fromSSEResponse\u003cItem\u003e(\n    response: Response,\n    controller: AbortController,\n    client?: OpenAI,\n    synthesizeEventData?: boolean,\n  ): Stream\u003cItem\u003e {\n    let consumed = false;\n    const logger = client ? loggerFor(client) : console;\n\n    async function* iterator(): AsyncIterator\u003cItem, any, undefined\u003e {\n      if (consumed) {\n        throw new OpenAIError('Cannot iterate over a consumed stream, use `.tee()` to split the stream.');\n      }\n      consumed = true;\n      let done = false;\n      try {\n        for await (const sse of _iterSSEMessages(response, controller)) {\n          if (done) continue;\n\n          if (sse.data.startsWith('[DONE]')) {\n            done = true;\n            continue;\n          }\n\n          if (sse.event === null || !sse.event.startsWith('thread.')) {\n            let data;\n\n            try {\n              data = JSON.parse(sse.data) as any;\n            } catch (e) {\n              logger.error(`Could not parse message into JSON:`, sse.d"
+        },
+        {
+          "id": "toolu_01CaRvZhYeP6FVfEc37u9225",
+          "kind": "execute",
+          "title": "echo \"=== lib dir ===\"\ngh api repos/openai/openai-node/contents/src/lib --jq '.[].name' 2\u003e\u00261\n",
+          "rawInput": {
+            "command": "echo \"=== lib dir ===\"\ngh api repos/openai/openai-node/contents/src/lib --jq '.[].name' 2\u003e\u00261\n",
+            "description": "List src/lib directory"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:13.936679Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:18.087146Z"
+            }
+          ],
+          "outputSize": 639,
+          "outputExcerpt": "List src/lib directory```console\n=== lib dir ===\n.keep\nAbstractChatCompletionRunner.ts\nAssistantStream.ts\nChatCompletionRunner.ts\nChatCompletionStream.ts\nChatCompletionStreamingRunner.ts\nEventEmitter.ts\nEventStream.ts\nResponsesParser.ts\nRunnableFunction.ts\nUtil.ts\nchatCompletionUtils.ts\njsonschema.ts\nparser.ts\nresponses\ntransform.ts\n```=== lib dir ===\n.keep\nAbstractChatCompletionRunner.ts\nAssistantStream.ts\nChatCompletionRunner.ts\nChatCompletionStream.ts\nChatCompletionStreamingRunner.ts\nEventEmitter.ts\nEventStream.ts\nResponsesParser.ts\nRunnableFunction.ts\nUtil.ts\nchatCompletionUtils.ts\njsonschema.ts\nparser.ts\nresponses\ntransform.ts"
+        },
+        {
+          "id": "toolu_019cnkySWjfxdNE381pQv4GC",
+          "kind": "execute",
+          "title": "echo \"=== lib/responses dir ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses --jq '.[].name' 2\u003e\u00261\n",
+          "rawInput": {
+            "command": "echo \"=== lib/responses dir ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses --jq '.[].name' 2\u003e\u00261\n",
+            "description": "List src/lib/responses directory"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:20.49867Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:21.465301Z"
+            }
+          ],
+          "outputSize": 251,
+          "outputExcerpt": "List src/lib/responses directory```console\n=== lib/responses dir ===\nEventTypes.ts\nResponseAccumulator.ts\nResponseInputItems.ts\nResponseStream.ts\n```=== lib/responses dir ===\nEventTypes.ts\nResponseAccumulator.ts\nResponseInputItems.ts\nResponseStream.ts"
+        },
+        {
+          "id": "toolu_017attMEL83zYoo1aA5cohKT",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/resources --jq '.[].name' 2\u003e\u00261\necho \"---\"\ngh search code \"fromSSEResponse\" --repo openai/openai-node --json path,repository -L 50 2\u003e\u00261\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/resources --jq '.[].name' 2\u003e\u00261\necho \"---\"\ngh search code \"fromSSEResponse\" --repo openai/openai-node --json path,repository -L 50 2\u003e\u00261\n",
+            "description": "List resources dir and search for fromSSEResponse usage"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:24.732386Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:27.695065Z"
+            }
+          ],
+          "outputSize": 918,
+          "outputExcerpt": "List resources dir and search for fromSSEResponse usage```console\nadmin.ts\nadmin\naudio.ts\naudio\nbatches.ts\nbeta.ts\nbeta\nchat.ts\nchat\ncompletions.ts\ncontainers.ts\ncontainers\nconversations.ts\nconversations\nembeddings.ts\nevals.ts\nevals\nfiles.ts\nfine-tuning.ts\nfine-tuning\ngraders.ts\ngraders\nimages.ts\nindex.ts\nmodels.ts\nmoderations.ts\nrealtime.ts\nrealtime\nresponses.ts\nresponses\nshared.ts\nskills.ts\nskills\nuploads.ts\nuploads\nvector-stores.ts\nvector-stores\nvideos.ts\nwebhooks.ts\nwebhooks\n---\n[]\n```admin.ts\nadmin\naudio.ts\naudio\nbatches.ts\nbeta.ts\nbeta\nchat.ts\nchat\ncompletions.ts\ncontainers.ts\ncontainers\nconversations.ts\nconversations\nembeddings.ts\nevals.ts\nevals\nfiles.ts\nfine-tuning.ts\nfine-tuning\ngraders.ts\ngraders\nimages.ts\nindex.ts\nmodels.ts\nmoderations.ts\nrealtime.ts\nrealtime\nresponses.ts\nresponses\nshared.ts\nskills.ts\nskills\nuploads.ts\nuploads\nvector-stores.ts\nvector-stores\nvideos.ts\nwebhooks.ts\nwebhooks\n---\n[]"
+        },
+        {
+          "id": "toolu_01LpYJbB4dBq3Gh8bHWBcAoL",
+          "kind": "execute",
+          "title": "gh api \"search/code?q=fromSSEResponse+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261",
+          "rawInput": {
+            "command": "gh api \"search/code?q=fromSSEResponse+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261",
+            "description": "Search code for fromSSEResponse via GitHub search API"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:31.519618Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:32.33759Z"
+            }
+          ],
+          "outputSize": 154,
+          "outputExcerpt": "Search code for fromSSEResponse via GitHub search API```console\nsrc/core/streaming.ts\nsrc/internal/parse.ts\n```src/core/streaming.ts\nsrc/internal/parse.ts"
+        },
+        {
+          "id": "toolu_01DP5qR9hXQVjDNiysrMgmhu",
+          "kind": "execute",
+          "title": "echo \"=== src/internal/parse.ts ===\"\ngh api repos/openai/openai-node/contents/src/internal/parse.ts --jq '.content' | base64 -d\n",
+          "rawInput": {
+            "command": "echo \"=== src/internal/parse.ts ===\"\ngh api repos/openai/openai-node/contents/src/internal/parse.ts --jq '.content' | base64 -d\n",
+            "description": "Fetch src/internal/parse.ts"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:37.531766Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:39.55957Z"
+            }
+          ],
+          "outputSize": 6334,
+          "outputExcerpt": "Fetch src/internal/parse.ts```console\n=== src/internal/parse.ts ===\n// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.\n\nimport type { FinalRequestOptions } from './request-options';\nimport { Stream } from '../core/streaming';\nimport { type OpenAI } from '../client';\nimport { formatRequestDetails, loggerFor } from './utils/log';\nimport type { AbstractPage } from '../pagination';\n\nexport type APIResponseProps = {\n  response: Response;\n  options: FinalRequestOptions;\n  controller: AbortController;\n  requestLogID: string;\n  retryOfRequestLogID: string | undefined;\n  startTime: number;\n};\n\nexport async function defaultParseResponse\u003cT\u003e(\n  client: OpenAI,\n  props: APIResponseProps,\n): Promise\u003cWithRequestID\u003cT\u003e\u003e {\n  const { response, requestLogID, retryOfRequestLogID, startTime } = props;\n  const body = await (async () =\u003e {\n    if (props.options.stream) {\n      loggerFor(client).debug('response', response.status, response.url, response.headers, response.body);\n\n      // Note: there is an invariant here that isn't represented in the type system\n      // that if you set `stream: true` the response type must also be `Stream\u003cT\u003e`\n\n      if (props.options.__streamClass) {\n        return props.options.__streamClass.fromSSEResponse(\n          response,\n          props.controller,\n          client,\n          props.options.__synthesizeEventData,\n        ) as any;\n      }\n\n      return Stream.fromSSEResponse(\n        response,\n        props.controller,\n        client,\n        props.options.__synthesizeEventData,\n      ) as any;\n    }\n\n    // fetch refuses to read the body when the status code is 204.\n    if (response.status === 204) {\n      return null as T;\n    }\n\n    if (props.options.__binaryResponse) {\n      return response as unknown as T;\n    }\n\n    const contentType = response.headers.get('content-type');\n    const mediaType = contentType?.split(';')[0]?.trim();\n    const isJSON = mediaType?.includes('application/json') || mediaType?.endsWith('+json');\n    if (isJSON) {\n      const contentL"
+        },
+        {
+          "id": "toolu_01C7CyjX89LgvGUftkgHjDxB",
+          "kind": "execute",
+          "title": "gh api \"search/code?q=__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---client.ts stream handling---\"\ngh api repos/openai/openai-node/contents/src/client.ts --jq '.content' | base64 -d \u003e /tmp/client.ts\nwc -l /tmp/client.ts\ngrep -n \"stream\" /tmp/client.ts | head -60\n",
+          "rawInput": {
+            "command": "gh api \"search/code?q=__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---client.ts stream handling---\"\ngh api repos/openai/openai-node/contents/src/client.ts --jq '.content' | base64 -d \u003e /tmp/client.ts\nwc -l /tmp/client.ts\ngrep -n \"stream\" /tmp/client.ts | head -60\n",
+            "description": "Search for __streamClass usage and inspect client.ts for stream handling"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:44.974283Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:50.431095Z"
+            }
+          ],
+          "outputSize": 325,
+          "outputExcerpt": "Search for __streamClass usage and inspect client.ts for stream handling```console\n---client.ts stream handling---\n    1660 /tmp/client.ts\n1234:      // Send chunked stream (each chunk has own `length`)\n```---client.ts stream handling---\n    1660 /tmp/client.ts\n1234:      // Send chunked stream (each chunk has own `length`)"
+        },
+        {
+          "id": "toolu_01BnEtgj3cPxKRSjewKZJVpJ",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/resources/chat/completions/completions.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/chat_completions.ts\nwc -l /tmp/chat_completions.ts\ngrep -n \"stream\\|Stream\" /tmp/chat_completions.ts | head -80\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/resources/chat/completions/completions.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/chat_completions.ts\nwc -l /tmp/chat_completions.ts\ngrep -n \"stream\\|Stream\" /tmp/chat_completions.ts | head -80\n",
+            "description": "Fetch chat completions resource file and grep for stream references"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:20:55.187231Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:20:57.713983Z"
+            }
+          ],
+          "outputSize": 11754,
+          "outputExcerpt": "Fetch chat completions resource file and grep for stream references```console\n    2460 /tmp/chat_completions.ts\n11:import { Stream } from '../../../core/streaming';\n16:import { ChatCompletionStreamingRunner } from '../../../lib/ChatCompletionStreamingRunner';\n19:import { ChatCompletionStreamingToolRunnerParams } from '../../../lib/ChatCompletionStreamingRunner';\n20:import { ChatCompletionStream, type ChatCompletionStreamParams } from '../../../lib/ChatCompletionStream';\n48:   * Returns a chat completion object, or a streamed sequence of chat completion\n49:   * chunk objects if the request is streamed.\n61:  create(body: ChatCompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cChatCompletion\u003e;\n63:    body: ChatCompletionCreateParamsStreaming,\n65:  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n69:  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e | ChatCompletion\u003e;\n73:  ): APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e {\n77:      stream: body.stream ?? false,\n79:    }) as APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n196:    Params extends ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n198:  \u003e(body: Params, options?: RunnerOptions): ChatCompletionStreamingRunner\u003cParsedT\u003e;\n201:    Params extends ChatCompletionToolRunnerParams\u003cany\u003e | ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n206:  ): ChatCompletionRunner\u003cParsedT\u003e | ChatCompletionStreamingRunner\u003cParsedT\u003e {\n207:    if (body.stream) {\n208:      return ChatCompletionStreamingRunner.runTools(\n210:        body as ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n219:   * Creates a chat completion stream\n221:  stream\u003cParams extends ChatCompletionStreamParams, ParsedT = ExtractParsedContentFromParams\u003cParams\u003e\u003e(\n224:  ): ChatCompletionStream\u003cParsedT\u003e {\n225:    return ChatCompletionStream.createChatCompletion(this._client, body, options);\n250:export type ChatCompletionParseParams = ChatCompletionCreateParamsNonStreaming;\n252:export { ChatCompletionStreamingRunner } from '../../../lib/ChatCompletionStreamingRunner';\n259:exp"
+        },
+        {
+          "id": "toolu_01H2AewsUTfzupdCcBBwmipi",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/resources/responses/responses.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/responses.ts\nwc -l /tmp/responses.ts\ngrep -n \"stream\\|Stream\" /tmp/responses.ts | head -60\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/resources/responses/responses.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/responses.ts\nwc -l /tmp/responses.ts\ngrep -n \"stream\\|Stream\" /tmp/responses.ts | head -60\n",
+            "description": "Fetch responses.ts resource and grep for stream references"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:01.081015Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:03.152617Z"
+            }
+          ],
+          "outputSize": 8953,
+          "outputExcerpt": "Fetch responses.ts resource and grep for stream references```console\n    8498 /tmp/responses.ts\n9:import { ResponseStream, ResponseStreamParams } from '../../lib/responses/ResponseStream';\n19:import { Stream } from '../../core/streaming';\n72:export type ResponseParseParams = ResponseCreateParamsNonStreaming;\n96:  create(body: ResponseCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cResponse\u003e;\n98:    body: ResponseCreateParamsStreaming,\n100:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n104:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e | Response\u003e;\n108:  ): APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e {\n113:        stream: body.stream ?? false,\n115:      }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e\n122:    }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n137:    query?: ResponseRetrieveParamsNonStreaming,\n142:    query: ResponseRetrieveParamsStreaming,\n144:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n149:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e | Response\u003e;\n154:  ): APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e {\n159:        stream: query?.stream ?? false,\n161:      }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e\n168:    }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n199:   * Creates a model response stream\n201:  stream\u003cParams extends ResponseStreamParams, ParsedT = ExtractParsedContentFromParams\u003cParams\u003e\u003e(\n204:  ): ResponseStream\u003cParsedT\u003e {\n205:    return ResponseStream.createResponse\u003cParsedT\u003e(this._client, body, options);\n1533:   * A sequence number for this chunk of the stream response.\n1594: * Emitted when a partial code snippet is streamed by the code interpreter.\n1598:   * The partial code snippet being streamed by the code interpreter.\n1609:   * streamed.\n1614:   * The sequence number of this event, used to order streaming events.\n1644:   * The sequence number of this event, used to order streaming events.\n1670:   * The sequence number of this event, used to order stream"
+        },
+        {
+          "id": "toolu_01UdmAutVmjexvz3zZWzp2MV",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/resources/beta --jq '.[].name' 2\u003e\u00261\necho \"---beta/threads---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads --jq '.[].name' 2\u003e\u00261\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/resources/beta --jq '.[].name' 2\u003e\u00261\necho \"---beta/threads---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads --jq '.[].name' 2\u003e\u00261\n",
+            "description": "List beta and beta/threads resource directories"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:06.781336Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:08.97547Z"
+            }
+          ],
+          "outputSize": 368,
+          "outputExcerpt": "List beta and beta/threads resource directories```console\nassistants.ts\nbeta.ts\nchatkit.ts\nchatkit\nindex.ts\nrealtime.ts\nrealtime\nthreads.ts\nthreads\n---beta/threads---\nindex.ts\nmessages.ts\nruns.ts\nruns\nthreads.ts\n```assistants.ts\nbeta.ts\nchatkit.ts\nchatkit\nindex.ts\nrealtime.ts\nrealtime\nthreads.ts\nthreads\n---beta/threads---\nindex.ts\nmessages.ts\nruns.ts\nruns\nthreads.ts"
+        },
+        {
+          "id": "toolu_01A8zFx7PCuYKenSJ1xgBkE9",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/resources/beta/threads/runs/runs.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/runs.ts\nwc -l /tmp/runs.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/runs.ts | head -60\necho \"---threads.ts (beta)---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads/threads.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/beta_threads.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/beta_threads.ts | head -60\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/resources/beta/threads/runs/runs.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/runs.ts\nwc -l /tmp/runs.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/runs.ts | head -60\necho \"---threads.ts (beta)---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads/threads.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/beta_threads.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/beta_threads.ts | head -60\n",
+            "description": "Check runs.ts and beta threads.ts for streaming"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:12.785814Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:17.694451Z"
+            }
+          ],
+          "outputSize": 14672,
+          "outputExcerpt": "Check runs.ts and beta threads.ts for streaming```console\n    1090 /tmp/runs.ts\n36:import { Stream } from '../../../../core/streaming';\n39:import { AssistantStream, RunCreateParamsBaseStream } from '../../../../lib/AssistantStream';\n41:import { RunSubmitToolOutputsParamsStream } from '../../../../lib/AssistantStream';\n57:  create(threadID: string, params: RunCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cRun\u003e;\n60:    params: RunCreateParamsStreaming,\n62:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n67:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e | Run\u003e;\n72:  ): APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e {\n79:      stream: params.stream ?? false,\n82:    }) as APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n153:    body: RunCreateParamsNonStreaming,\n161:   * Create a Run stream\n163:   * @deprecated use `stream` instead\n165:  createAndStream(\n167:    body: RunCreateParamsBaseStream,\n169:  ): AssistantStream {\n170:    return AssistantStream.createAssistantStream(threadId, this._client.beta.threads.runs, body, options);\n230:   * Create a Run stream\n232:  stream(threadId: string, body: RunCreateParamsBaseStream, options?: RequestOptions): AssistantStream {\n233:    return AssistantStream.createAssistantStream(threadId, this._client.beta.threads.runs, body, options);\n246:    params: RunSubmitToolOutputsParamsNonStreaming,\n251:    params: RunSubmitToolOutputsParamsStreaming,\n253:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n258:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e | Run\u003e;\n263:  ): APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e {\n269:      stream: params.stream ?? false,\n272:    }) as APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n282:    params: RunSubmitToolOutputsParamsNonStreaming,\n290:   * Submit the tool outputs from a previous run and stream the run to a terminal\n294:  submitToolOutputsStream(\n296:    params: RunSubmitToolOutpu"
+        },
+        {
+          "id": "toolu_01ThkzKhymz1qU1fWNHT2E4f",
+          "kind": "execute",
+          "title": "gh api repos/openai/openai-node/contents/src/lib/EventStream.ts --jq '.content' | base64 -d \u003e /tmp/EventStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\" /tmp/EventStream.ts | head -30\necho \"=== ChatCompletionStream.ts imports/class defs ===\"\ngh api repos/openai/openai-node/contents/src/lib/ChatCompletionStream.ts --jq '.content' | base64 -d \u003e /tmp/ChatCompletionStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ChatCompletionStream.ts | head -30\necho \"=== ResponseStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses/ResponseStream.ts --jq '.content' | base64 -d \u003e /tmp/ResponseStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ResponseStream.ts | head -30\necho \"=== AssistantStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/AssistantStream.ts --jq '.content' | base64 -d \u003e /tmp/AssistantStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/AssistantStream.ts | head -30\n",
+          "rawInput": {
+            "command": "gh api repos/openai/openai-node/contents/src/lib/EventStream.ts --jq '.content' | base64 -d \u003e /tmp/EventStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\" /tmp/EventStream.ts | head -30\necho \"=== ChatCompletionStream.ts imports/class defs ===\"\ngh api repos/openai/openai-node/contents/src/lib/ChatCompletionStream.ts --jq '.content' | base64 -d \u003e /tmp/ChatCompletionStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ChatCompletionStream.ts | head -30\necho \"=== ResponseStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses/ResponseStream.ts --jq '.content' | base64 -d \u003e /tmp/ResponseStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ResponseStream.ts | head -30\necho \"=== AssistantStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/AssistantStream.ts --jq '.content' | base64 -d \u003e /tmp/AssistantStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/AssistantStream.ts | head -30\n",
+            "description": "Inspect EventStream, ChatCompletionStream, ResponseStream, AssistantStream base classes"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:23.099176Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:31.225173Z"
+            }
+          ],
+          "outputSize": 8094,
+          "outputExcerpt": "Inspect EventStream, ChatCompletionStream, ResponseStream, AssistantStream base classes```console\n1:import { APIUserAbortError, OpenAIError } from '../error';\n3:export class EventStream\u003cEventTypes extends BaseEvents\u003e {\n101:  on\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n115:  off\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n128:  once\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n146:  emitted\u003cEvent extends keyof EventTypes\u003e(\n149:    EventParameters\u003cEventTypes, Event\u003e extends [infer Param] ? Param\n150:    : EventParameters\u003cEventTypes, Event\u003e extends [] ? void\n186:  _emit\u003cEvent extends keyof BaseEvents\u003e(event: Event, ...args: EventParameters\u003cBaseEvents, Event\u003e): void;\n187:  _emit\u003cEvent extends keyof EventTypes\u003e(event: Event, ...args: EventParameters\u003cEventTypes, Event\u003e): void;\n188:  _emit\u003cEvent extends keyof EventTypes\u003e(\n243:type EventListener\u003cEvents, EventType extends keyof Events\u003e = Events[EventType];\n245:type EventListeners\u003cEvents, EventType extends keyof Events\u003e = Array\u003c{\n250:export type EventParameters\u003cEvents, EventType extends keyof Events\u003e = {\n251:  [Event in EventType]: EventListener\u003cEvents, EventType\u003e extends (...args: infer P) =\u003e any ? P : never;\n=== ChatCompletionStream.ts imports/class defs ===\n1:import { partialParse } from '../_vendor/partial-json-parser/parser';\n2:import {\n8:import OpenAI from '../index';\n9:import { RequestOptions } from '../internal/request-options';\n10:import { type ReadableStream } from '../internal/shim-types';\n11:import { uuid4 } from '../internal/utils/uuid';\n12:import {\n21:import { ChatCompletionFunctionTool, ParsedChatCompletion } from '../resources/chat/completions';\n22:import {\n31:import { Stream } from '../streaming';\n32:import {\n97:export interface ChatCompletionStreamEvents\u003cParsedT = null\u003e extends AbstractChatCompletionRunnerEvents {\n130:export class ChatCompletionStream\u003cParsedT = null\u003e\n131:  extends AbstractChatC"
+        },
+        {
+          "id": "toolu_019LkpNQUAHxm5rg42ztZVJg",
+          "kind": "execute",
+          "title": "gh api \"search/code?q=Stream.fromSSEResponse+OR+__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---audio transcriptions---\"\ngh api repos/openai/openai-node/contents/src/resources/audio/transcriptions.ts --jq '.content' 2\u003e/dev/null | base64 -d | grep -n \"stream\\|Stream\" | head -30\n",
+          "rawInput": {
+            "command": "gh api \"search/code?q=Stream.fromSSEResponse+OR+__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---audio transcriptions---\"\ngh api repos/openai/openai-node/contents/src/resources/audio/transcriptions.ts --jq '.content' 2\u003e/dev/null | base64 -d | grep -n \"stream\\|Stream\" | head -30\n",
+            "description": "Check audio transcriptions for streaming support"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:36.242213Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:41.469843Z"
+            }
+          ],
+          "outputSize": 4983,
+          "outputExcerpt": "Check audio transcriptions for streaming support```console\n---audio transcriptions---\n7:import { Stream } from '../../core/streaming';\n20:   * format, or a stream of transcript events.\n26:   *     file: fs.createReadStream('speech.mp3'),\n32:    body: TranscriptionCreateParamsNonStreaming\u003c'json' | undefined\u003e,\n36:    body: TranscriptionCreateParamsNonStreaming\u003c'verbose_json'\u003e,\n40:    body: TranscriptionCreateParamsNonStreaming\u003c'srt' | 'vtt' | 'text'\u003e,\n43:  create(body: TranscriptionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cTranscription\u003e;\n45:    body: TranscriptionCreateParamsStreaming,\n47:  ): APIPromise\u003cStream\u003cTranscriptionStreamEvent\u003e\u003e;\n49:    body: TranscriptionCreateParamsStreaming,\n51:  ): APIPromise\u003cTranscriptionCreateResponse | string | Stream\u003cTranscriptionStreamEvent\u003e\u003e;\n55:  ): APIPromise\u003cTranscriptionCreateResponse | string | Stream\u003cTranscriptionStreamEvent\u003e\u003e {\n62:          stream: body.stream ?? false,\n369: * with `stream` set to `true` and `response_format` set to `diarized_json`.\n371:export type TranscriptionStreamEvent =\n380: * with the `Stream` parameter set to `true`.\n430: * with the `Stream` parameter set to `true`.\n527: * with `stream` set to `true` and `response_format` set to `diarized_json`.\n639:\u003e = TranscriptionCreateParamsNonStreaming\u003cResponseFormat\u003e | TranscriptionCreateParamsStreaming;\n720:   * If set to true, the model response data will be streamed to the client as it is\n722:   * [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\n724:   * [Streaming section of the Speech-to-Text guide](https://platform.openai.com/docs/guides/speech-to-text?lang=curl#streaming-transcriptions)\n727:   * Note: Streaming is not supported for the `whisper-1` model and will be ignored.\n729:  stream?: boolean | null;\n778:  export type TranscriptionCreateParamsNonStreaming = TranscriptionsAPI.TranscriptionCreateParamsNonStreaming;\n779:  export type TranscriptionCreateParamsStreaming = TranscriptionsAPI.Transc"
+        },
+        {
+          "id": "toolu_01QwZLJsMm3ateQ2phkiKjp3",
+          "kind": "execute",
+          "title": "sed -n '55,90p' /tmp/chat_completions.ts\necho \"---\"\nsed -n '190,235p' /tmp/chat_completions.ts",
+          "rawInput": {
+            "command": "sed -n '55,90p' /tmp/chat_completions.ts\necho \"---\"\nsed -n '190,235p' /tmp/chat_completions.ts",
+            "description": "Show exact create() and stream()/runTools() method bodies in chat completions resource"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:21:43.801976Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:21:45.227746Z"
+            }
+          ],
+          "outputSize": 5663,
+          "outputExcerpt": "Show exact create() and stream()/runTools() method bodies in chat completions resource```console\n   *     messages: [{ content: 'string', role: 'developer' }],\n   *     model: 'gpt-5.4',\n   *   },\n   * );\n   * ```\n   */\n  create(body: ChatCompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cChatCompletion\u003e;\n  create(\n    body: ChatCompletionCreateParamsStreaming,\n    options?: RequestOptions,\n  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n  create(\n    body: ChatCompletionCreateParamsBase,\n    options?: RequestOptions,\n  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e | ChatCompletion\u003e;\n  create(\n    body: ChatCompletionCreateParams,\n    options?: RequestOptions,\n  ): APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e {\n    return this._client.post('/chat/completions', {\n      body,\n      ...options,\n      stream: body.stream ?? false,\n      __security: { bearerAuth: true },\n    }) as APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n  }\n\n  /**\n   * Get a stored chat completion. Only Chat Completions that have been created with\n   * the `store` parameter set to `true` will be returned.\n   *\n   * @example\n   * ```ts\n   * const chatCompletion =\n   *   await client.chat.completions.retrieve('completion_id');\n   * ```\n---\n  runTools\u003c\n    Params extends ChatCompletionToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(body: Params, options?: RunnerOptions): ChatCompletionRunner\u003cParsedT\u003e;\n\n  runTools\u003c\n    Params extends ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(body: Params, options?: RunnerOptions): ChatCompletionStreamingRunner\u003cParsedT\u003e;\n\n  runTools\u003c\n    Params extends ChatCompletionToolRunnerParams\u003cany\u003e | ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(\n    body: Params,\n    options?: RunnerOptions,\n  ): ChatCompletionRunner\u003cParsedT\u003e | ChatCompletionStreamingRunner\u003cParsedT\u003e {\n    if (body.stream) {\n      return ChatCompl"
+        }
+      ],
+      "resumed": false,
+      "toolOutputChars": 84086,
+      "durationMs": 141443
+    }
+  ],
+  "actions": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01CPbB2AkE1pPzQrNKjHQMLw",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src --jq '.[].name' 2\u003e\u00261",
+      "at": "2026-07-06T07:19:50.721478Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01PpZyhvrvd3ARZBBEtKnCNv",
+      "kind": "execute",
+      "name": "execute",
+      "input": "echo \"=== streaming.ts ===\"\ngh api repos/openai/openai-node/contents/src/streaming.ts --jq '.content' | base64 -d\n",
+      "at": "2026-07-06T07:20:00.366657Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01AB8gUemvnU8qAYvQeGYusW",
+      "kind": "execute",
+      "name": "execute",
+      "input": "echo \"=== core dir ===\"\ngh api repos/openai/openai-node/contents/src/core --jq '.[].name' 2\u003e\u00261\necho \"=== core/streaming (if dir) ===\"\ngh api repos/openai/openai-node/contents/src/core/streaming --jq '.[].name' 2\u003e\u00261\n",
+      "at": "2026-07-06T07:20:03.735922Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_011f5fWcRyXC3iT9XxjjrwZ3",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/core/streaming.ts --jq '.content' | base64 -d",
+      "at": "2026-07-06T07:20:09.79986Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01CaRvZhYeP6FVfEc37u9225",
+      "kind": "execute",
+      "name": "execute",
+      "input": "echo \"=== lib dir ===\"\ngh api repos/openai/openai-node/contents/src/lib --jq '.[].name' 2\u003e\u00261\n",
+      "at": "2026-07-06T07:20:13.936679Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_019cnkySWjfxdNE381pQv4GC",
+      "kind": "execute",
+      "name": "execute",
+      "input": "echo \"=== lib/responses dir ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses --jq '.[].name' 2\u003e\u00261\n",
+      "at": "2026-07-06T07:20:20.49867Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_017attMEL83zYoo1aA5cohKT",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/resources --jq '.[].name' 2\u003e\u00261\necho \"---\"\ngh search code \"fromSSEResponse\" --repo openai/openai-node --json path,repository -L 50 2\u003e\u00261\n",
+      "at": "2026-07-06T07:20:24.732386Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01LpYJbB4dBq3Gh8bHWBcAoL",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api \"search/code?q=fromSSEResponse+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261",
+      "at": "2026-07-06T07:20:31.519618Z"
+    },
+    {
+      "actionIndex": 8,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01DP5qR9hXQVjDNiysrMgmhu",
+      "kind": "execute",
+      "name": "execute",
+      "input": "echo \"=== src/internal/parse.ts ===\"\ngh api repos/openai/openai-node/contents/src/internal/parse.ts --jq '.content' | base64 -d\n",
+      "at": "2026-07-06T07:20:37.531766Z"
+    },
+    {
+      "actionIndex": 9,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01C7CyjX89LgvGUftkgHjDxB",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api \"search/code?q=__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---client.ts stream handling---\"\ngh api repos/openai/openai-node/contents/src/client.ts --jq '.content' | base64 -d \u003e /tmp/client.ts\nwc -l /tmp/client.ts\ngrep -n \"stream\" /tmp/client.ts | head -60\n",
+      "at": "2026-07-06T07:20:44.974283Z"
+    },
+    {
+      "actionIndex": 10,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01BnEtgj3cPxKRSjewKZJVpJ",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/resources/chat/completions/completions.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/chat_completions.ts\nwc -l /tmp/chat_completions.ts\ngrep -n \"stream\\|Stream\" /tmp/chat_completions.ts | head -80\n",
+      "at": "2026-07-06T07:20:55.187231Z"
+    },
+    {
+      "actionIndex": 11,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01H2AewsUTfzupdCcBBwmipi",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/resources/responses/responses.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/responses.ts\nwc -l /tmp/responses.ts\ngrep -n \"stream\\|Stream\" /tmp/responses.ts | head -60\n",
+      "at": "2026-07-06T07:21:01.081015Z"
+    },
+    {
+      "actionIndex": 12,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01UdmAutVmjexvz3zZWzp2MV",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/resources/beta --jq '.[].name' 2\u003e\u00261\necho \"---beta/threads---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads --jq '.[].name' 2\u003e\u00261\n",
+      "at": "2026-07-06T07:21:06.781336Z"
+    },
+    {
+      "actionIndex": 13,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01A8zFx7PCuYKenSJ1xgBkE9",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/resources/beta/threads/runs/runs.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/runs.ts\nwc -l /tmp/runs.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/runs.ts | head -60\necho \"---threads.ts (beta)---\"\ngh api repos/openai/openai-node/contents/src/resources/beta/threads/threads.ts --jq '.content' 2\u003e/dev/null | base64 -d \u003e /tmp/beta_threads.ts\ngrep -n \"stream\\|Stream\\|AssistantStream\" /tmp/beta_threads.ts | head -60\n",
+      "at": "2026-07-06T07:21:12.785814Z"
+    },
+    {
+      "actionIndex": 14,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01ThkzKhymz1qU1fWNHT2E4f",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/openai/openai-node/contents/src/lib/EventStream.ts --jq '.content' | base64 -d \u003e /tmp/EventStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\" /tmp/EventStream.ts | head -30\necho \"=== ChatCompletionStream.ts imports/class defs ===\"\ngh api repos/openai/openai-node/contents/src/lib/ChatCompletionStream.ts --jq '.content' | base64 -d \u003e /tmp/ChatCompletionStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ChatCompletionStream.ts | head -30\necho \"=== ResponseStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/responses/ResponseStream.ts --jq '.content' | base64 -d \u003e /tmp/ResponseStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/ResponseStream.ts | head -30\necho \"=== AssistantStream.ts ===\"\ngh api repos/openai/openai-node/contents/src/lib/AssistantStream.ts --jq '.content' | base64 -d \u003e /tmp/AssistantStream.ts\ngrep -n \"class\\|extends\\|Stream.from\\|import\\|static create\" /tmp/AssistantStream.ts | head -30\n",
+      "at": "2026-07-06T07:21:23.099176Z"
+    },
+    {
+      "actionIndex": 15,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_019LkpNQUAHxm5rg42ztZVJg",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api \"search/code?q=Stream.fromSSEResponse+OR+__streamClass+repo:openai/openai-node\" --jq '.items[].path' 2\u003e\u00261\necho \"---audio transcriptions---\"\ngh api repos/openai/openai-node/contents/src/resources/audio/transcriptions.ts --jq '.content' 2\u003e/dev/null | base64 -d | grep -n \"stream\\|Stream\" | head -30\n",
+      "at": "2026-07-06T07:21:36.242213Z"
+    },
+    {
+      "actionIndex": 16,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01QwZLJsMm3ateQ2phkiKjp3",
+      "kind": "execute",
+      "name": "execute",
+      "input": "sed -n '55,90p' /tmp/chat_completions.ts\necho \"---\"\nsed -n '190,235p' /tmp/chat_completions.ts",
+      "at": "2026-07-06T07:21:43.801976Z"
+    }
+  ],
+  "observations": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "toolCallId": "toolu_01CPbB2AkE1pPzQrNKjHQMLw",
+      "text": "List top-level src directory contents```console\n_vendor\napi-promise.ts\nauth\nazure.ts\nbedrock.ts\nbeta\nclient.ts\ncore\nerror.ts\nhelpers\nindex.ts\ninternal\nlib\npagination.ts\nproviders\nrealtime\nresource.ts\nresources.ts\nresources\nstreaming.ts\nuploads.ts\nversion.ts\n```_vendor\napi-promise.ts\nauth\nazure.ts\nbedrock.ts\nbeta\nclient.ts\ncore\nerror.ts\nhelpers\nindex.ts\ninternal\nlib\npagination.ts\nproviders\nrealtime\nresource.ts\nresources.ts\nresources\nstreaming.ts\nuploads.ts\nversion.ts",
+      "outputSize": 470,
+      "at": "2026-07-06T07:19:57.257107Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "toolCallId": "toolu_01PpZyhvrvd3ARZBBEtKnCNv",
+      "text": "Fetch and decode src/streaming.ts```console\n=== streaming.ts ===\n/** @deprecated Import from ./core/streaming instead */\nexport * from './core/streaming';\n```=== streaming.ts ===\n/** @deprecated Import from ./core/streaming instead */\nexport * from './core/streaming';",
+      "outputSize": 268,
+      "at": "2026-07-06T07:20:01.297051Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "toolCallId": "toolu_01AB8gUemvnU8qAYvQeGYusW",
+      "text": "Inspect core directory and core/streaming```\nExit code 1\n=== core dir ===\nEventEmitter.ts\nREADME.md\napi-promise.ts\nerror.ts\npagination.ts\nresource.ts\nstreaming.ts\nuploads.ts\n=== core/streaming (if dir) ===\n{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}gh: Not Found (HTTP 404)\n```Exit code 1\n=== core dir ===\nEventEmitter.ts\nREADME.md\napi-promise.ts\nerror.ts\npagination.ts\nresource.ts\nstreaming.ts\nuploads.ts\n=== core/streaming (if dir) ===\n{\"message\":\"Not Found\",\"documentation_url\":\"https://docs.github.com/rest/repos/contents#get-repository-content\",\"status\":\"404\"}gh: Not Found (HTTP 404)",
+      "outputSize": 673,
+      "at": "2026-07-06T07:20:07.376989Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "toolCallId": "toolu_011f5fWcRyXC3iT9XxjjrwZ3",
+      "text": "Fetch and decode src/core/streaming.ts```console\nimport { OpenAIError } from './error';\nimport { type ReadableStream } from '../internal/shim-types';\nimport { makeReadableStream } from '../internal/shims';\nimport { findDoubleNewlineIndex, LineDecoder } from '../internal/decoders/line';\nimport { ReadableStreamToAsyncIterable } from '../internal/shims';\nimport { isAbortError } from '../internal/errors';\nimport { encodeUTF8 } from '../internal/utils/bytes';\nimport { loggerFor } from '../internal/utils/log';\nimport type { OpenAI } from '../client';\n\nimport { APIError } from './error';\n\ntype Bytes = string | ArrayBuffer | Uint8Array | null | undefined;\n\nexport type ServerSentEvent = {\n  event: string | null;\n  data: string;\n  raw: string[];\n};\n\nexport class Stream\u003cItem\u003e implements AsyncIterable\u003cItem\u003e {\n  controller: AbortController;\n  #client: OpenAI | undefined;\n\n  constructor(\n    private iterator: () =\u003e AsyncIterator\u003cItem\u003e,\n    controller: AbortController,\n    client?: OpenAI,\n  ) {\n    this.controller = controller;\n    this.#client = client;\n  }\n\n  static fromSSEResponse\u003cItem\u003e(\n    response: Response,\n    controller: AbortController,\n    client?: OpenAI,\n    synthesizeEventData?: boolean,\n  ): Stream\u003cItem\u003e {\n    let consumed = false;\n    const logger = client ? loggerFor(client) : console;\n\n    async function* iterator(): AsyncIterator\u003cItem, any, undefined\u003e {\n      if (consumed) {\n        throw new OpenAIError('Cannot iterate over a consumed stream, use `.tee()` to split the stream.');\n      }\n      consumed = true;\n      let done = false;\n      try {\n        for await (const sse of _iterSSEMessages(response, controller)) {\n          if (done) continue;\n\n          if (sse.data.startsWith('[DONE]')) {\n            done = true;\n            continue;\n          }\n\n          if (sse.event === null || !sse.event.startsWith('thread.')) {\n            let data;\n\n            try {\n              data = JSON.parse(sse.data) as any;\n            } catch (e) {\n              logger.error(`Could not parse message into JSON:`, sse.d",
+      "outputSize": 19567,
+      "at": "2026-07-06T07:20:11.007439Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "toolCallId": "toolu_01CaRvZhYeP6FVfEc37u9225",
+      "text": "List src/lib directory```console\n=== lib dir ===\n.keep\nAbstractChatCompletionRunner.ts\nAssistantStream.ts\nChatCompletionRunner.ts\nChatCompletionStream.ts\nChatCompletionStreamingRunner.ts\nEventEmitter.ts\nEventStream.ts\nResponsesParser.ts\nRunnableFunction.ts\nUtil.ts\nchatCompletionUtils.ts\njsonschema.ts\nparser.ts\nresponses\ntransform.ts\n```=== lib dir ===\n.keep\nAbstractChatCompletionRunner.ts\nAssistantStream.ts\nChatCompletionRunner.ts\nChatCompletionStream.ts\nChatCompletionStreamingRunner.ts\nEventEmitter.ts\nEventStream.ts\nResponsesParser.ts\nRunnableFunction.ts\nUtil.ts\nchatCompletionUtils.ts\njsonschema.ts\nparser.ts\nresponses\ntransform.ts",
+      "outputSize": 639,
+      "at": "2026-07-06T07:20:18.087146Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "toolCallId": "toolu_019cnkySWjfxdNE381pQv4GC",
+      "text": "List src/lib/responses directory```console\n=== lib/responses dir ===\nEventTypes.ts\nResponseAccumulator.ts\nResponseInputItems.ts\nResponseStream.ts\n```=== lib/responses dir ===\nEventTypes.ts\nResponseAccumulator.ts\nResponseInputItems.ts\nResponseStream.ts",
+      "outputSize": 251,
+      "at": "2026-07-06T07:20:21.465301Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "toolCallId": "toolu_017attMEL83zYoo1aA5cohKT",
+      "text": "List resources dir and search for fromSSEResponse usage```console\nadmin.ts\nadmin\naudio.ts\naudio\nbatches.ts\nbeta.ts\nbeta\nchat.ts\nchat\ncompletions.ts\ncontainers.ts\ncontainers\nconversations.ts\nconversations\nembeddings.ts\nevals.ts\nevals\nfiles.ts\nfine-tuning.ts\nfine-tuning\ngraders.ts\ngraders\nimages.ts\nindex.ts\nmodels.ts\nmoderations.ts\nrealtime.ts\nrealtime\nresponses.ts\nresponses\nshared.ts\nskills.ts\nskills\nuploads.ts\nuploads\nvector-stores.ts\nvector-stores\nvideos.ts\nwebhooks.ts\nwebhooks\n---\n[]\n```admin.ts\nadmin\naudio.ts\naudio\nbatches.ts\nbeta.ts\nbeta\nchat.ts\nchat\ncompletions.ts\ncontainers.ts\ncontainers\nconversations.ts\nconversations\nembeddings.ts\nevals.ts\nevals\nfiles.ts\nfine-tuning.ts\nfine-tuning\ngraders.ts\ngraders\nimages.ts\nindex.ts\nmodels.ts\nmoderations.ts\nrealtime.ts\nrealtime\nresponses.ts\nresponses\nshared.ts\nskills.ts\nskills\nuploads.ts\nuploads\nvector-stores.ts\nvector-stores\nvideos.ts\nwebhooks.ts\nwebhooks\n---\n[]",
+      "outputSize": 918,
+      "at": "2026-07-06T07:20:27.695065Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "toolCallId": "toolu_01LpYJbB4dBq3Gh8bHWBcAoL",
+      "text": "Search code for fromSSEResponse via GitHub search API```console\nsrc/core/streaming.ts\nsrc/internal/parse.ts\n```src/core/streaming.ts\nsrc/internal/parse.ts",
+      "outputSize": 154,
+      "at": "2026-07-06T07:20:32.33759Z"
+    },
+    {
+      "actionIndex": 8,
+      "turn": 0,
+      "toolCallId": "toolu_01DP5qR9hXQVjDNiysrMgmhu",
+      "text": "Fetch src/internal/parse.ts```console\n=== src/internal/parse.ts ===\n// File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.\n\nimport type { FinalRequestOptions } from './request-options';\nimport { Stream } from '../core/streaming';\nimport { type OpenAI } from '../client';\nimport { formatRequestDetails, loggerFor } from './utils/log';\nimport type { AbstractPage } from '../pagination';\n\nexport type APIResponseProps = {\n  response: Response;\n  options: FinalRequestOptions;\n  controller: AbortController;\n  requestLogID: string;\n  retryOfRequestLogID: string | undefined;\n  startTime: number;\n};\n\nexport async function defaultParseResponse\u003cT\u003e(\n  client: OpenAI,\n  props: APIResponseProps,\n): Promise\u003cWithRequestID\u003cT\u003e\u003e {\n  const { response, requestLogID, retryOfRequestLogID, startTime } = props;\n  const body = await (async () =\u003e {\n    if (props.options.stream) {\n      loggerFor(client).debug('response', response.status, response.url, response.headers, response.body);\n\n      // Note: there is an invariant here that isn't represented in the type system\n      // that if you set `stream: true` the response type must also be `Stream\u003cT\u003e`\n\n      if (props.options.__streamClass) {\n        return props.options.__streamClass.fromSSEResponse(\n          response,\n          props.controller,\n          client,\n          props.options.__synthesizeEventData,\n        ) as any;\n      }\n\n      return Stream.fromSSEResponse(\n        response,\n        props.controller,\n        client,\n        props.options.__synthesizeEventData,\n      ) as any;\n    }\n\n    // fetch refuses to read the body when the status code is 204.\n    if (response.status === 204) {\n      return null as T;\n    }\n\n    if (props.options.__binaryResponse) {\n      return response as unknown as T;\n    }\n\n    const contentType = response.headers.get('content-type');\n    const mediaType = contentType?.split(';')[0]?.trim();\n    const isJSON = mediaType?.includes('application/json') || mediaType?.endsWith('+json');\n    if (isJSON) {\n      const contentL",
+      "outputSize": 6334,
+      "at": "2026-07-06T07:20:39.55957Z"
+    },
+    {
+      "actionIndex": 9,
+      "turn": 0,
+      "toolCallId": "toolu_01C7CyjX89LgvGUftkgHjDxB",
+      "text": "Search for __streamClass usage and inspect client.ts for stream handling```console\n---client.ts stream handling---\n    1660 /tmp/client.ts\n1234:      // Send chunked stream (each chunk has own `length`)\n```---client.ts stream handling---\n    1660 /tmp/client.ts\n1234:      // Send chunked stream (each chunk has own `length`)",
+      "outputSize": 325,
+      "at": "2026-07-06T07:20:50.431095Z"
+    },
+    {
+      "actionIndex": 10,
+      "turn": 0,
+      "toolCallId": "toolu_01BnEtgj3cPxKRSjewKZJVpJ",
+      "text": "Fetch chat completions resource file and grep for stream references```console\n    2460 /tmp/chat_completions.ts\n11:import { Stream } from '../../../core/streaming';\n16:import { ChatCompletionStreamingRunner } from '../../../lib/ChatCompletionStreamingRunner';\n19:import { ChatCompletionStreamingToolRunnerParams } from '../../../lib/ChatCompletionStreamingRunner';\n20:import { ChatCompletionStream, type ChatCompletionStreamParams } from '../../../lib/ChatCompletionStream';\n48:   * Returns a chat completion object, or a streamed sequence of chat completion\n49:   * chunk objects if the request is streamed.\n61:  create(body: ChatCompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cChatCompletion\u003e;\n63:    body: ChatCompletionCreateParamsStreaming,\n65:  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n69:  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e | ChatCompletion\u003e;\n73:  ): APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e {\n77:      stream: body.stream ?? false,\n79:    }) as APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n196:    Params extends ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n198:  \u003e(body: Params, options?: RunnerOptions): ChatCompletionStreamingRunner\u003cParsedT\u003e;\n201:    Params extends ChatCompletionToolRunnerParams\u003cany\u003e | ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n206:  ): ChatCompletionRunner\u003cParsedT\u003e | ChatCompletionStreamingRunner\u003cParsedT\u003e {\n207:    if (body.stream) {\n208:      return ChatCompletionStreamingRunner.runTools(\n210:        body as ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n219:   * Creates a chat completion stream\n221:  stream\u003cParams extends ChatCompletionStreamParams, ParsedT = ExtractParsedContentFromParams\u003cParams\u003e\u003e(\n224:  ): ChatCompletionStream\u003cParsedT\u003e {\n225:    return ChatCompletionStream.createChatCompletion(this._client, body, options);\n250:export type ChatCompletionParseParams = ChatCompletionCreateParamsNonStreaming;\n252:export { ChatCompletionStreamingRunner } from '../../../lib/ChatCompletionStreamingRunner';\n259:exp",
+      "outputSize": 11754,
+      "at": "2026-07-06T07:20:57.713983Z"
+    },
+    {
+      "actionIndex": 11,
+      "turn": 0,
+      "toolCallId": "toolu_01H2AewsUTfzupdCcBBwmipi",
+      "text": "Fetch responses.ts resource and grep for stream references```console\n    8498 /tmp/responses.ts\n9:import { ResponseStream, ResponseStreamParams } from '../../lib/responses/ResponseStream';\n19:import { Stream } from '../../core/streaming';\n72:export type ResponseParseParams = ResponseCreateParamsNonStreaming;\n96:  create(body: ResponseCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cResponse\u003e;\n98:    body: ResponseCreateParamsStreaming,\n100:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n104:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e | Response\u003e;\n108:  ): APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e {\n113:        stream: body.stream ?? false,\n115:      }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e\n122:    }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n137:    query?: ResponseRetrieveParamsNonStreaming,\n142:    query: ResponseRetrieveParamsStreaming,\n144:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n149:  ): APIPromise\u003cStream\u003cResponseStreamEvent\u003e | Response\u003e;\n154:  ): APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e {\n159:        stream: query?.stream ?? false,\n161:      }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e\n168:    }) as APIPromise\u003cResponse\u003e | APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e;\n199:   * Creates a model response stream\n201:  stream\u003cParams extends ResponseStreamParams, ParsedT = ExtractParsedContentFromParams\u003cParams\u003e\u003e(\n204:  ): ResponseStream\u003cParsedT\u003e {\n205:    return ResponseStream.createResponse\u003cParsedT\u003e(this._client, body, options);\n1533:   * A sequence number for this chunk of the stream response.\n1594: * Emitted when a partial code snippet is streamed by the code interpreter.\n1598:   * The partial code snippet being streamed by the code interpreter.\n1609:   * streamed.\n1614:   * The sequence number of this event, used to order streaming events.\n1644:   * The sequence number of this event, used to order streaming events.\n1670:   * The sequence number of this event, used to order stream",
+      "outputSize": 8953,
+      "at": "2026-07-06T07:21:03.152617Z"
+    },
+    {
+      "actionIndex": 12,
+      "turn": 0,
+      "toolCallId": "toolu_01UdmAutVmjexvz3zZWzp2MV",
+      "text": "List beta and beta/threads resource directories```console\nassistants.ts\nbeta.ts\nchatkit.ts\nchatkit\nindex.ts\nrealtime.ts\nrealtime\nthreads.ts\nthreads\n---beta/threads---\nindex.ts\nmessages.ts\nruns.ts\nruns\nthreads.ts\n```assistants.ts\nbeta.ts\nchatkit.ts\nchatkit\nindex.ts\nrealtime.ts\nrealtime\nthreads.ts\nthreads\n---beta/threads---\nindex.ts\nmessages.ts\nruns.ts\nruns\nthreads.ts",
+      "outputSize": 368,
+      "at": "2026-07-06T07:21:08.97547Z"
+    },
+    {
+      "actionIndex": 13,
+      "turn": 0,
+      "toolCallId": "toolu_01A8zFx7PCuYKenSJ1xgBkE9",
+      "text": "Check runs.ts and beta threads.ts for streaming```console\n    1090 /tmp/runs.ts\n36:import { Stream } from '../../../../core/streaming';\n39:import { AssistantStream, RunCreateParamsBaseStream } from '../../../../lib/AssistantStream';\n41:import { RunSubmitToolOutputsParamsStream } from '../../../../lib/AssistantStream';\n57:  create(threadID: string, params: RunCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cRun\u003e;\n60:    params: RunCreateParamsStreaming,\n62:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n67:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e | Run\u003e;\n72:  ): APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e {\n79:      stream: params.stream ?? false,\n82:    }) as APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n153:    body: RunCreateParamsNonStreaming,\n161:   * Create a Run stream\n163:   * @deprecated use `stream` instead\n165:  createAndStream(\n167:    body: RunCreateParamsBaseStream,\n169:  ): AssistantStream {\n170:    return AssistantStream.createAssistantStream(threadId, this._client.beta.threads.runs, body, options);\n230:   * Create a Run stream\n232:  stream(threadId: string, body: RunCreateParamsBaseStream, options?: RequestOptions): AssistantStream {\n233:    return AssistantStream.createAssistantStream(threadId, this._client.beta.threads.runs, body, options);\n246:    params: RunSubmitToolOutputsParamsNonStreaming,\n251:    params: RunSubmitToolOutputsParamsStreaming,\n253:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n258:  ): APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e | Run\u003e;\n263:  ): APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e {\n269:      stream: params.stream ?? false,\n272:    }) as APIPromise\u003cRun\u003e | APIPromise\u003cStream\u003cAssistantsAPI.AssistantStreamEvent\u003e\u003e;\n282:    params: RunSubmitToolOutputsParamsNonStreaming,\n290:   * Submit the tool outputs from a previous run and stream the run to a terminal\n294:  submitToolOutputsStream(\n296:    params: RunSubmitToolOutpu",
+      "outputSize": 14672,
+      "at": "2026-07-06T07:21:17.694451Z"
+    },
+    {
+      "actionIndex": 14,
+      "turn": 0,
+      "toolCallId": "toolu_01ThkzKhymz1qU1fWNHT2E4f",
+      "text": "Inspect EventStream, ChatCompletionStream, ResponseStream, AssistantStream base classes```console\n1:import { APIUserAbortError, OpenAIError } from '../error';\n3:export class EventStream\u003cEventTypes extends BaseEvents\u003e {\n101:  on\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n115:  off\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n128:  once\u003cEvent extends keyof EventTypes\u003e(event: Event, listener: EventListener\u003cEventTypes, Event\u003e): this {\n146:  emitted\u003cEvent extends keyof EventTypes\u003e(\n149:    EventParameters\u003cEventTypes, Event\u003e extends [infer Param] ? Param\n150:    : EventParameters\u003cEventTypes, Event\u003e extends [] ? void\n186:  _emit\u003cEvent extends keyof BaseEvents\u003e(event: Event, ...args: EventParameters\u003cBaseEvents, Event\u003e): void;\n187:  _emit\u003cEvent extends keyof EventTypes\u003e(event: Event, ...args: EventParameters\u003cEventTypes, Event\u003e): void;\n188:  _emit\u003cEvent extends keyof EventTypes\u003e(\n243:type EventListener\u003cEvents, EventType extends keyof Events\u003e = Events[EventType];\n245:type EventListeners\u003cEvents, EventType extends keyof Events\u003e = Array\u003c{\n250:export type EventParameters\u003cEvents, EventType extends keyof Events\u003e = {\n251:  [Event in EventType]: EventListener\u003cEvents, EventType\u003e extends (...args: infer P) =\u003e any ? P : never;\n=== ChatCompletionStream.ts imports/class defs ===\n1:import { partialParse } from '../_vendor/partial-json-parser/parser';\n2:import {\n8:import OpenAI from '../index';\n9:import { RequestOptions } from '../internal/request-options';\n10:import { type ReadableStream } from '../internal/shim-types';\n11:import { uuid4 } from '../internal/utils/uuid';\n12:import {\n21:import { ChatCompletionFunctionTool, ParsedChatCompletion } from '../resources/chat/completions';\n22:import {\n31:import { Stream } from '../streaming';\n32:import {\n97:export interface ChatCompletionStreamEvents\u003cParsedT = null\u003e extends AbstractChatCompletionRunnerEvents {\n130:export class ChatCompletionStream\u003cParsedT = null\u003e\n131:  extends AbstractChatC",
+      "outputSize": 8094,
+      "at": "2026-07-06T07:21:31.225173Z"
+    },
+    {
+      "actionIndex": 15,
+      "turn": 0,
+      "toolCallId": "toolu_019LkpNQUAHxm5rg42ztZVJg",
+      "text": "Check audio transcriptions for streaming support```console\n---audio transcriptions---\n7:import { Stream } from '../../core/streaming';\n20:   * format, or a stream of transcript events.\n26:   *     file: fs.createReadStream('speech.mp3'),\n32:    body: TranscriptionCreateParamsNonStreaming\u003c'json' | undefined\u003e,\n36:    body: TranscriptionCreateParamsNonStreaming\u003c'verbose_json'\u003e,\n40:    body: TranscriptionCreateParamsNonStreaming\u003c'srt' | 'vtt' | 'text'\u003e,\n43:  create(body: TranscriptionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cTranscription\u003e;\n45:    body: TranscriptionCreateParamsStreaming,\n47:  ): APIPromise\u003cStream\u003cTranscriptionStreamEvent\u003e\u003e;\n49:    body: TranscriptionCreateParamsStreaming,\n51:  ): APIPromise\u003cTranscriptionCreateResponse | string | Stream\u003cTranscriptionStreamEvent\u003e\u003e;\n55:  ): APIPromise\u003cTranscriptionCreateResponse | string | Stream\u003cTranscriptionStreamEvent\u003e\u003e {\n62:          stream: body.stream ?? false,\n369: * with `stream` set to `true` and `response_format` set to `diarized_json`.\n371:export type TranscriptionStreamEvent =\n380: * with the `Stream` parameter set to `true`.\n430: * with the `Stream` parameter set to `true`.\n527: * with `stream` set to `true` and `response_format` set to `diarized_json`.\n639:\u003e = TranscriptionCreateParamsNonStreaming\u003cResponseFormat\u003e | TranscriptionCreateParamsStreaming;\n720:   * If set to true, the model response data will be streamed to the client as it is\n722:   * [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\n724:   * [Streaming section of the Speech-to-Text guide](https://platform.openai.com/docs/guides/speech-to-text?lang=curl#streaming-transcriptions)\n727:   * Note: Streaming is not supported for the `whisper-1` model and will be ignored.\n729:  stream?: boolean | null;\n778:  export type TranscriptionCreateParamsNonStreaming = TranscriptionsAPI.TranscriptionCreateParamsNonStreaming;\n779:  export type TranscriptionCreateParamsStreaming = TranscriptionsAPI.Transc",
+      "outputSize": 4983,
+      "at": "2026-07-06T07:21:41.469843Z"
+    },
+    {
+      "actionIndex": 16,
+      "turn": 0,
+      "toolCallId": "toolu_01QwZLJsMm3ateQ2phkiKjp3",
+      "text": "Show exact create() and stream()/runTools() method bodies in chat completions resource```console\n   *     messages: [{ content: 'string', role: 'developer' }],\n   *     model: 'gpt-5.4',\n   *   },\n   * );\n   * ```\n   */\n  create(body: ChatCompletionCreateParamsNonStreaming, options?: RequestOptions): APIPromise\u003cChatCompletion\u003e;\n  create(\n    body: ChatCompletionCreateParamsStreaming,\n    options?: RequestOptions,\n  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n  create(\n    body: ChatCompletionCreateParamsBase,\n    options?: RequestOptions,\n  ): APIPromise\u003cStream\u003cChatCompletionChunk\u003e | ChatCompletion\u003e;\n  create(\n    body: ChatCompletionCreateParams,\n    options?: RequestOptions,\n  ): APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e {\n    return this._client.post('/chat/completions', {\n      body,\n      ...options,\n      stream: body.stream ?? false,\n      __security: { bearerAuth: true },\n    }) as APIPromise\u003cChatCompletion\u003e | APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e;\n  }\n\n  /**\n   * Get a stored chat completion. Only Chat Completions that have been created with\n   * the `store` parameter set to `true` will be returned.\n   *\n   * @example\n   * ```ts\n   * const chatCompletion =\n   *   await client.chat.completions.retrieve('completion_id');\n   * ```\n---\n  runTools\u003c\n    Params extends ChatCompletionToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(body: Params, options?: RunnerOptions): ChatCompletionRunner\u003cParsedT\u003e;\n\n  runTools\u003c\n    Params extends ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(body: Params, options?: RunnerOptions): ChatCompletionStreamingRunner\u003cParsedT\u003e;\n\n  runTools\u003c\n    Params extends ChatCompletionToolRunnerParams\u003cany\u003e | ChatCompletionStreamingToolRunnerParams\u003cany\u003e,\n    ParsedT = ExtractParsedContentFromParams\u003cParams\u003e,\n  \u003e(\n    body: Params,\n    options?: RunnerOptions,\n  ): ChatCompletionRunner\u003cParsedT\u003e | ChatCompletionStreamingRunner\u003cParsedT\u003e {\n    if (body.stream) {\n      return ChatCompl",
+      "outputSize": 5663,
+      "at": "2026-07-06T07:21:45.227746Z"
+    }
+  ],
+  "identity": {
+    "agentCommand": "/Users/goga/Documents/goga/ghx/scripts/eval-agent-acp.sh",
+    "adapterName": "@agentclientprotocol/claude-agent-acp",
+    "adapterVersion": "0.55.0",
+    "subjectModel": "claude-sonnet-5",
+    "wrapperSha256": "30cb9d7258c2c08862d2c592d58a8e3f242ea2032a0495646441399e1e71b98d"
+  },
+  "context": {
+    "mainAgentChars": 90367,
+    "sidecarInternalChars": 0,
+    "totalWorkflowChars": 90367
+  },
+  "rewards": {
+    "correctness": 1,
+    "evidence": 1,
+    "trajectory": 0.8235294117647058,
+    "compression": 0,
+    "memory": 0,
+    "memoryApplies": false,
+    "safety": 1,
+    "overall": 0.7647058823529411
+  },
+  "startedAt": "2026-07-06T07:19:45.755667Z",
+  "endedAt": "2026-07-06T07:22:08.729943Z",
+  "parallel": true
+}

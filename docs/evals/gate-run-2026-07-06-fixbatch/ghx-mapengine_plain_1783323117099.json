@@ -1,0 +1,378 @@
+{
+  "id": "ghx-mapengine_plain_1783323117099",
+  "taskId": "ghx-mapengine",
+  "repo": "gkoreli/ghx",
+  "profile": "plain",
+  "checks": {
+    "expectedFiles": [
+      "internal/mapengine/types.go",
+      "internal/mapengine/goast.go",
+      "internal/mapengine/treesitter.go"
+    ],
+    "expectedSymbols": [
+      "mapAuto",
+      "EngineAuto"
+    ],
+    "avoidPaths": [
+      "_test.go"
+    ],
+    "contaminationPaths": [
+      "docs/adr/",
+      "docs/evals/"
+    ]
+  },
+  "turns": [
+    {
+      "turn": 0,
+      "question": "Where is the structural map engine implemented, and how is the parser engine selected per file?",
+      "text": "Found `internal/mapengine/` directory with `goast.go`, `regex.go`, `treesitter.go`, `types.go`. Let me look at those files directly.This is the core. Now let me check treesitter.go and goast.go/regex.go briefly, plus how the CLI wires up the `map` command and its flags.Now let's check where `mapengine.Map` is called from (CLI wiring, e.g., `ghx map` command) to confirm the \"per file\" selection flow and CLI flag.Confirmed: `internal/ghx/read.go` is the caller. Let's view the surrounding context there to describe the per-file call flow, plus check for a CLI flag definition (`--map-engine`).I have everything needed to answer confidently.\n\n## Structural map engine\n\nImplemented in the `internal/mapengine` package (repo `gkoreli/ghx`, default branch `mainline`):\n\n- **`internal/mapengine/types.go`** — the core dispatcher. Defines `Engine` (`auto`, `go-ast`, `regex`, `tree-sitter`), the `Mapper` interface, `Options`/`Result`/`Symbol` types, and the top-level `Map(path, content, opts)` function that routes to a specific mapper. `mapAuto()` is the per-file selection logic (see below). `buildResultFromSymbols` does sorting/dedup/formatting shared by all engines.\n- **`internal/mapengine/goast.go`** — `GoASTMapper`, uses Go's own `go/parser` + `go/ast` to extract package/func/type/const/var symbols for `.go` files.\n- **`internal/mapengine/treesitter.go`** — `TreeSitterMapper`, uses `github.com/odvcencio/gotreesitter` + `grammars.DetectLanguage` to run a tree-sitter \"tags query\" per language, extracting symbols with signatures; can optionally merge in regex-derived symbols (`cfg.MergeRegex`).\n- **`internal/mapengine/regex.go`** — `RegexMapper`, a line-based regex fallback with per-extension rule tables (`regexRules` map keyed by `\"go\"`, `\"ts\"`, `\"py\"`, `\"rs\"`, `\"java\"`, `\"kt\"`, `\"rb\"`, etc.).\n\n## Per-file engine selection\n\n`mapengine.Map` (`types.go`) normalizes options via `NormalizeOptions`/`normalizeEngine`, then:\n\n- If the caller explicitly passed `regex` or `tree-sitter`, that engine is used directly (tree-sitter still falls back to regex on failure via `mapTreeSitterWithFallback`).\n- If `auto` (the default) or unrecognized, it delegates to **`mapAuto(path, content, opts)`**, which switches on `filepath.Ext(path)`:\n  - `.go` → `GoASTMapper`; on parse error, falls back to `RegexMapper` (marks `Result.Fallback = true`).\n  - `.ts`, `.tsx`, `.js`, `.jsx`, `.py`, `.rs` → `TreeSitterMapper` via `mapTreeSitterWithFallback`, which falls back to `RegexMapper` if tree-sitter errors or the language is unsupported.\n  - any other extension → `RegexMapper` directly.\n\nSo selection is per-file, based on file extension, with a fixed priority: Go AST for `.go`, tree-sitter for a fixed list of other languages, regex as the universal fallback/default for everything else.\n\n## Call path (CLI → engine)\n\n- `internal/ghx/read.go`: `Read()` builds a `FileResult` per file; when `opts.Map` is true, it calls `mapengine.Map(path, []byte(text), mapengine.Options{Engine: opts.MapEngine, Level: opts.MapLevel, Kind: opts.MapKind})` — confirming the engine choice is applied **per file** as each file is processed.\n- `internal/cli/ghx.go:112,120,211`: the CLI `read` command registers a `--map-engine` flag (default `\"auto\"`, help text `\"Map engine: auto|regex|tree-sitter\"`) and passes its value through to `ReadOpts.MapEngine`, which flows into `mapengine.Map` as shown above.\n\n## Not verified\n- I did not check `internal/mapengine/regex_test.go` or the `grammars` package internals (external module `github.com/odvcencio/gotreesitter`) in depth — only enough to confirm the wiring.\n- I did not verify behavior at runtime (no build/test run); this is a static read of source via `gh api`, not a clone/build.\n- Did not inspect `internal/cli/code.go`, `internal/ghx/tree.go`, or `internal/ghx/explore.go` for any additional call sites beyond `read.go` — grep across the full repo for other `mapengine.Map(` callers wasn't exhaustive beyond the files checked.",
+      "toolCalls": [
+        "execute: gh repo view gkoreli/ghx --json name,description,defaultBranchRef,url 2\u003e\u00261 (completed)",
+        "execute: gh api search/code -X GET -f q=\"repo:gkoreli/ghx parser\" 2\u003e\u00261 | head -100\necho \"---\"\ngh api repos/gkoreli/ghx/git/trees/mainline?recursive=1 2\u003e\u00261 | python3 -c \"\nimport json,sys\nd=json.load(sys.stdin)\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -300 (completed)",
+        "execute: gh api 'repos/gkoreli/ghx/git/trees/mainline?recursive=1' \u003e /tmp/tree.json 2\u003e\u00261\npython3 -c \"\nimport json\nd=json.load(open('/tmp/tree.json'))\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -400 (completed)",
+        "execute: gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go --jq .content | base64 -d (completed)",
+        "execute: gh api repos/gkoreli/ghx/contents/internal/mapengine/treesitter.go --jq .content | base64 -d | head -120\necho \"=====GOAST=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/goast.go --jq .content | base64 -d | head -60\necho \"=====REGEX=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/regex.go --jq .content | base64 -d | head -60 (completed)",
+        "execute: for f in internal/cli/code.go internal/ghx/read.go internal/ghx/tree.go; do\n  echo \"=== $f ===\"\n  gh api \"repos/gkoreli/ghx/contents/$f\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"mapengine\\|Engine\\|\\.Map(\" \ndone (failed)",
+        "execute: gh api \"repos/gkoreli/ghx/contents/internal/ghx/read.go\" --jq .content | base64 -d | sed -n '1,60p;160,210p' (completed)",
+        "execute: gh api \"repos/gkoreli/ghx/contents/internal/cli/ghx.go\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"map-engine\\|MapEngine\\|mapengine\"  (completed)"
+      ],
+      "toolTraces": [
+        {
+          "id": "toolu_01NAkv7ce9oNnc6RBmUTysfK",
+          "kind": "execute",
+          "title": "gh repo view gkoreli/ghx --json name,description,defaultBranchRef,url 2\u003e\u00261",
+          "rawInput": {
+            "command": "gh repo view gkoreli/ghx --json name,description,defaultBranchRef,url 2\u003e\u00261"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:03.371142Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:06.96996Z"
+            }
+          ],
+          "outputSize": 597,
+          "outputExcerpt": "```console\n{\"defaultBranchRef\":{\"name\":\"mainline\"},\"description\":\"Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\",\"name\":\"ghx\",\"url\":\"https://github.com/gkoreli/ghx\"}\n```{\"defaultBranchRef\":{\"name\":\"mainline\"},\"description\":\"Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\",\"name\":\"ghx\",\"url\":\"https://github.com/gkoreli/ghx\"}"
+        },
+        {
+          "id": "toolu_01JxDwKvruKkShXo1dbA2UdS",
+          "kind": "execute",
+          "title": "gh api search/code -X GET -f q=\"repo:gkoreli/ghx parser\" 2\u003e\u00261 | head -100\necho \"---\"\ngh api repos/gkoreli/ghx/git/trees/mainline?recursive=1 2\u003e\u00261 | python3 -c \"\nimport json,sys\nd=json.load(sys.stdin)\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -300",
+          "rawInput": {
+            "command": "gh api search/code -X GET -f q=\"repo:gkoreli/ghx parser\" 2\u003e\u00261 | head -100\necho \"---\"\ngh api repos/gkoreli/ghx/git/trees/mainline?recursive=1 2\u003e\u00261 | python3 -c \"\nimport json,sys\nd=json.load(sys.stdin)\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -300"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:09.631748Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:12.470883Z"
+            }
+          ],
+          "outputSize": 2129,
+          "outputExcerpt": "```console\n{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}---\n(eval):3: no matches found: repos/gkoreli/ghx/git/trees/mainline?recursive=1\nTraceback (most recent call last):\n  File \"\u003cstring\u003e\", line 3, in \u003cmodule\u003e\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 293, in load\n    return loads(fp.read(),\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n```{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}---\n(eval):3: no matches found: repos/gkoreli/ghx/git/trees/mainline?recursive=1\nTraceback (most recent call last):\n  File \"\u003cstring\u003e\", line 3, in \u003cmodule\u003e\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 293, in load\n    return loads(fp.read(),\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) "
+        },
+        {
+          "id": "toolu_01GLDA7vsMZPNiNcKRrPoADf",
+          "kind": "execute",
+          "title": "gh api 'repos/gkoreli/ghx/git/trees/mainline?recursive=1' \u003e /tmp/tree.json 2\u003e\u00261\npython3 -c \"\nimport json\nd=json.load(open('/tmp/tree.json'))\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -400",
+          "rawInput": {
+            "command": "gh api 'repos/gkoreli/ghx/git/trees/mainline?recursive=1' \u003e /tmp/tree.json 2\u003e\u00261\npython3 -c \"\nimport json\nd=json.load(open('/tmp/tree.json'))\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -400"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:15.985114Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:20.164844Z"
+            }
+          ],
+          "outputSize": 49085,
+          "outputExcerpt": "```console\n.claude-plugin\n.claude-plugin/plugin.json\n.claude\n.claude/skills\n.claude/skills/fable-delegation\n.claude/skills/fable-delegation/SKILL.md\n.envrc.example\n.github\n.github/workflows\n.github/workflows/auto-tag.yml\n.gitignore\n.goreleaser.yml\n.mise.toml\nAGENTS.md\nCLAUDE.md\nLICENSE\nREADME.md\ncmd\ncmd/ghx\ncmd/ghx/main.go\ndocs\ndocs/NORTH_STAR.md\ndocs/adr\ndocs/adr/0001-landscape-research.md\ndocs/adr/0002-problem-goal-vision.md\ndocs/adr/0003-search-design.md\ndocs/adr/0004-whats-next.md\ndocs/adr/0005-flag-firewall-agentic-defaults.md\ndocs/adr/0006-rewrite-decision.md\ndocs/adr/0007-go-multi-frontend-architecture.md\ndocs/adr/0008-technical-decisions.md\ndocs/adr/0009-codemode-type-system.md\ndocs/adr/0010-code-meta-tool.md\ndocs/adr/0011-glob-support-in-read.md\ndocs/adr/0012-graphql-underutilized-fields.md\ndocs/adr/0013-ghx-map-command.md\ndocs/adr/0014-search-console-demand-signal.md\ndocs/adr/0014.1-sidecar-agent-vision.md\ndocs/adr/0014.2-sidecar-proof-of-concept-gate.md\ndocs/adr/0014.3-sidecar-mvp-implementation.md\ndocs/adr/0014.4-sidecar-bench-llm-judge.md\ndocs/adr/0015-sidecar-go-native-migration.md\ndocs/adr/0015.1-sidecar-evidence-ledger.md\ndocs/adr/0016-sidecar-agentic-eval-and-training-data.md\ndocs/adr/0016.1-sidecar-eval-implementation.md\ndocs/adr/0016.2-benchmark-validity-hardening.md\ndocs/adr/0016.3-eval-observability-isolation-economics.md\ndocs/adr/0016.4-otel-trace-emission-architecture.md\ndocs/adr/0016.5-replay-decontamination-repeat-read-refinement.md\ndocs/adr/0016.6-signal-per-token.md\ndocs/adr/0016.7-sidecar-report-reliability-fix.md\ndocs/adr/0016.8-measurement-fix-batch.md\ndocs/adr/0017-training-data-exports-research.md\ndocs/adr/0017.1-training-data-exports-decision.md\ndocs/adr/0018-agentic-observability-genai-conventions.md\ndocs/adr/0019-sidecar-adoption-zero-cli-surface.md\ndocs/adr/0019.1-discovery-tier.md\ndocs/adr/0020-agent-sidecar-protocol-landscape-research.md\ndocs/adr/0020.1-protocol-strategy-decision.md\ndocs/adr/0021-report-contract-enforcement.md\ndocs/adr/0022-shared-visibility-runtime.md\ndocs/a"
+        },
+        {
+          "id": "toolu_01HxpngAcdn9M3dRMXiLsqnV",
+          "kind": "execute",
+          "title": "gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go --jq .content | base64 -d",
+          "rawInput": {
+            "command": "gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go --jq .content | base64 -d"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:24.64879Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:26.762726Z"
+            }
+          ],
+          "outputSize": 11179,
+          "outputExcerpt": "```console\npackage mapengine\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n)\n\ntype Engine string\n\nconst (\n\tEngineAuto       Engine = \"auto\"\n\tEngineGoAST      Engine = \"go-ast\"\n\tEngineRegex      Engine = \"regex\"\n\tEngineTreeSitter Engine = \"tree-sitter\"\n)\n\ntype Level string\n\nconst (\n\tLevelCompact  Level = \"compact\"\n\tLevelMinimal  Level = \"minimal\"\n\tLevelOutline  Level = \"outline\"\n\tLevelStandard Level = \"standard\"\n)\n\ntype Kind string\n\nconst (\n\tKindFunc    Kind = \"func\"\n\tKindType    Kind = \"type\"\n\tKindImport  Kind = \"import\"\n\tKindConst   Kind = \"const\"\n\tKindVar     Kind = \"var\"\n\tKindPackage Kind = \"package\"\n\tKindOther   Kind = \"other\"\n)\n\ntype Options struct {\n\tEngine Engine\n\tLevel  Level\n\tKind   Kind\n}\n\ntype Mapper interface {\n\tMap(path string, content []byte, opts Options) (Result, error)\n}\n\ntype Result struct {\n\tSymbols       []Symbol\n\tLines         []string\n\tEngine        Engine\n\tFallback      bool\n\tWarnings      []string\n\tOriginalChars int\n\tMappedChars   int\n}\n\ntype Symbol struct {\n\tKind      Kind\n\tName      string\n\tSignature string\n\tLine      int\n\tEndLine   int\n\tParent    string\n\tDoc       string\n}\n\nvar ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n\nfunc NormalizeOptions(opts Options) Options {\n\topts.Engine = normalizeEngine(opts.Engine)\n\topts.Level = normalizeLevel(opts.Level)\n\topts.Kind = normalizeKind(opts.Kind)\n\treturn opts\n}\n\nfunc normalizeEngine(engine Engine) Engine {\n\tswitch Engine(strings.ToLower(strings.TrimSpace(string(engine)))) {\n\tcase EngineRegex:\n\t\treturn EngineRegex\n\tcase EngineTreeSitter:\n\t\treturn EngineTreeSitter\n\tdefault:\n\t\treturn EngineAuto\n\t}\n}\n\nfunc normalizeLevel(level Level) Level {\n\tswitch Level(strings.ToLower(strings.TrimSpace(string(level)))) {\n\tcase LevelOutline:\n\t\treturn LevelOutline\n\tcase LevelMinimal:\n\t\treturn LevelMinimal\n\tcase LevelStandard:\n\t\treturn LevelStandard\n\tdefault:\n\t\treturn LevelCompact\n\t}\n}\n\nfunc normalizeKind(kind Kind) Kind {\n\tswitch Kind(strings.ToLower(strings.TrimSpace(string(kind)))) {\n\tcase KindFunc:\n\t\treturn KindFunc\n\tcase Kin"
+        },
+        {
+          "id": "toolu_01DTux4MximTK4UQvpZ7GmxP",
+          "kind": "execute",
+          "title": "gh api repos/gkoreli/ghx/contents/internal/mapengine/treesitter.go --jq .content | base64 -d | head -120\necho \"=====GOAST=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/goast.go --jq .content | base64 -d | head -60\necho \"=====REGEX=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/regex.go --jq .content | base64 -d | head -60",
+          "rawInput": {
+            "command": "gh api repos/gkoreli/ghx/contents/internal/mapengine/treesitter.go --jq .content | base64 -d | head -120\necho \"=====GOAST=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/goast.go --jq .content | base64 -d | head -60\necho \"=====REGEX=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/regex.go --jq .content | base64 -d | head -60"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:29.474177Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:38.995742Z"
+            }
+          ],
+          "outputSize": 12861,
+          "outputExcerpt": "```console\npackage mapengine\n\nimport (\n\t\"fmt\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/odvcencio/gotreesitter\"\n\t\"github.com/odvcencio/gotreesitter/grammars\"\n)\n\ntype TreeSitterMapper struct {\n\tLanguages map[string]TreeSitterLanguageConfig\n}\n\ntype TreeSitterLanguageConfig struct {\n\tTagsQuery       func(grammars.LangEntry) string\n\tTagKinds        map[string]Kind\n\tSignature       func(string, []byte, gotreesitter.Range) string\n\tMergeRegex      bool\n\tMergeRegexKinds map[Kind]bool\n\tTokenSource     func([]byte, *gotreesitter.Language) gotreesitter.TokenSource\n}\n\nfunc (m TreeSitterMapper) Map(path string, content []byte, opts Options) (Result, error) {\n\topts = NormalizeOptions(opts)\n\n\tentry := m.treeSitterEntry(path)\n\tif entry == nil || entry.Language == nil {\n\t\treturn Result{}, fmt.Errorf(\"%w: %s\", ErrUnsupportedLanguage, path)\n\t}\n\n\tlang := entry.Language()\n\tif lang == nil {\n\t\treturn Result{}, fmt.Errorf(\"%w: failed to load grammar for %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\tcfg, ok := m.treeSitterConfigForEntry(*entry)\n\tif !ok {\n\t\treturn Result{}, fmt.Errorf(\"%w: %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\ttagsQuery := cfg.resolveTagsQuery(*entry)\n\tif strings.TrimSpace(tagsQuery) == \"\" {\n\t\treturn Result{}, fmt.Errorf(\"%w: no tags query for %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\ttagger, err := newTagger(entry, cfg, lang, tagsQuery)\n\tif err != nil {\n\t\treturn Result{}, err\n\t}\n\n\tsymbols := make([]Symbol, 0)\n\tseen := make(map[string]struct{})\n\tadd := func(symbol Symbol) {\n\t\tif symbol.Signature == \"\" {\n\t\t\treturn\n\t\t}\n\t\tkey := looseSymbolKey(symbol)\n\t\tif _, ok := seen[key]; ok {\n\t\t\treturn\n\t\t}\n\t\tseen[key] = struct{}{}\n\t\tsymbols = append(symbols, symbol)\n\t}\n\n\tallTags := tagger.Tag(content)\n\tparents := computeTreeSitterParents(allTags)\n\n\tfor i, tag := range allTags {\n\t\tsymbol, ok := cfg.symbolFromTag(path, content, tag, parents[i])\n\t\tif ok {\n\t\t\tadd(symbol)\n\t\t}\n\t}\n\n\tif cfg.MergeRegex {\n\t\tregexResult, _ := RegexMapper{}.Map(path, content, Options{Level: LevelCompact})\n\t\tfor _, symbol := range regexResult.Symbols {\n\t\t\tif cfg."
+        },
+        {
+          "id": "toolu_01WSyL8R81xyeuPPhWsTwwKq",
+          "kind": "execute",
+          "title": "for f in internal/cli/code.go internal/ghx/read.go internal/ghx/tree.go; do\n  echo \"=== $f ===\"\n  gh api \"repos/gkoreli/ghx/contents/$f\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"mapengine\\|Engine\\|\\.Map(\" \ndone",
+          "rawInput": {
+            "command": "for f in internal/cli/code.go internal/ghx/read.go internal/ghx/tree.go; do\n  echo \"=== $f ===\"\n  gh api \"repos/gkoreli/ghx/contents/$f\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"mapengine\\|Engine\\|\\.Map(\" \ndone"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:43.89985Z"
+            },
+            {
+              "status": "failed",
+              "at": "2026-07-06T07:32:49.431881Z"
+            }
+          ],
+          "outputSize": 1156,
+          "outputExcerpt": "```\nExit code 1\n=== internal/cli/code.go ===\n=== internal/ghx/read.go ===\n10:\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n28:\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n39:\tMapEngine string // map engine: auto|regex|tree-sitter\n187:\t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n188:\t\t\tEngine: mapengine.Engine(opts.MapEngine),\n189:\t\t\tLevel:  mapengine.Level(opts.MapLevel),\n190:\t\t\tKind:   mapengine.Kind(opts.MapKind),\n194:\t\tresult.MapEngine = string(mapResult.Engine)\n=== internal/ghx/tree.go ===\n```Exit code 1\n=== internal/cli/code.go ===\n=== internal/ghx/read.go ===\n10:\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n28:\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n39:\tMapEngine string // map engine: auto|regex|tree-sitter\n187:\t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n188:\t\t\tEngine: mapengine.Engine(opts.MapEngine),\n189:\t\t\tLevel:  mapengine.Level(opts.MapLevel),\n190:\t\t\tKind:   mapengine.Kind(opts.MapKind),\n194:\t\tresult.MapEngine = string(mapResult.Engine)\n=== internal/ghx/tree.go ==="
+        },
+        {
+          "id": "toolu_01FfGr6omLyjQp8FqoJRh1r3",
+          "kind": "execute",
+          "title": "gh api \"repos/gkoreli/ghx/contents/internal/ghx/read.go\" --jq .content | base64 -d | sed -n '1,60p;160,210p'",
+          "rawInput": {
+            "command": "gh api \"repos/gkoreli/ghx/contents/internal/ghx/read.go\" --jq .content | base64 -d | sed -n '1,60p;160,210p'"
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:52.11962Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:54.652568Z"
+            }
+          ],
+          "outputSize": 7029,
+          "outputExcerpt": "```console\npackage ghx\n\nimport (\n\t\"fmt\"\n\t\"regexp\"\n\t\"strconv\"\n\t\"strings\"\n\n\t\"github.com/cli/go-gh/v2/pkg/api\"\n\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n)\n\ntype GrepMatch struct {\n\tLineNum int    `json:\"lineNum\"`\n\tLine    string `json:\"line\"`\n\tIsMatch bool   `json:\"isMatch\"` // true for the matching line, false for context lines\n}\n\ntype FileResult struct {\n\tPath        string      `json:\"path\"`\n\tContent     string      `json:\"content\"` // full text (empty if using grep/map)\n\tByteSize    int         `json:\"byteSize\"`\n\tNotFound    bool        `json:\"notFound\"`\n\tDirEntries  []FileEntry `json:\"dirEntries,omitempty\"`  // populated when path is a directory\n\tGrepHits    []GrepMatch `json:\"grepHits,omitempty\"`    // populated when Grep is set\n\tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n\tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n\tMapWarnings []string    `json:\"mapWarnings,omitempty\"` // fallback/quality warnings from mapper\n\tGlobPattern string      `json:\"globPattern,omitempty\"` // the glob that matched this file (empty for exact paths)\n}\n\ntype ReadOpts struct {\n\tGrep      string // filter to matching lines with 2 lines context\n\tLines     string // line range \"N-M\"\n\tMap       bool   // structural signatures only\n\tMapLevel  string // map detail level: outline|minimal|compact|standard\n\tMapKind   string // map symbol kind filter: func|type|import|const|var\n\tMapEngine string // map engine: auto|regex|tree-sitter\n\n\t// Output: populated after Read() when globs are used\n\tGlobs []GlobResult\n}\n\n// Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.\n// Returns one FileResult per requested file.\nfunc Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {\n\tif opts == nil {\n\t\topts = \u0026ReadOpts{}\n\t}\n\n\tparts := strings.Split(repo, \"/\")\n\tif len(parts) != 2 {\n\t\treturn nil, fmt.Errorf(\"invalid repo"
+        },
+        {
+          "id": "toolu_019pUgLgoejPHDjRBmnZJfWt",
+          "kind": "execute",
+          "title": "gh api \"repos/gkoreli/ghx/contents/internal/cli/ghx.go\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"map-engine\\|MapEngine\\|mapengine\" ",
+          "rawInput": {
+            "command": "gh api \"repos/gkoreli/ghx/contents/internal/cli/ghx.go\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"map-engine\\|MapEngine\\|mapengine\" "
+          },
+          "statusTransitions": [
+            {
+              "status": "pending",
+              "at": "2026-07-06T07:32:56.977185Z"
+            },
+            {
+              "status": "completed",
+              "at": "2026-07-06T07:32:59.477631Z"
+            }
+          ],
+          "outputSize": 363,
+          "outputExcerpt": "```console\n112:\t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n120:\t\t\tMapEngine: mapEngine,\n211:\treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n```112:\t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n120:\t\t\tMapEngine: mapEngine,\n211:\treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")"
+        }
+      ],
+      "resumed": false,
+      "toolOutputChars": 84399,
+      "durationMs": 76081
+    }
+  ],
+  "actions": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01NAkv7ce9oNnc6RBmUTysfK",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh repo view gkoreli/ghx --json name,description,defaultBranchRef,url 2\u003e\u00261",
+      "at": "2026-07-06T07:32:03.371142Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01JxDwKvruKkShXo1dbA2UdS",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api search/code -X GET -f q=\"repo:gkoreli/ghx parser\" 2\u003e\u00261 | head -100\necho \"---\"\ngh api repos/gkoreli/ghx/git/trees/mainline?recursive=1 2\u003e\u00261 | python3 -c \"\nimport json,sys\nd=json.load(sys.stdin)\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -300",
+      "at": "2026-07-06T07:32:09.631748Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01GLDA7vsMZPNiNcKRrPoADf",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api 'repos/gkoreli/ghx/git/trees/mainline?recursive=1' \u003e /tmp/tree.json 2\u003e\u00261\npython3 -c \"\nimport json\nd=json.load(open('/tmp/tree.json'))\nfor t in d.get('tree',[]):\n    print(t['path'])\n\" 2\u003e\u00261 | head -400",
+      "at": "2026-07-06T07:32:15.985114Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01HxpngAcdn9M3dRMXiLsqnV",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go --jq .content | base64 -d",
+      "at": "2026-07-06T07:32:24.64879Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01DTux4MximTK4UQvpZ7GmxP",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api repos/gkoreli/ghx/contents/internal/mapengine/treesitter.go --jq .content | base64 -d | head -120\necho \"=====GOAST=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/goast.go --jq .content | base64 -d | head -60\necho \"=====REGEX=====\"\ngh api repos/gkoreli/ghx/contents/internal/mapengine/regex.go --jq .content | base64 -d | head -60",
+      "at": "2026-07-06T07:32:29.474177Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01WSyL8R81xyeuPPhWsTwwKq",
+      "kind": "execute",
+      "name": "execute",
+      "input": "for f in internal/cli/code.go internal/ghx/read.go internal/ghx/tree.go; do\n  echo \"=== $f ===\"\n  gh api \"repos/gkoreli/ghx/contents/$f\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"mapengine\\|Engine\\|\\.Map(\" \ndone",
+      "at": "2026-07-06T07:32:43.89985Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_01FfGr6omLyjQp8FqoJRh1r3",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api \"repos/gkoreli/ghx/contents/internal/ghx/read.go\" --jq .content | base64 -d | sed -n '1,60p;160,210p'",
+      "at": "2026-07-06T07:32:52.11962Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "type": "tool",
+      "toolCallId": "toolu_019pUgLgoejPHDjRBmnZJfWt",
+      "kind": "execute",
+      "name": "execute",
+      "input": "gh api \"repos/gkoreli/ghx/contents/internal/cli/ghx.go\" --jq .content 2\u003e/dev/null | base64 -d | grep -n -i \"map-engine\\|MapEngine\\|mapengine\" ",
+      "at": "2026-07-06T07:32:56.977185Z"
+    }
+  ],
+  "observations": [
+    {
+      "actionIndex": 0,
+      "turn": 0,
+      "toolCallId": "toolu_01NAkv7ce9oNnc6RBmUTysfK",
+      "text": "```console\n{\"defaultBranchRef\":{\"name\":\"mainline\"},\"description\":\"Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\",\"name\":\"ghx\",\"url\":\"https://github.com/gkoreli/ghx\"}\n```{\"defaultBranchRef\":{\"name\":\"mainline\"},\"description\":\"Agent-first GitHub code exploration. GraphQL batching, code maps (~92% token reduction), AND search, repo discovery with README previews. Codemode TypeScript sandbox, MCP server. Go.\",\"name\":\"ghx\",\"url\":\"https://github.com/gkoreli/ghx\"}",
+      "outputSize": 597,
+      "at": "2026-07-06T07:32:06.96996Z"
+    },
+    {
+      "actionIndex": 1,
+      "turn": 0,
+      "toolCallId": "toolu_01JxDwKvruKkShXo1dbA2UdS",
+      "text": "```console\n{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}---\n(eval):3: no matches found: repos/gkoreli/ghx/git/trees/mainline?recursive=1\nTraceback (most recent call last):\n  File \"\u003cstring\u003e\", line 3, in \u003cmodule\u003e\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 293, in load\n    return loads(fp.read(),\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n```{\"total_count\":0,\"incomplete_results\":false,\"items\":[]}---\n(eval):3: no matches found: repos/gkoreli/ghx/git/trees/mainline?recursive=1\nTraceback (most recent call last):\n  File \"\u003cstring\u003e\", line 3, in \u003cmodule\u003e\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 293, in load\n    return loads(fp.read(),\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 337, in decode\n    obj, end = self.raw_decode(s, idx=_w(s, 0).end())\n  File \"/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) ",
+      "outputSize": 2129,
+      "at": "2026-07-06T07:32:12.470883Z"
+    },
+    {
+      "actionIndex": 2,
+      "turn": 0,
+      "toolCallId": "toolu_01GLDA7vsMZPNiNcKRrPoADf",
+      "text": "```console\n.claude-plugin\n.claude-plugin/plugin.json\n.claude\n.claude/skills\n.claude/skills/fable-delegation\n.claude/skills/fable-delegation/SKILL.md\n.envrc.example\n.github\n.github/workflows\n.github/workflows/auto-tag.yml\n.gitignore\n.goreleaser.yml\n.mise.toml\nAGENTS.md\nCLAUDE.md\nLICENSE\nREADME.md\ncmd\ncmd/ghx\ncmd/ghx/main.go\ndocs\ndocs/NORTH_STAR.md\ndocs/adr\ndocs/adr/0001-landscape-research.md\ndocs/adr/0002-problem-goal-vision.md\ndocs/adr/0003-search-design.md\ndocs/adr/0004-whats-next.md\ndocs/adr/0005-flag-firewall-agentic-defaults.md\ndocs/adr/0006-rewrite-decision.md\ndocs/adr/0007-go-multi-frontend-architecture.md\ndocs/adr/0008-technical-decisions.md\ndocs/adr/0009-codemode-type-system.md\ndocs/adr/0010-code-meta-tool.md\ndocs/adr/0011-glob-support-in-read.md\ndocs/adr/0012-graphql-underutilized-fields.md\ndocs/adr/0013-ghx-map-command.md\ndocs/adr/0014-search-console-demand-signal.md\ndocs/adr/0014.1-sidecar-agent-vision.md\ndocs/adr/0014.2-sidecar-proof-of-concept-gate.md\ndocs/adr/0014.3-sidecar-mvp-implementation.md\ndocs/adr/0014.4-sidecar-bench-llm-judge.md\ndocs/adr/0015-sidecar-go-native-migration.md\ndocs/adr/0015.1-sidecar-evidence-ledger.md\ndocs/adr/0016-sidecar-agentic-eval-and-training-data.md\ndocs/adr/0016.1-sidecar-eval-implementation.md\ndocs/adr/0016.2-benchmark-validity-hardening.md\ndocs/adr/0016.3-eval-observability-isolation-economics.md\ndocs/adr/0016.4-otel-trace-emission-architecture.md\ndocs/adr/0016.5-replay-decontamination-repeat-read-refinement.md\ndocs/adr/0016.6-signal-per-token.md\ndocs/adr/0016.7-sidecar-report-reliability-fix.md\ndocs/adr/0016.8-measurement-fix-batch.md\ndocs/adr/0017-training-data-exports-research.md\ndocs/adr/0017.1-training-data-exports-decision.md\ndocs/adr/0018-agentic-observability-genai-conventions.md\ndocs/adr/0019-sidecar-adoption-zero-cli-surface.md\ndocs/adr/0019.1-discovery-tier.md\ndocs/adr/0020-agent-sidecar-protocol-landscape-research.md\ndocs/adr/0020.1-protocol-strategy-decision.md\ndocs/adr/0021-report-contract-enforcement.md\ndocs/adr/0022-shared-visibility-runtime.md\ndocs/a",
+      "outputSize": 49085,
+      "at": "2026-07-06T07:32:20.164844Z"
+    },
+    {
+      "actionIndex": 3,
+      "turn": 0,
+      "toolCallId": "toolu_01HxpngAcdn9M3dRMXiLsqnV",
+      "text": "```console\npackage mapengine\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"path/filepath\"\n\t\"sort\"\n\t\"strings\"\n)\n\ntype Engine string\n\nconst (\n\tEngineAuto       Engine = \"auto\"\n\tEngineGoAST      Engine = \"go-ast\"\n\tEngineRegex      Engine = \"regex\"\n\tEngineTreeSitter Engine = \"tree-sitter\"\n)\n\ntype Level string\n\nconst (\n\tLevelCompact  Level = \"compact\"\n\tLevelMinimal  Level = \"minimal\"\n\tLevelOutline  Level = \"outline\"\n\tLevelStandard Level = \"standard\"\n)\n\ntype Kind string\n\nconst (\n\tKindFunc    Kind = \"func\"\n\tKindType    Kind = \"type\"\n\tKindImport  Kind = \"import\"\n\tKindConst   Kind = \"const\"\n\tKindVar     Kind = \"var\"\n\tKindPackage Kind = \"package\"\n\tKindOther   Kind = \"other\"\n)\n\ntype Options struct {\n\tEngine Engine\n\tLevel  Level\n\tKind   Kind\n}\n\ntype Mapper interface {\n\tMap(path string, content []byte, opts Options) (Result, error)\n}\n\ntype Result struct {\n\tSymbols       []Symbol\n\tLines         []string\n\tEngine        Engine\n\tFallback      bool\n\tWarnings      []string\n\tOriginalChars int\n\tMappedChars   int\n}\n\ntype Symbol struct {\n\tKind      Kind\n\tName      string\n\tSignature string\n\tLine      int\n\tEndLine   int\n\tParent    string\n\tDoc       string\n}\n\nvar ErrUnsupportedLanguage = errors.New(\"unsupported map language\")\n\nfunc NormalizeOptions(opts Options) Options {\n\topts.Engine = normalizeEngine(opts.Engine)\n\topts.Level = normalizeLevel(opts.Level)\n\topts.Kind = normalizeKind(opts.Kind)\n\treturn opts\n}\n\nfunc normalizeEngine(engine Engine) Engine {\n\tswitch Engine(strings.ToLower(strings.TrimSpace(string(engine)))) {\n\tcase EngineRegex:\n\t\treturn EngineRegex\n\tcase EngineTreeSitter:\n\t\treturn EngineTreeSitter\n\tdefault:\n\t\treturn EngineAuto\n\t}\n}\n\nfunc normalizeLevel(level Level) Level {\n\tswitch Level(strings.ToLower(strings.TrimSpace(string(level)))) {\n\tcase LevelOutline:\n\t\treturn LevelOutline\n\tcase LevelMinimal:\n\t\treturn LevelMinimal\n\tcase LevelStandard:\n\t\treturn LevelStandard\n\tdefault:\n\t\treturn LevelCompact\n\t}\n}\n\nfunc normalizeKind(kind Kind) Kind {\n\tswitch Kind(strings.ToLower(strings.TrimSpace(string(kind)))) {\n\tcase KindFunc:\n\t\treturn KindFunc\n\tcase Kin",
+      "outputSize": 11179,
+      "at": "2026-07-06T07:32:26.762726Z"
+    },
+    {
+      "actionIndex": 4,
+      "turn": 0,
+      "toolCallId": "toolu_01DTux4MximTK4UQvpZ7GmxP",
+      "text": "```console\npackage mapengine\n\nimport (\n\t\"fmt\"\n\t\"sort\"\n\t\"strings\"\n\n\t\"github.com/odvcencio/gotreesitter\"\n\t\"github.com/odvcencio/gotreesitter/grammars\"\n)\n\ntype TreeSitterMapper struct {\n\tLanguages map[string]TreeSitterLanguageConfig\n}\n\ntype TreeSitterLanguageConfig struct {\n\tTagsQuery       func(grammars.LangEntry) string\n\tTagKinds        map[string]Kind\n\tSignature       func(string, []byte, gotreesitter.Range) string\n\tMergeRegex      bool\n\tMergeRegexKinds map[Kind]bool\n\tTokenSource     func([]byte, *gotreesitter.Language) gotreesitter.TokenSource\n}\n\nfunc (m TreeSitterMapper) Map(path string, content []byte, opts Options) (Result, error) {\n\topts = NormalizeOptions(opts)\n\n\tentry := m.treeSitterEntry(path)\n\tif entry == nil || entry.Language == nil {\n\t\treturn Result{}, fmt.Errorf(\"%w: %s\", ErrUnsupportedLanguage, path)\n\t}\n\n\tlang := entry.Language()\n\tif lang == nil {\n\t\treturn Result{}, fmt.Errorf(\"%w: failed to load grammar for %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\tcfg, ok := m.treeSitterConfigForEntry(*entry)\n\tif !ok {\n\t\treturn Result{}, fmt.Errorf(\"%w: %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\ttagsQuery := cfg.resolveTagsQuery(*entry)\n\tif strings.TrimSpace(tagsQuery) == \"\" {\n\t\treturn Result{}, fmt.Errorf(\"%w: no tags query for %s\", ErrUnsupportedLanguage, entry.Name)\n\t}\n\n\ttagger, err := newTagger(entry, cfg, lang, tagsQuery)\n\tif err != nil {\n\t\treturn Result{}, err\n\t}\n\n\tsymbols := make([]Symbol, 0)\n\tseen := make(map[string]struct{})\n\tadd := func(symbol Symbol) {\n\t\tif symbol.Signature == \"\" {\n\t\t\treturn\n\t\t}\n\t\tkey := looseSymbolKey(symbol)\n\t\tif _, ok := seen[key]; ok {\n\t\t\treturn\n\t\t}\n\t\tseen[key] = struct{}{}\n\t\tsymbols = append(symbols, symbol)\n\t}\n\n\tallTags := tagger.Tag(content)\n\tparents := computeTreeSitterParents(allTags)\n\n\tfor i, tag := range allTags {\n\t\tsymbol, ok := cfg.symbolFromTag(path, content, tag, parents[i])\n\t\tif ok {\n\t\t\tadd(symbol)\n\t\t}\n\t}\n\n\tif cfg.MergeRegex {\n\t\tregexResult, _ := RegexMapper{}.Map(path, content, Options{Level: LevelCompact})\n\t\tfor _, symbol := range regexResult.Symbols {\n\t\t\tif cfg.",
+      "outputSize": 12861,
+      "at": "2026-07-06T07:32:38.995742Z"
+    },
+    {
+      "actionIndex": 5,
+      "turn": 0,
+      "toolCallId": "toolu_01WSyL8R81xyeuPPhWsTwwKq",
+      "text": "```\nExit code 1\n=== internal/cli/code.go ===\n=== internal/ghx/read.go ===\n10:\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n28:\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n39:\tMapEngine string // map engine: auto|regex|tree-sitter\n187:\t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n188:\t\t\tEngine: mapengine.Engine(opts.MapEngine),\n189:\t\t\tLevel:  mapengine.Level(opts.MapLevel),\n190:\t\t\tKind:   mapengine.Kind(opts.MapKind),\n194:\t\tresult.MapEngine = string(mapResult.Engine)\n=== internal/ghx/tree.go ===\n```Exit code 1\n=== internal/cli/code.go ===\n=== internal/ghx/read.go ===\n10:\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n28:\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n39:\tMapEngine string // map engine: auto|regex|tree-sitter\n187:\t\tmapResult, err := mapengine.Map(path, []byte(text), mapengine.Options{\n188:\t\t\tEngine: mapengine.Engine(opts.MapEngine),\n189:\t\t\tLevel:  mapengine.Level(opts.MapLevel),\n190:\t\t\tKind:   mapengine.Kind(opts.MapKind),\n194:\t\tresult.MapEngine = string(mapResult.Engine)\n=== internal/ghx/tree.go ===",
+      "outputSize": 1156,
+      "at": "2026-07-06T07:32:49.431881Z"
+    },
+    {
+      "actionIndex": 6,
+      "turn": 0,
+      "toolCallId": "toolu_01FfGr6omLyjQp8FqoJRh1r3",
+      "text": "```console\npackage ghx\n\nimport (\n\t\"fmt\"\n\t\"regexp\"\n\t\"strconv\"\n\t\"strings\"\n\n\t\"github.com/cli/go-gh/v2/pkg/api\"\n\t\"github.com/gkoreli/ghx/v2/internal/mapengine\"\n)\n\ntype GrepMatch struct {\n\tLineNum int    `json:\"lineNum\"`\n\tLine    string `json:\"line\"`\n\tIsMatch bool   `json:\"isMatch\"` // true for the matching line, false for context lines\n}\n\ntype FileResult struct {\n\tPath        string      `json:\"path\"`\n\tContent     string      `json:\"content\"` // full text (empty if using grep/map)\n\tByteSize    int         `json:\"byteSize\"`\n\tNotFound    bool        `json:\"notFound\"`\n\tDirEntries  []FileEntry `json:\"dirEntries,omitempty\"`  // populated when path is a directory\n\tGrepHits    []GrepMatch `json:\"grepHits,omitempty\"`    // populated when Grep is set\n\tMapLines    []string    `json:\"mapLines,omitempty\"`    // populated when Map is true\n\tMapChars    int         `json:\"mapChars,omitempty\"`    // original char count (for reduction stats)\n\tMapEngine   string      `json:\"mapEngine,omitempty\"`   // mapper engine used when Map is true\n\tMapWarnings []string    `json:\"mapWarnings,omitempty\"` // fallback/quality warnings from mapper\n\tGlobPattern string      `json:\"globPattern,omitempty\"` // the glob that matched this file (empty for exact paths)\n}\n\ntype ReadOpts struct {\n\tGrep      string // filter to matching lines with 2 lines context\n\tLines     string // line range \"N-M\"\n\tMap       bool   // structural signatures only\n\tMapLevel  string // map detail level: outline|minimal|compact|standard\n\tMapKind   string // map symbol kind filter: func|type|import|const|var\n\tMapEngine string // map engine: auto|regex|tree-sitter\n\n\t// Output: populated after Read() when globs are used\n\tGlobs []GlobResult\n}\n\n// Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.\n// Returns one FileResult per requested file.\nfunc Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {\n\tif opts == nil {\n\t\topts = \u0026ReadOpts{}\n\t}\n\n\tparts := strings.Split(repo, \"/\")\n\tif len(parts) != 2 {\n\t\treturn nil, fmt.Errorf(\"invalid repo",
+      "outputSize": 7029,
+      "at": "2026-07-06T07:32:54.652568Z"
+    },
+    {
+      "actionIndex": 7,
+      "turn": 0,
+      "toolCallId": "toolu_019pUgLgoejPHDjRBmnZJfWt",
+      "text": "```console\n112:\t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n120:\t\t\tMapEngine: mapEngine,\n211:\treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")\n```112:\t\tmapEngine, _ := cmd.Flags().GetString(\"map-engine\")\n120:\t\t\tMapEngine: mapEngine,\n211:\treadCmd.Flags().String(\"map-engine\", \"auto\", \"Map engine: auto|regex|tree-sitter\")",
+      "outputSize": 363,
+      "at": "2026-07-06T07:32:59.477631Z"
+    }
+  ],
+  "identity": {
+    "agentCommand": "/Users/goga/Documents/goga/ghx/scripts/eval-agent-acp.sh",
+    "adapterName": "@agentclientprotocol/claude-agent-acp",
+    "adapterVersion": "0.55.0",
+    "subjectModel": "claude-sonnet-5",
+    "wrapperSha256": "30cb9d7258c2c08862d2c592d58a8e3f242ea2032a0495646441399e1e71b98d"
+  },
+  "context": {
+    "mainAgentChars": 88391,
+    "sidecarInternalChars": 0,
+    "totalWorkflowChars": 88391
+  },
+  "rewards": {
+    "correctness": 0.75,
+    "evidence": 1,
+    "trajectory": 1,
+    "compression": 0,
+    "memory": 0,
+    "memoryApplies": false,
+    "safety": 1,
+    "overall": 0.75
+  },
+  "startedAt": "2026-07-06T07:31:57.099665Z",
+  "endedAt": "2026-07-06T07:33:16.277003Z"
+}
