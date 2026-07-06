@@ -77,12 +77,24 @@ func TestEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record manifest round: %v", err)
 	}
+	identityHashes, reason, err := BaselineReuseHashes(cfg, tasks, "testdata/tasks", currentIdentity)
+	if err != nil {
+		t.Fatalf("record manifest identity hashes: %s: %v", reason, err)
+	}
+	if reason != "" {
+		t.Fatalf("record manifest identity hashes: %s", reason)
+	}
+	manifest, err = RecordManifestIdentityHashes(runDir, identityHashes)
+	if err != nil {
+		t.Fatalf("record manifest identity hashes: %v", err)
+	}
 	expectedEpisodes := manifest.ExpectedEpisodes
 	var reuse *BaselineReuse
 	if priorRunDir := os.Getenv(BaselineReuseEnv); priorRunDir != "" {
 		var ok bool
 		var reason string
-		reuse, ok, reason, err = TryReuseBaselines(runDir, priorRunDir, cfg, tasks, "testdata/tasks", 1, currentIdentity, manifest.CreatedAt)
+		plannedTrials := PlannedBaselineTrials(manifest)
+		reuse, ok, reason, err = TryReuseBaselines(runDir, priorRunDir, cfg, tasks, "testdata/tasks", plannedTrials, currentIdentity, manifest.CreatedAt)
 		if err != nil {
 			t.Fatalf("baseline reuse: %v", err)
 		}
@@ -93,7 +105,22 @@ func TestEpisodes(t *testing.T) {
 			}
 			t.Logf("baseline reuse: copied %d episodes from %s", len(reuse.Episodes), reuse.ReusedFromRunID)
 		} else {
-			t.Logf("%s", reason)
+			refusal := BaselineReuseRefusalMessage(priorRunDir, reason)
+			if !BaselineFreshFallbackAllowed() {
+				t.Fatalf("%s", refusal)
+			}
+			manifest, err = RecordBaselineFallback(runDir, BaselineFallback{
+				Mode:             BaselineFallbackFresh,
+				RequestedRunDir:  priorRunDir,
+				RefusalReason:    reason,
+				Remediation:      refusal,
+				ControllingEnv:   BaselineFallbackEnv,
+				ControllingValue: BaselineFallbackFresh,
+			})
+			if err != nil {
+				t.Fatalf("record baseline fallback: %v", err)
+			}
+			t.Logf("%s", refusal)
 		}
 	}
 

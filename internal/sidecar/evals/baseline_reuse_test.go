@@ -163,6 +163,37 @@ func TestBaselineReuseManifestRoundtrip(t *testing.T) {
 	}
 }
 
+func TestManifestIdentityHashesWrittenForFreshRun(t *testing.T) {
+	fixture := newBaselineReuseFixture(t, 1)
+	freshRun := t.TempDir()
+	manifest, err := RecordManifestRound(freshRun, PlannedRound{Tasks: len(fixture.tasks), Profiles: len(AllProfiles()), Trials: 1}, fixture.identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes, reason, err := BaselineReuseHashes(fixture.cfg, fixture.tasks, fixture.taskDir, fixture.identity)
+	if err != nil || reason != "" {
+		t.Fatalf("hashes reason=%q err=%v", reason, err)
+	}
+	manifest, err = RecordManifestIdentityHashes(freshRun, hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.BaselineReuse != nil {
+		t.Fatalf("fresh run should not need baselineReuse to expose identity hashes: %+v", manifest.BaselineReuse)
+	}
+	if len(manifest.IdentityHashes) != 5 {
+		t.Fatalf("identityHashes = %d, want 5", len(manifest.IdentityHashes))
+	}
+
+	loaded, err := LoadRunManifest(freshRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.IdentityHashes) != 5 || hashValue(loaded.IdentityHashes, "taskCorpus") == "" {
+		t.Fatalf("manifest did not persist reusable identity inventory: %+v", loaded.IdentityHashes)
+	}
+}
+
 func TestTryReuseBaselinesEligibilityAndCopySemantics(t *testing.T) {
 	fixture := newBaselineReuseFixture(t, 1)
 	reuse, ok, reason, err := TryReuseBaselines(fixture.targetRun, fixture.priorRun, fixture.cfg, fixture.tasks, fixture.taskDir, 1, fixture.identity, fixture.now)
@@ -196,24 +227,68 @@ func TestTryReuseBaselinesEligibilityAndCopySemantics(t *testing.T) {
 	}
 }
 
+func TestTryReuseBaselinesAcceptsAtLeastPlannedAndSelectsEarliestValid(t *testing.T) {
+	fixture := newBaselineReuseFixture(t, 3)
+	excluded, err := LoadEpisode(filepath.Join(fixture.priorRun, "a_plain_0.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded.ExclusionReasons = []string{"test exclusion"}
+	if _, err := SaveEpisode(fixture.priorRun, excluded); err != nil {
+		t.Fatal(err)
+	}
+
+	reuse, ok, reason, err := TryReuseBaselines(fixture.targetRun, fixture.priorRun, fixture.cfg, fixture.tasks, fixture.taskDir, 2, fixture.identity, fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("reuse rejected: %s", reason)
+	}
+	if len(reuse.Episodes) != len(fixture.tasks)*2*2 {
+		t.Fatalf("copied episodes = %d, want %d", len(reuse.Episodes), len(fixture.tasks)*2*2)
+	}
+
+	var aPlain []string
+	for _, rec := range reuse.Episodes {
+		if rec.TaskID == "a" && rec.Profile == ProfilePlain {
+			aPlain = append(aPlain, filepath.Base(rec.SourceFile))
+		}
+	}
+	if strings.Join(aPlain, ",") != "a_plain_1.json,a_plain_2.json" {
+		t.Fatalf("a/plain deterministic selection = %v, want earliest non-excluded trials 1 and 2", aPlain)
+	}
+
+	again, ok, reason, err := TryReuseBaselines(fixture.targetRun, fixture.priorRun, fixture.cfg, fixture.tasks, fixture.taskDir, 2, fixture.identity, fixture.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("idempotent reuse rejected: %s", reason)
+	}
+	if len(again.Episodes) != len(reuse.Episodes) {
+		t.Fatalf("idempotent copy episode count = %d, want %d", len(again.Episodes), len(reuse.Episodes))
+	}
+}
+
 func TestTryReuseBaselinesMismatchTable(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*baselineReuseFixture)
 		want   string
 	}{
-		{name: "hash mismatch", mutate: func(f *baselineReuseFixture) { f.priorManifest.BaselineReuse.Hashes[0].Value = "wrong" }, want: "hash mismatch"},
+		{name: "hash mismatch", mutate: func(f *baselineReuseFixture) { f.priorManifest.IdentityHashes[0].Value = "wrong" }, want: "hash mismatch"},
 		{name: "old run", mutate: func(f *baselineReuseFixture) { f.priorManifest.CreatedAt = f.now.Add(-8 * 24 * time.Hour) }, want: "older than 7 days"},
-		{name: "missing inventory", mutate: func(f *baselineReuseFixture) { f.priorManifest.BaselineReuse = nil }, want: "lacks baselineReuse hash inventory"},
+		{name: "missing inventory", mutate: func(f *baselineReuseFixture) { f.priorManifest.IdentityHashes = nil }, want: "lacks manifest identity hash inventory"},
 		{name: "adapter mismatch", mutate: func(f *baselineReuseFixture) { f.priorManifest.Identity.AdapterVersion = "other" }, want: "adapterVersion mismatch"},
 		{name: "blank adapter", mutate: func(f *baselineReuseFixture) { f.identity.AdapterVersion = "" }, want: "adapter version is blank"},
 		{name: "unknown subject", mutate: func(f *baselineReuseFixture) { f.identity.SubjectModel = "unknown" }, want: "subject model is unknown"},
-		{name: "missing plain", mutate: func(f *baselineReuseFixture) { os.Remove(filepath.Join(f.priorRun, "a_plain_0.json")) }, want: "incomplete baseline matrix"},
+		{name: "missing plain", mutate: func(f *baselineReuseFixture) { os.Remove(filepath.Join(f.priorRun, "a_plain_0.json")) }, want: "too few valid trials"},
 		{name: "only one profile", mutate: func(f *baselineReuseFixture) {
 			for _, name := range []string{"a_ghx_0.json", "b_ghx_0.json"} {
 				os.Remove(filepath.Join(f.priorRun, name))
 			}
-		}, want: "incomplete baseline matrix"},
+		}, want: "too few valid trials"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,6 +310,52 @@ func TestTryReuseBaselinesMismatchTable(t *testing.T) {
 				t.Fatalf("reason = %q, want contains %q", reason, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlannedBaselineTrialsUsesManifestRounds(t *testing.T) {
+	m := &RunManifest{Rounds: []PlannedRound{
+		{Tasks: 2, Profiles: 3, Trials: 1, ExpectedEpisodes: 6},
+		{Tasks: 2, Profiles: 3, Trials: 1, ExpectedEpisodes: 6},
+		{Tasks: 2, Profiles: 3, Trials: 3, ExpectedEpisodes: 18},
+	}}
+	if got := PlannedBaselineTrials(m); got != 5 {
+		t.Fatalf("planned baseline trials = %d, want 5", got)
+	}
+}
+
+func TestBaselineReuseRefusalMessageAndFallbackRecording(t *testing.T) {
+	reason := "baseline reuse disabled: source cell has too few valid trials task=a profile=plain got=1 want>=2"
+	msg := BaselineReuseRefusalMessage("/runs/prior", reason)
+	for _, want := range []string{
+		"baseline reuse requested from /runs/prior but refused",
+		"source cell has too few valid trials",
+		"manifest.identityHashes",
+		BaselineFallbackEnv + "=" + BaselineFallbackFresh,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("refusal message missing %q:\n%s", want, msg)
+		}
+	}
+
+	t.Setenv(BaselineFallbackEnv, BaselineFallbackFresh)
+	if !BaselineFreshFallbackAllowed() {
+		t.Fatal("fresh fallback env was not honored")
+	}
+	dir := t.TempDir()
+	manifest, err := RecordBaselineFallback(dir, BaselineFallback{
+		Mode:             BaselineFallbackFresh,
+		RequestedRunDir:  "/runs/prior",
+		RefusalReason:    reason,
+		Remediation:      msg,
+		ControllingEnv:   BaselineFallbackEnv,
+		ControllingValue: BaselineFallbackFresh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.BaselineFallback == nil || manifest.BaselineFallback.RefusalReason != reason {
+		t.Fatalf("fallback not recorded: %+v", manifest.BaselineFallback)
 	}
 }
 
@@ -294,13 +415,14 @@ func newBaselineReuseFixture(t *testing.T, trials int) *baselineReuseFixture {
 		for _, task := range tasks {
 			for _, profile := range []Profile{ProfilePlain, ProfileGhx} {
 				ep := &Episode{
-					ID:       task.ID + "_" + string(profile) + "_" + strconv.Itoa(trial),
-					TaskID:   task.ID,
-					Repo:     task.Repo,
-					Profile:  profile,
-					Identity: identity,
-					Turns:    []TurnRecord{{Turn: 0}},
-					Rewards:  RewardBreakdown{Correctness: 1, Evidence: 1, Safety: 1},
+					ID:        task.ID + "_" + string(profile) + "_" + strconv.Itoa(trial),
+					TaskID:    task.ID,
+					Repo:      task.Repo,
+					Profile:   profile,
+					Identity:  identity,
+					StartedAt: now.Add(time.Duration(trial) * time.Minute),
+					Turns:     []TurnRecord{{Turn: 0}},
+					Rewards:   RewardBreakdown{Correctness: 1, Evidence: 1, Safety: 1},
 				}
 				if _, err := SaveEpisode(priorRun, ep); err != nil {
 					t.Fatal(err)
@@ -309,9 +431,10 @@ func newBaselineReuseFixture(t *testing.T, trials int) *baselineReuseFixture {
 		}
 	}
 	manifest := &RunManifest{
-		RunDir:    priorRun,
-		Identity:  identity,
-		CreatedAt: now.Add(-time.Hour),
+		RunDir:         priorRun,
+		Identity:       identity,
+		IdentityHashes: hashes,
+		CreatedAt:      now.Add(-time.Hour),
 		BaselineReuse: &BaselineReuse{
 			ReusedFromRunID: "seed",
 			MaxAgeDays:      BaselineReuseMaxAgeDays,
