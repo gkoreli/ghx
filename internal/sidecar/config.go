@@ -7,54 +7,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
-// newRoot returns the root storage directory ghx writes to: $GHX_HOME when set,
-// otherwise ~/.ghx (ADR-0022 D3). This is the location SaveConfig and new
-// sessions always use; the legacy ~/.ghx-sidecar location is only ever read.
-func newRoot() string {
+// rootDir returns the single root storage directory ghx reads and writes:
+// $GHX_HOME when set, otherwise ~/.ghx (ADR-0022 D3). The pre-ADR-0022
+// ~/.ghx-sidecar read-fallback was removed 2026-07-05 — the migration happened
+// on the only install, so there is exactly one path with no legacy shim.
+func rootDir() string {
 	if h := strings.TrimSpace(os.Getenv("GHX_HOME")); h != "" {
 		return h
 	}
 	return filepath.Join(os.Getenv("HOME"), ".ghx")
-}
-
-// legacyRoot is the pre-ADR-0022 storage location, read as a migration
-// fallback but never written.
-func legacyRoot() string {
-	return filepath.Join(os.Getenv("HOME"), ".ghx-sidecar")
-}
-
-// activeRoot returns the root to READ from and whether it fell back to the
-// legacy ~/.ghx-sidecar location. GHX_HOME (explicit override) and an existing
-// ~/.ghx both win; only when neither exists and the legacy dir is present do we
-// fall back to it so a pre-migration user keeps seeing their sessions.
-func activeRoot() (dir string, legacy bool) {
-	root := newRoot()
-	if strings.TrimSpace(os.Getenv("GHX_HOME")) != "" {
-		return root, false
-	}
-	if _, err := os.Stat(root); err == nil {
-		return root, false
-	}
-	if _, err := os.Stat(legacyRoot()); err == nil {
-		return legacyRoot(), true
-	}
-	return root, false
-}
-
-var migrationNoticeOnce sync.Once
-
-// noteMigration prints a one-line migration notice to stderr, at most once per
-// process, when config is being read from the legacy location (ADR-0022 D3).
-func noteMigration(root string) {
-	migrationNoticeOnce.Do(func() {
-		fmt.Fprintf(os.Stderr,
-			"note: reading legacy config from %s — run `ghx sidecar config init` to migrate to %s\n",
-			root, newRoot())
-	})
 }
 
 // VisibilityConfig controls the shared visibility runtime (ADR-0022 D4).
@@ -122,29 +86,19 @@ func defaultConfig(root string) Config {
 	}
 }
 
-// NewDefaultConfig returns the default config rooted at the new ~/.ghx (or
-// $GHX_HOME) root. `config init` uses this so migration always writes the new
-// location (ADR-0022 D3).
-func NewDefaultConfig() Config { return defaultConfig(newRoot()) }
+// NewDefaultConfig returns the default config rooted at ~/.ghx (or $GHX_HOME).
+func NewDefaultConfig() Config { return defaultConfig(rootDir()) }
 
 // configFilePath returns the path to the JSON config file under root.
 func configFilePath(root string) string { return filepath.Join(root, "config.json") }
 
-// ConfigFilePath returns the config file path currently in effect (the active
-// read root), for display.
-func ConfigFilePath() string {
-	root, _ := activeRoot()
-	return configFilePath(root)
-}
+// ConfigFilePath returns the config file path in effect, for display.
+func ConfigFilePath() string { return configFilePath(rootDir()) }
 
-// LoadConfig reads the config file, falling back to defaults on any error.
-// It reads from ~/.ghx (or $GHX_HOME), or the legacy ~/.ghx-sidecar location
-// when that is the only one present (printing a one-line migration notice).
+// LoadConfig reads the config file from ~/.ghx (or $GHX_HOME), falling back to
+// defaults on any error.
 func LoadConfig() Config {
-	root, legacy := activeRoot()
-	if legacy {
-		noteMigration(root)
-	}
+	root := rootDir()
 	def := defaultConfig(root)
 	data, err := os.ReadFile(configFilePath(root))
 	if err != nil {
@@ -163,13 +117,11 @@ func LoadConfig() Config {
 	return c
 }
 
-// ConfigFileExists reports whether a config file already exists at the active
-// read root (including the legacy ~/.ghx-sidecar location), returning its
-// path. `config init --claude-acp` uses it to refuse overwriting an existing
-// config without --force.
+// ConfigFileExists reports whether a config file already exists at the root,
+// returning its path. `config init --claude-acp` uses it to refuse overwriting
+// an existing config without --force.
 func ConfigFileExists() (path string, exists bool) {
-	root, _ := activeRoot()
-	path = configFilePath(root)
+	path = configFilePath(rootDir())
 	_, err := os.Stat(path)
 	return path, err == nil
 }
@@ -200,10 +152,10 @@ func formatBoolPtr(b *bool) string {
 	return fmt.Sprintf("%t", *b)
 }
 
-// SaveConfig writes cfg to the new root (~/.ghx or $GHX_HOME), creating the
-// directory if needed. It never writes the legacy location.
+// SaveConfig writes cfg to the root (~/.ghx or $GHX_HOME), creating the
+// directory if needed.
 func SaveConfig(cfg Config) error {
-	root := newRoot()
+	root := rootDir()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", root, err)
 	}

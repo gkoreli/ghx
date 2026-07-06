@@ -244,9 +244,8 @@ func runSidecarConfigInit(claudeACP, force bool) error {
 		return fmt.Errorf("no ACP-compatible agents found on PATH (tried: claude, codex, kiro); " +
 			"run `ghx sidecar config init --claude-acp` to configure the pinned Claude ACP adapter (needs Node/npx)")
 	}
-	// Always write the new ~/.ghx root (ADR-0022 D3): start from the fresh
-	// default rooted there and carry over any existing model/visibility, so
-	// init migrates a legacy config to the new location instead of pinning it.
+	// Start from the fresh default config (rooted at ~/.ghx or $GHX_HOME,
+	// ADR-0022 D3) and carry over any existing model/visibility settings.
 	existing := sidecar.LoadConfig()
 	cfg := sidecar.NewDefaultConfig()
 	cfg.Model = existing.Model
