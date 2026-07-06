@@ -84,15 +84,20 @@ func (t Task) Validate() error {
 
 // TurnRecord captures what happened during one episode turn.
 type TurnRecord struct {
-	Turn      int      `json:"turn"`
-	Question  string   `json:"question"`
-	Text      string   `json:"text"`
+	Turn     int    `json:"turn"`
+	Question string `json:"question"`
+	Text     string `json:"text"`
+	// Thinking captures ACP agent_thought_chunk reasoning for this turn.
+	Thinking  string   `json:"thinking,omitempty"`
 	ToolCalls []string `json:"toolCalls"`
 	// ToolTraces carries full ACP tool-call audit data for this turn.
 	ToolTraces []ToolCallTrace `json:"toolTraces,omitempty"`
 	// ReplayedText is message text replayed before this turn's prompt was sent.
 	// It is audit-only and excluded from turn output/accounting.
 	ReplayedText string `json:"replayedText,omitempty"`
+	// ReplayedThinking is reasoning replayed before this turn's prompt was sent.
+	// It is audit-only and excluded from live turn telemetry.
+	ReplayedThinking string `json:"replayedThinking,omitempty"`
 	// ReplayedToolTraces carries ACP tool-call history replayed before this
 	// turn's prompt was sent. It is excluded from actions, observations,
 	// memory/repeat-read scoring, ledger derivation, and char accounting.

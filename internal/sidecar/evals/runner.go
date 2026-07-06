@@ -89,7 +89,9 @@ func runSidecarEpisode(ctx context.Context, cfg RunConfig, task Task, ep *Episod
 		}
 
 		rec.Text = turn.FullText
+		rec.Thinking = turn.Thinking
 		rec.ReplayedText = turn.ReplayedText
+		rec.ReplayedThinking = turn.ReplayedThinking
 		rec.ToolCalls = turn.ToolCalls
 		rec.ToolOutputChars = turn.ToolOutputChars
 		rec.ReportRetried = turn.ReportRetried

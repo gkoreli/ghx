@@ -155,6 +155,15 @@ func messageNotification(text string) acp.SessionNotification {
 	}
 }
 
+func thoughtNotification(text string) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{Content: acp.TextBlock(text)},
+		},
+	}
+}
+
 func TestReplayBeforePromptIsAuditOnly(t *testing.T) {
 	result := TurnResult{}
 	c := &denyClient{result: &result}
@@ -169,6 +178,9 @@ func TestReplayBeforePromptIsAuditOnly(t *testing.T) {
 	if err := c.SessionUpdate(context.Background(), messageNotification("replayed answer")); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.SessionUpdate(context.Background(), thoughtNotification("replayed thinking")); err != nil {
+		t.Fatal(err)
+	}
 
 	c.promptSent = true
 	if err := c.SessionUpdate(context.Background(), toolCallNotification("live-1", "ghx read o/r src/new.ts", acp.ToolCallStatusPending)); err != nil {
@@ -178,6 +190,9 @@ func TestReplayBeforePromptIsAuditOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := c.SessionUpdate(context.Background(), messageNotification("live answer")); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SessionUpdate(context.Background(), thoughtNotification("live thinking")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,6 +207,12 @@ func TestReplayBeforePromptIsAuditOnly(t *testing.T) {
 	}
 	if result.ReplayedText != "replayed answer" {
 		t.Fatalf("ReplayedText = %q, want replayed answer", result.ReplayedText)
+	}
+	if result.Thinking != "live thinking" {
+		t.Fatalf("Thinking = %q, want live thinking", result.Thinking)
+	}
+	if result.ReplayedThinking != "replayed thinking" {
+		t.Fatalf("ReplayedThinking = %q, want replayed thinking", result.ReplayedThinking)
 	}
 	if result.ToolOutputChars != len("live output") {
 		t.Fatalf("ToolOutputChars = %d, want %d", result.ToolOutputChars, len("live output"))

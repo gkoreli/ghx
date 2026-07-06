@@ -11,4 +11,5 @@
 #   ./internal/sidecar/evals -tags=agent_e2e -run TestEpisodes
 export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
 export GHX_EVAL_SUBJECT_MODEL="${GHX_EVAL_SUBJECT_MODEL:-$ANTHROPIC_MODEL}"
+export MAX_THINKING_TOKENS="${MAX_THINKING_TOKENS:-4096}"
 exec npx -y @agentclientprotocol/claude-agent-acp@0.55.0 "$@"
