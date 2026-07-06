@@ -84,3 +84,9 @@ config and let the recon skill do the talking._
 - Ground: the runtime resumed the persisted ACP session ID from meta.json; the adapter answered `Resource not found` (-32002) and the whole ask failed. A LoadSession miss must fall back to a fresh ACP session (the ledger already carries cross-turn context) — resume is an optimization, never a hard dependency (ADR-0027 spirit).
 - Trace: ~/.ghx/sessions/gin-gonic-gin/ (meta.json holds the dead session ID).
 - Disposition: fixed aeb86c3 — on LoadSession Resource-not-found (-32002), `Ask` now creates exactly one fresh ACP session, continues the turn with the named-session ledger prompt, persists the new ACP session ID, and records the soft downgrade as `SessionRecreated` plus a `sidecar.session.recreated` session log entry.
+
+## 2026-07-06 baseline-reuse refusal is silent and falls back to the expensive path — soft
+- Attempted: first live reuse run (`GHX_EVAL_BASELINE_REUSE_RUN_DIR` at the fixbatch run) to measure the ADR-0029 persona with reused baselines.
+- Ground: eligibility refused (reason not surfaced anywhere — manifest has no baselineReuse block, no log line) and the runner silently ran fresh plain+ghx+sidecar — the 3x-more-expensive shape the caller explicitly tried to avoid. Refusal must print WHICH check failed and require explicit opt-in before fresh-baseline fallback.
+- Trace: internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07-06-persona-reuse/ (quarantined diagnostic round, 18 eps, not a verdict).
+- Disposition: open — diagnose eligibility failure (suspect: prior-run mapengine trial count 7>5 from top-ups, or relative run-dir path handling) + make refusal loud.
