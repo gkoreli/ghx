@@ -71,7 +71,7 @@ func TestUnionScoringDedupesAcrossTurns(t *testing.T) {
 	turn1 := &sidecar.Report{
 		Answer: "Middleware composes in compose.ts.", // repeated answer
 		Verified: []sidecar.Claim{
-			repeated, // duplicate across turns → deduped
+			repeated,                            // duplicate across turns → deduped
 			{Summary: "onError catches throws"}, // new, no evidence
 		},
 		CommandsRun: []string{"ghx read honojs/hono src/compose.ts"}, // duplicate
