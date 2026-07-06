@@ -53,7 +53,7 @@ func TestBuildPromptFirstTurn(t *testing.T) {
 		"honojs/hono",
 		"hono-middleware",
 		"Where is middleware composition implemented?",
-		"normal",  // default depth
+		"normal",   // default depth
 		"- remote", // default backend
 	} {
 		if !strings.Contains(p, want) {
