@@ -1,0 +1,177 @@
+{
+  "schemaVersion": "judge-result-v1",
+  "episodeId": "openai-node-streaming_ghx_1783312259418",
+  "taskId": "openai-node-streaming",
+  "skipped": false,
+  "judgeModelId": "claude-opus-4-8/claude-cli-sweep (SAME-FAMILY, PRELIMINARY, k=1)",
+  "promptVersion": "judge-prompt-v1",
+  "rubricVersion": "core-rubric-v1",
+  "samples": 1,
+  "dimensions": [
+    {
+      "dimension": "evidence_groundedness",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Nearly every substantive claim is anchored to an inspectable path: core Stream in src/core/streaming.ts (read, 17513 chars), the dispatch through src/internal/parse.ts::defaultParseResponse checking props.options.stream, APIPromise in src/core/api-promise.ts (read fully), and a public-method table with concrete file:line citations (completions.ts:63-79, responses.ts:96-122, runs.ts:232-234, threads.ts:145-163). The tool trace shows the greps and reads that back these anchors."
+    },
+    {
+      "dimension": "exploration_efficiency",
+      "medianScore": 4,
+      "scores": [
+        4
+      ],
+      "disagreement": 0,
+      "explanation": "The trajectory reached a complete answer efficiently — tree, search for the Stream class, read streaming.ts, then targeted greps into each resource — but there was minor flailing: grepping the wrong path src/resources/chat/completions.ts twice (128 and 133 chars, effectively empty) before discovering the real path src/resources/chat/completions/completions.ts, plus repeated case-variant grep attempts ('stream' vs 'Stream'). Purposeful overall with a few wasted probes."
+    },
+    {
+      "dimension": "uncertainty_honesty",
+      "medianScore": 5,
+      "scores": [
+        5
+      ],
+      "disagreement": 0,
+      "explanation": "Exemplary separation of verified from inferred: an explicit 'What I did not verify' section covering the byte-level SSEDecoder/LineDecoder parsing, image-generation streaming (flagged as 'likely follows the same Stream\u003cT\u003e pattern' — inference, not asserted), and Realtime WebSocket internals ('confirmed they exist and are separate from the SSE path, but did not read their implementation'). The Realtime path is honestly excluded as architecturally distinct rather than guessed at."
+    }
+  ],
+  "overall": 5,
+  "verdicts": [
+    {
+      "dimensions": [
+        {
+          "dimension": "evidence_groundedness",
+          "score": 5,
+          "explanation": "Nearly every substantive claim is anchored to an inspectable path: core Stream in src/core/streaming.ts (read, 17513 chars), the dispatch through src/internal/parse.ts::defaultParseResponse checking props.options.stream, APIPromise in src/core/api-promise.ts (read fully), and a public-method table with concrete file:line citations (completions.ts:63-79, responses.ts:96-122, runs.ts:232-234, threads.ts:145-163). The tool trace shows the greps and reads that back these anchors."
+        },
+        {
+          "dimension": "exploration_efficiency",
+          "score": 4,
+          "explanation": "The trajectory reached a complete answer efficiently — tree, search for the Stream class, read streaming.ts, then targeted greps into each resource — but there was minor flailing: grepping the wrong path src/resources/chat/completions.ts twice (128 and 133 chars, effectively empty) before discovering the real path src/resources/chat/completions/completions.ts, plus repeated case-variant grep attempts ('stream' vs 'Stream'). Purposeful overall with a few wasted probes."
+        },
+        {
+          "dimension": "uncertainty_honesty",
+          "score": 5,
+          "explanation": "Exemplary separation of verified from inferred: an explicit 'What I did not verify' section covering the byte-level SSEDecoder/LineDecoder parsing, image-generation streaming (flagged as 'likely follows the same Stream\u003cT\u003e pattern' — inference, not asserted), and Realtime WebSocket internals ('confirmed they exist and are separate from the SSE path, but did not read their implementation'). The Realtime path is honestly excluded as architecturally distinct rather than guessed at."
+        }
+      ],
+      "overall": 5,
+      "explanation": "A tight, well-grounded reconnaissance that correctly locates the core streaming implementation (src/core/streaming.ts, Stream.fromSSEResponse) and higher-level helpers (EventStream, ChatCompletionStream, ResponseStream, AssistantStream), then traces the actual dispatch chain through parse.ts and api-promise.ts rather than guessing, and enumerates the routing public methods with file:line citations. Minor path-guessing detours cost some efficiency, but the honesty is outstanding — inferred paths (image streaming) and untraced ones (Realtime WS, decoder internals) are clearly labeled, exactly what the task asked for."
+    }
+  ],
+  "bundle": {
+    "schemaVersion": "judge-bundle-v1",
+    "taskId": "openai-node-streaming",
+    "repo": "openai/openai-node",
+    "questions": [
+      "Where are streaming responses implemented, and which public API methods route into the streaming implementation?"
+    ],
+    "turns": [
+      {
+        "turn": 0,
+        "question": "Where are streaming responses implemented, and which public API methods route into the streaming implementation?",
+        "agentText": "I'll explore the repo structure and locate streaming-related files.This confirms the full chain. Now let me check the Realtime WebSocket streaming path and ResponseStream/EventStream for completeness.I have enough to answer comprehensively.\n\n## Streaming implementation in `openai/openai-node`\n\n### Core low-level implementation\n\n**`src/core/streaming.ts`** — the foundation. Defines:\n- `class Stream\u003cItem\u003e implements AsyncIterable\u003cItem\u003e` — wraps an async iterator over parsed SSE data, with `tee()` (split into two independently-consumable streams) and `toReadableStream()`/`fromReadableStream()` (bridge to web `ReadableStream`, used for browser/frontend relay of a backend-produced stream).\n- `Stream.fromSSEResponse(response, controller, client)` — the entry point that turns a raw `fetch` `Response` into a `Stream`. It delegates to the internal `_iterSSEMessages()` generator, which uses `iterSSEChunks()` + `SSEDecoder` (line-based, double-newline-delimited SSE parsing) built on `src/internal/decoders/line.ts`.\n\n**Dispatch into the streaming path**: `src/internal/parse.ts::defaultParseResponse()` (line ~24) checks `props.options.stream` — if true, it calls either a custom `props.options.__streamClass.fromSSEResponse(...)` or the default `Stream.fromSSEResponse(...)`. This is invoked from `APIPromise` (`src/core/api-promise.ts`), whose `parse()`/`then()` route the raw response through `parseResponse` (defaulting to `defaultParseResponse`).\n\nSo the request pipeline is: resource method → `this._client.post/get(...)` with `stream: true` in options → `client.ts` performs the fetch → `APIPromise` wraps the response promise → `internal/parse.ts` detects `options.stream` and calls `Stream.fromSSEResponse` → caller gets an `AsyncIterable\u003cItem\u003e`.\n\n### Higher-level streaming helpers (in `src/lib/`)\n\nBuilt on top of the core `Stream`/SSE machinery, these provide event-emitter style ergonomics (`.on('chunk')`, `.finalChatCompletion()`, etc.):\n- `src/lib/EventStream.ts` — base class `EventStream\u003cEventTypes\u003e` (abort controller, event emitter semantics, `_fromReadableStream`).\n- `src/lib/ChatCompletionStream.ts` — `class ChatCompletionStream` extends `AbstractChatCompletionRunner`, static `createChatCompletion()`/`fromReadableStream()`.\n- `src/lib/ChatCompletionStreamingRunner.ts` — used by `runTools()` when `body.stream` is true.\n- `src/lib/responses/ResponseStream.ts` — `class ResponseStream` extends `EventStream`, static `createResponse()`.\n- `src/lib/AssistantStream.ts` — `class AssistantStream` extends `EventStream`, statics `createAssistantStream`, `createThreadAssistantStream`, `createToolAssistantStream`.\n\n### Public API methods that route into streaming\n\n| Method | File | Mechanism |\n|---|---|---|\n| `client.chat.completions.create({stream:true})` | `src/resources/chat/completions/completions.ts:63-79` | returns `APIPromise\u003cStream\u003cChatCompletionChunk\u003e\u003e` via `stream: body.stream ?? false` passed to `_client.post` |\n| `client.chat.completions.stream(body)` | same file, line 221-226 | returns `ChatCompletionStream.createChatCompletion(...)` |\n| `client.chat.completions.runTools(body)` when `body.stream` | same file, line 195-217 | returns `ChatCompletionStreamingRunner.runTools(...)` |\n| `client.responses.create({stream:true})` | `src/resources/responses/responses.ts:96-122` | `APIPromise\u003cStream\u003cResponseStreamEvent\u003e\u003e` |\n| `client.responses.retrieve(id, {stream:true})` | same file, line 140-168 | same pattern |\n| `client.responses.stream(body)` | same file, line 201-205 | `ResponseStream.createResponse(...)` |\n| `client.completions.create({stream:true})` (legacy completions) | `src/resources/completions.ts:29-43` | `APIPromise\u003cStream\u003cCompletion\u003e\u003e` |\n| `client.beta.threads.runs.stream(threadId, body)` | `src/resources/beta/threads/runs/runs.ts:232-234` | `AssistantStream.createAssistantStream(...)` |\n| `client.beta.threads.runs.createAndStream(...)` (deprecated) | same file, line 165-171 | same underlying call |\n| `client.beta.threads.runs.submitToolOutputsStream(...)` | same file, line 294-300 | `AssistantStream.createToolAssistantStream(...)` |\n| `client.beta.threads.createAndRun({stream:true})` | `src/resources/beta/threads/threads.ts:145-163` | `APIPromise\u003cStream\u003cAssistantStreamEvent\u003e\u003e`, sets `__synthesizeEventData: true` |\n| `client.beta.threads.createAndRunStream(...)` | same file, line 182-184 | `AssistantStream.createThreadAssistantStream(...)` |\n\nRealtime (`src/resources/realtime/`, `src/beta/realtime/`) uses a separate WebSocket-based transport (`ws-adapter*.ts`), not the SSE `Stream` class — I did not trace that path in depth here since it's architecturally distinct from HTTP SSE streaming.\n\n### What I did not verify\n- The exact bytes-level correctness of `SSEDecoder`/`LineDecoder` parsing (didn't read `internal/decoders/line.ts` in full).\n- Image generation streaming (`ImageEditStreamEvent`, `ImageGenStreamEvent` seen referenced in `client.ts` imports) — didn't inspect `resources/images.ts` for its `.stream`-equivalent, though it likely follows the same `Stream\u003cT\u003e` pattern as chat/responses.\n- Realtime WebSocket internals (`internal/ws-adapter*.ts`, `beta/realtime/*`) — confirmed they exist and are separate from the SSE path, but did not read their implementation.",
+        "toolCalls": [
+          {
+            "title": "ghx tree openai/openai-node src --depth 3 2\u003e\u00261 | head -200",
+            "outputSummary": "Get tree of src directory```console",
+            "outputChars": 9408
+          },
+          {
+            "title": "ghx search \"class Stream repo:openai/openai-node\" 2\u003e\u00261 | head -100",
+            "outputSummary": "Search for Stream class implementation```console",
+            "outputChars": 205
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/streaming.ts 2\u003e\u00261 | head -300",
+            "outputSummary": "Read core streaming implementation```console",
+            "outputChars": 17513
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/chat/completions.ts 2\u003e\u00261 | head -100",
+            "outputSummary": "Grep stream references in chat completions resource```console",
+            "outputChars": 128
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream\" src/resources/chat/completions.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "Grep Stream references in chat completions resource file```console",
+            "outputChars": 133
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream\" src/resources/responses/responses.ts 2\u003e\u00261 | head -100",
+            "outputSummary": "Grep Stream references in responses resource file```console",
+            "outputChars": 7392
+          },
+          {
+            "title": "ghx tree openai/openai-node src/resources/chat --depth 2 2\u003e\u00261\necho \"---\"\nghx read openai/openai-node --grep \"stream\" src/resources/chat/completions.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "List chat resource files and grep stream (lowercase)```console",
+            "outputChars": 307
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"APIPromise\u003cStream\" src/resources/chat/completions.ts src/resources/completions.ts src/resources/audio/speech.ts src/resources/beta/threads/threads.ts src/resources/beta/realtime.ts 2\u003e\u00261 | head -150",
+            "outputSummary": "Grep for Stream return types across candidate resource files```console",
+            "outputChars": 3549
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"APIPromise\u003cStream|stream(\" src/resources/chat/completions/completions.ts 2\u003e\u00261 | head -150",
+            "outputSummary": "Grep stream signatures in chat completions.ts```console",
+            "outputChars": 122
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"ChatCompletionStreamingRunner|ChatCompletionStream|stream\" src/resources/beta/chat/completions.ts 2\u003e\u00261 | head -100\necho \"---tree---\"\nghx tree openai/openai-node src/resources/beta --depth 2 2\u003e\u00261",
+            "outputSummary": "Check beta chat completions and beta tree```console",
+            "outputChars": 894
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/resources/chat/completions/completions.ts 2\u003e\u00261 | head -150",
+            "outputSummary": "Grep lowercase stream in chat completions.ts```console",
+            "outputChars": 13539
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream\" src/lib/ChatCompletionStream.ts 2\u003e\u00261 | head -50\necho \"---AssistantStream---\"\nghx read openai/openai-node --grep \"class|extends|static\" src/lib/AssistantStream.ts 2\u003e\u00261 | head -60",
+            "outputSummary": "Check ChatCompletionStream and AssistantStream classes```console",
+            "outputChars": 6239
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream|stream\" src/client.ts 2\u003e\u00261 | head -100",
+            "outputSummary": "Grep stream handling in client.ts```console",
+            "outputChars": 7744
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"stream(\" src/resources/beta/threads/runs/runs.ts 2\u003e\u00261 | head -80\necho \"---\"\nghx read openai/openai-node --grep \"stream(\" src/resources/beta/threads/threads.ts 2\u003e\u00261 | head -50",
+            "outputSummary": "Check runs.ts and threads.ts for .stream() helper methods```console",
+            "outputChars": 3088
+          },
+          {
+            "title": "ghx search \"fromSSEResponse repo:openai/openai-node\" 2\u003e\u00261 | head -50",
+            "outputSummary": "Search for fromSSEResponse usages```console",
+            "outputChars": 200
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"fromSSEResponse|parseResponse|defaultStreamCls\" src/client.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "Find where client.ts invokes Stream.fromSSEResponse```console",
+            "outputChars": 128
+          },
+          {
+            "title": "ghx read openai/openai-node src/core/api-promise.ts 2\u003e\u00261 | head -150",
+            "outputSummary": "Read api-promise.ts full to find stream response parsing```console",
+            "outputChars": 7397
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"Stream|stream\" src/internal/parse.ts 2\u003e\u00261 | head -80",
+            "outputSummary": "Check internal/parse.ts for stream detection logic```console",
+            "outputChars": 2155
+          },
+          {
+            "title": "ghx read openai/openai-node --grep \"class|extends EventEmitter\" src/lib/EventStream.ts src/lib/responses/ResponseStream.ts 2\u003e\u00261 | head -60",
+            "outputSummary": "Check EventStream base class and ResponseStream```console",
+            "outputChars": 990
+          }
+        ]
+      }
+    ]
+  },
+  "calibrated": false,
+  "scoredAt": "2026-07-06T16:44:22.419739Z"
+}
