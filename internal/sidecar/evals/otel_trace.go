@@ -40,9 +40,12 @@ func EmitEpisodeTraces(ctx context.Context, runDir string, ep *Episode) error {
 	}()
 
 	tracer := tp.Tracer(tracerName, trace.WithInstrumentationVersion(otelSemconvVersion))
-	emitEpisodeSpans(ctx, tracer, ep)
+	logs := emitEpisodeSpans(ctx, tracer, ep)
 	if err := tp.ForceFlush(ctx); err != nil {
 		return fmt.Errorf("flush episode traces: %w", err)
+	}
+	if err := writeOTLPJSONLogs(runDir, ep, logs); err != nil {
+		return err
 	}
 	return nil
 }
@@ -83,7 +86,8 @@ func resourceAttributes(runDir string, ep *Episode) []attribute.KeyValue {
 	}
 }
 
-func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) {
+func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) []episodeLogRecord {
+	var logs []episodeLogRecord
 	start := nonZeroTime(ep.StartedAt, time.Now().UTC())
 	end := nonZeroTime(ep.EndedAt, start)
 	episodeCtx, episodeSpan := tracer.Start(ctx, "eval.episode",
@@ -93,7 +97,7 @@ func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) {
 	)
 
 	for _, turn := range ep.Turns {
-		emitTurnSpan(episodeCtx, tracer, ep, turn)
+		logs = append(logs, emitTurnSpan(episodeCtx, tracer, ep, turn)...)
 	}
 	for _, anomaly := range ep.Anomalies {
 		episodeSpan.AddEvent("ghx.eval.anomaly",
@@ -110,9 +114,10 @@ func emitEpisodeSpans(ctx context.Context, tracer trace.Tracer, ep *Episode) {
 		episodeSpan.SetAttributes(attribute.Bool("ghx.eval.invalid", true))
 	}
 	episodeSpan.End(trace.WithTimestamp(end))
+	return logs
 }
 
-func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn TurnRecord) {
+func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn TurnRecord) []episodeLogRecord {
 	start := turnStart(ep, turn)
 	end := start.Add(time.Duration(turn.DurationMs) * time.Millisecond)
 	turnCtx, span := tracer.Start(parent, "eval.turn",
@@ -127,7 +132,9 @@ func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn
 	for _, tool := range turn.ToolTraces {
 		emitToolSpan(turnCtx, tracer, turn, tool)
 	}
+	logs := turnContentLogs(span.SpanContext(), ep, turn, start)
 	span.End(trace.WithTimestamp(nonZeroTime(end, start)))
+	return logs
 }
 
 func emitToolSpan(parent context.Context, tracer trace.Tracer, turn TurnRecord, tool ToolCallTrace) {

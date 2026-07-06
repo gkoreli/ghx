@@ -25,6 +25,8 @@ import (
 // access; the test skips with a preflight diagnostic when the environment
 // is not ready, and fails when the agent itself cannot complete an episode.
 func TestEpisodes(t *testing.T) {
+	t.Setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
+
 	pf := sidecar.RunPreflight(context.Background())
 	if !pf.Passed {
 		t.Skipf("preflight failed — environment not ready for live episodes:\n%s", sidecar.FormatPreflight(pf))

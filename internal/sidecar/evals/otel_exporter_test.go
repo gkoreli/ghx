@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -28,6 +30,51 @@ type exportedSpan struct {
 	SpanID       string `json:"spanId"`
 	ParentSpanID string `json:"parentSpanId"`
 	Name         string `json:"name"`
+}
+
+type exportedLogRecord struct {
+	TraceID    string `json:"traceId"`
+	SpanID     string `json:"spanId"`
+	EventName  string `json:"eventName"`
+	Attributes []struct {
+		Key   string `json:"key"`
+		Value struct {
+			StringValue string `json:"stringValue"`
+		} `json:"value"`
+	} `json:"attributes"`
+}
+
+func readExportedLogs(t *testing.T, runDir string) (lines int, logs []exportedLogRecord) {
+	t.Helper()
+	f, err := os.Open(filepath.Join(runDir, logFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines++
+		var ld struct {
+			ResourceLogs []struct {
+				ScopeLogs []struct {
+					LogRecords []exportedLogRecord `json:"logRecords"`
+				} `json:"scopeLogs"`
+			} `json:"resourceLogs"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &ld); err != nil {
+			t.Fatalf("line %d is not OTLP LogsData JSON: %v", lines, err)
+		}
+		for _, rl := range ld.ResourceLogs {
+			for _, sl := range rl.ScopeLogs {
+				logs = append(logs, sl.LogRecords...)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return lines, logs
 }
 
 func readExportedSpans(t *testing.T, runDir string) (lines int, spans []exportedSpan) {
@@ -144,4 +191,63 @@ func TestOTLPJSONFileExporterEmitsSpecHexIDs(t *testing.T) {
 	if c.TraceID != p.TraceID {
 		t.Errorf("child traceId = %q, want parent traceId %q", c.TraceID, p.TraceID)
 	}
+}
+
+func TestOTLPJSONLogsExporterEmitsSpecHexIDsAndGenAIContent(t *testing.T) {
+	t.Setenv(genAICaptureMessageContentEnv, "true")
+	runDir := t.TempDir()
+	ep := &Episode{
+		ID:      "ep-logs",
+		TaskID:  "task-logs",
+		Repo:    "owner/repo",
+		Profile: ProfileGhx,
+		Turns: []TurnRecord{{
+			Turn:     0,
+			Question: "Where is routing configured?",
+			Text:     "Routing lives in router.go.",
+			Thinking: "Need to inspect route files.",
+		}},
+		Identity:  AgentIdentity{SubjectModel: "test-model"},
+		StartedAt: timeNowUTC(),
+	}
+	ep.EndedAt = ep.StartedAt.Add(10)
+
+	if err := EmitEpisodeTraces(context.Background(), runDir, ep); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, logs := readExportedLogs(t, runDir)
+	if lines != 1 {
+		t.Fatalf("log lines = %d, want 1", lines)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("log records = %d, want 1", len(logs))
+	}
+	log := logs[0]
+	if log.EventName != genAIInferenceOperationDetailsEvent {
+		t.Fatalf("eventName = %q, want %q", log.EventName, genAIInferenceOperationDetailsEvent)
+	}
+	if !hexTraceIDRE.MatchString(log.TraceID) {
+		t.Errorf("log traceId = %q, want 32-char lowercase hex", log.TraceID)
+	}
+	if !hexSpanIDRE.MatchString(log.SpanID) {
+		t.Errorf("log spanId = %q, want 16-char lowercase hex", log.SpanID)
+	}
+	attrs := map[string]string{}
+	for _, attr := range log.Attributes {
+		attrs[attr.Key] = attr.Value.StringValue
+	}
+	if attrs[genAIInputMessagesAttribute] == "" {
+		t.Fatalf("missing %s attribute", genAIInputMessagesAttribute)
+	}
+	if attrs[genAIOutputMessagesAttribute] == "" {
+		t.Fatalf("missing %s attribute", genAIOutputMessagesAttribute)
+	}
+	if !strings.Contains(attrs[genAIOutputMessagesAttribute], `"type":"reasoning"`) {
+		t.Fatalf("output messages do not include reasoning part: %s", attrs[genAIOutputMessagesAttribute])
+	}
+}
+
+func timeNowUTC() time.Time {
+	return time.Now().UTC()
 }
