@@ -50,13 +50,16 @@ type SessionOptions struct {
 	// Maps to depth budget (see DepthBudget). Nil means adapter default.
 	MaxTurns *int `json:"maxTurns,omitempty"`
 
-	// Thinking configures the extended thinking budget. Nil means adapter
-	// default; 0 disables thinking; >0 enables it with that token budget.
-	// Maps to depth budget (see DepthBudget).
-	Thinking *int `json:"thinking,omitempty"`
+	// Thinking configures extended thinking. The SDK's ThinkingConfig is an
+	// object — {"type":"disabled"} or {"type":"enabled","budgetTokens":N} —
+	// never a bare number (claude-agent-sdk sdk.d.ts; the adapter's own
+	// resolveThinkingConfig builds exactly these shapes from
+	// MAX_THINKING_TOKENS). Nil means adapter default.
+	Thinking *ThinkingConfig `json:"thinking,omitempty"`
 
-	// Effort is the model's internal effort/compute level. Accepted values
-	// from the adapter: "low", "normal", "high". Maps to depth budget.
+	// Effort is the model's effort/compute level. SDK enum:
+	// "low" | "medium" | "high" | "xhigh" | "max" (sdk.d.ts — there is no
+	// "normal"). Maps to depth budget.
 	Effort string `json:"effort,omitempty"`
 
 	// Model pins the subject model for this session. Empty means adapter
@@ -64,10 +67,27 @@ type SessionOptions struct {
 	// wrong-model failure mode is structurally impossible (ADR-0020.1 D4).
 	Model string `json:"model,omitempty"`
 
-	// EmitRawSDKMessages enables the _claude/sdkMessage notification firehose
-	// (adapter-specific audit channel). Set true only when running under evals;
-	// off by default in production (ADR-0020.1 D5).
-	EmitRawSDKMessages bool `json:"emitRawSDKMessages,omitempty"`
+	// NOTE: emitRawSDKMessages is deliberately NOT part of this struct. The
+	// adapter reads it from _meta.claudeCode.emitRawSDKMessages — a sibling
+	// of "options", not inside it (acp-agent.js:
+	// `emitRawSDKMessages: sessionMeta?.claudeCode?.emitRawSDKMessages ?? false`).
+	// BuildSessionMeta places it there.
+}
+
+// ThinkingConfig mirrors the claude-agent-sdk ThinkingConfig union:
+// {"type":"disabled"} | {"type":"enabled","budgetTokens":N} | {"type":"adaptive"}.
+type ThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budgetTokens,omitempty"`
+}
+
+// thinkingConfigForBudget converts a token budget into the SDK object shape:
+// 0 disables thinking, >0 enables it with that budget.
+func thinkingConfigForBudget(tokens int) *ThinkingConfig {
+	if tokens == 0 {
+		return &ThinkingConfig{Type: "disabled"}
+	}
+	return &ThinkingConfig{Type: "enabled", BudgetTokens: tokens}
 }
 
 // depthBudget is one row of the depth→budget mapping table (ADR-0020.1 D3).
@@ -80,7 +100,7 @@ type SessionOptions struct {
 //     keep latency low.
 //
 //   - normal (default): the current sidecar contract of ~8 commands. MaxTurns=8
-//     matches the existing honor-system budget. Effort="normal". Thinking
+//     matches the existing honor-system budget. Effort="medium". Thinking
 //     enabled at 2048 tokens — enough for a reasoning step without ballooning
 //     cost; keeps the existing adapter default behaviour roughly intact.
 //
@@ -101,8 +121,8 @@ func intPtr(n int) *int { return &n }
 var depthBudgets = map[string]depthBudget{
 	// cheap: 4 turns, no thinking, low effort
 	"cheap": {maxTurns: intPtr(4), thinking: intPtr(0), effort: "low"},
-	// normal: 8 turns, 2048-token thinking, normal effort (default)
-	"normal": {maxTurns: intPtr(8), thinking: intPtr(2048), effort: "normal"},
+	// normal: 8 turns, 2048-token thinking, medium effort (default)
+	"normal": {maxTurns: intPtr(8), thinking: intPtr(2048), effort: "medium"},
 	// deep: 16 turns, 4096-token thinking, high effort
 	"deep": {maxTurns: intPtr(16), thinking: intPtr(4096), effort: "high"},
 }
@@ -139,17 +159,19 @@ func BuildSessionMeta(persona, depth, model string, emitRaw bool) map[string]any
 		StrictMcpConfig: true,
 		Tools:           sidecarToolsAllowlist,
 		MaxTurns:        budget.maxTurns,
-		Thinking:        budget.thinking,
 		Effort:          budget.effort,
 		Model:           model,
 	}
-	if emitRaw {
-		opts.EmitRawSDKMessages = true
+	if budget.thinking != nil {
+		opts.Thinking = thinkingConfigForBudget(*budget.thinking)
 	}
 
-	return map[string]any{
-		"claudeCode": map[string]any{
-			"options": opts,
-		},
+	claudeCode := map[string]any{
+		"options": opts,
 	}
+	if emitRaw {
+		// Sibling of "options", per the adapter's read path.
+		claudeCode["emitRawSDKMessages"] = true
+	}
+	return map[string]any{"claudeCode": claudeCode}
 }

@@ -18,11 +18,11 @@ import (
 //	      "strictMcpConfig": true,
 //	      "tools":           ["Bash","Read"],
 //	      "maxTurns":        <depth-dependent>,
-//	      "thinking":        <depth-dependent>,
-//	      "effort":          "<depth-dependent>",
-//	      "model":           "<model or empty>",
-//	      "emitRawSDKMessages": <eval-only>
-//	    }
+//	      "thinking":        {"type":"enabled","budgetTokens":N} | {"type":"disabled"},
+//	      "effort":          "low" | "medium" | "high",
+//	      "model":           "<model or empty>"
+//	    },
+//	    "emitRawSDKMessages": <eval-only, sibling of options>
 //	  }
 //	}
 func TestBuildSessionMetaShape(t *testing.T) {
@@ -107,15 +107,20 @@ func TestBuildSessionMetaShape(t *testing.T) {
 		t.Errorf("tools allowlist missing %q", missing)
 	}
 
-	// D3: mechanical budget fields present for "normal" depth
+	// D3: mechanical budget fields present for "normal" depth. Thinking is
+	// the SDK ThinkingConfig object shape, never a bare number.
 	if mt, _ := opts["maxTurns"].(float64); mt != 8 {
 		t.Errorf("options.maxTurns = %v for depth=normal, want 8", mt)
 	}
-	if th, _ := opts["thinking"].(float64); th != 2048 {
-		t.Errorf("options.thinking = %v for depth=normal, want 2048", th)
+	th, ok := opts["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("options.thinking must be ThinkingConfig object, got %T", opts["thinking"])
 	}
-	if eff, _ := opts["effort"].(string); eff != "normal" {
-		t.Errorf("options.effort = %q for depth=normal, want normal", eff)
+	if th["type"] != "enabled" || th["budgetTokens"] != float64(2048) {
+		t.Errorf("options.thinking = %v for depth=normal, want {enabled, 2048}", th)
+	}
+	if eff, _ := opts["effort"].(string); eff != "medium" {
+		t.Errorf("options.effort = %q for depth=normal, want medium (SDK enum has no 'normal')", eff)
 	}
 
 	// D4: model pin present
@@ -123,9 +128,13 @@ func TestBuildSessionMetaShape(t *testing.T) {
 		t.Errorf("options.model = %q, want claude-test-model", mdl)
 	}
 
-	// D5: emitRawSDKMessages absent in production mode (omitempty + false)
+	// D5: emitRawSDKMessages lives at claudeCode level (sibling of options,
+	// per the adapter's read path) and must be absent in production mode.
+	if _, present := cc["emitRawSDKMessages"]; present {
+		t.Error("claudeCode.emitRawSDKMessages must be absent in production mode (emitRaw=false)")
+	}
 	if _, present := opts["emitRawSDKMessages"]; present {
-		t.Error("options.emitRawSDKMessages must be absent in production mode (emitRaw=false)")
+		t.Error("emitRawSDKMessages must never be inside options — the adapter reads claudeCode.emitRawSDKMessages")
 	}
 }
 
@@ -141,9 +150,13 @@ func TestBuildSessionMetaEvalMode(t *testing.T) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	opts := m["claudeCode"].(map[string]any)["options"].(map[string]any)
-	if emit, _ := opts["emitRawSDKMessages"].(bool); !emit {
-		t.Error("options.emitRawSDKMessages must be true in eval mode")
+	cc := m["claudeCode"].(map[string]any)
+	if emit, _ := cc["emitRawSDKMessages"].(bool); !emit {
+		t.Error("claudeCode.emitRawSDKMessages must be true in eval mode")
+	}
+	opts := cc["options"].(map[string]any)
+	if _, present := opts["emitRawSDKMessages"]; present {
+		t.Error("emitRawSDKMessages must never be inside options — the adapter reads claudeCode.emitRawSDKMessages")
 	}
 }
 
@@ -151,20 +164,21 @@ func TestBuildSessionMetaEvalMode(t *testing.T) {
 // (ADR-0020.1 D3).
 func TestBuildSessionMetaDepthBudgets(t *testing.T) {
 	cases := []struct {
-		depth    string
-		maxTurns float64
-		thinking float64
-		effort   string
+		depth        string
+		maxTurns     float64
+		thinkingType string
+		budgetTokens float64
+		effort       string
 	}{
-		// cheap: 4 turns, no thinking, low effort
-		{"cheap", 4, 0, "low"},
-		// normal: 8 turns, 2048-token thinking, normal effort
-		{"normal", 8, 2048, "normal"},
+		// cheap: 4 turns, thinking disabled, low effort
+		{"cheap", 4, "disabled", 0, "low"},
+		// normal: 8 turns, 2048-token thinking, medium effort
+		{"normal", 8, "enabled", 2048, "medium"},
 		// deep: 16 turns, 4096-token thinking, high effort
-		{"deep", 16, 4096, "high"},
+		{"deep", 16, "enabled", 4096, "high"},
 		// unknown depth defaults to normal
-		{"", 8, 2048, "normal"},
-		{"bogus", 8, 2048, "normal"},
+		{"", 8, "enabled", 2048, "medium"},
+		{"bogus", 8, "enabled", 2048, "medium"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -182,8 +196,16 @@ func TestBuildSessionMetaDepthBudgets(t *testing.T) {
 			if mt, _ := opts["maxTurns"].(float64); mt != tc.maxTurns {
 				t.Errorf("depth=%q maxTurns=%v, want %v", tc.depth, mt, tc.maxTurns)
 			}
-			if th, _ := opts["thinking"].(float64); th != tc.thinking {
-				t.Errorf("depth=%q thinking=%v, want %v", tc.depth, th, tc.thinking)
+			th, ok := opts["thinking"].(map[string]any)
+			if !ok {
+				t.Fatalf("depth=%q thinking must be ThinkingConfig object, got %T", tc.depth, opts["thinking"])
+			}
+			if th["type"] != tc.thinkingType {
+				t.Errorf("depth=%q thinking.type=%v, want %q", tc.depth, th["type"], tc.thinkingType)
+			}
+			bt, _ := th["budgetTokens"].(float64)
+			if bt != tc.budgetTokens {
+				t.Errorf("depth=%q thinking.budgetTokens=%v, want %v", tc.depth, bt, tc.budgetTokens)
 			}
 			if eff, _ := opts["effort"].(string); eff != tc.effort {
 				t.Errorf("depth=%q effort=%q, want %q", tc.depth, eff, tc.effort)
