@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
-	"unicode/utf8"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -83,6 +81,7 @@ func (e *otlpJSONFileExporter) ExportSpans(ctx context.Context, spans []sdktrace
 	if len(data.ResourceSpans) == 0 {
 		return nil
 	}
+	sanitizeProtoStrings(data)
 	line, err := protojson.MarshalOptions{EmitUnpopulated: false}.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal OTLP trace json: %w", err)
@@ -103,25 +102,6 @@ func (e *otlpJSONFileExporter) Shutdown(ctx context.Context) error {
 	default:
 		return nil
 	}
-}
-
-// validUTF8 replaces invalid UTF-8 byte sequences with the Unicode
-// replacement rune (U+FFFD). proto3 requires string fields to be valid
-// UTF-8, so protojson.Marshal fails the ENTIRE export batch when any span
-// carries invalid bytes (e.g. binary tool output in an attribute value) —
-// observed live in spot-instrumented-2026-07-06, where one of 33 tool spans
-// was dropped from traces.jsonl by "AnyValue.string_value contains invalid
-// UTF-8". Dropping spans silently corrupts the audit surface (AGENTS.md
-// visibility/truthfulness), so every proto string field on the span path is
-// sanitized before marshal: a span with a replacement rune is faithful
-// evidence, a missing span is not. Valid strings are returned unchanged
-// (strings.ToValidUTF8 only copies on invalid input; the utf8.ValidString
-// fast path skips even that scan's allocation checks).
-func validUTF8(s string) string {
-	if utf8.ValidString(s) {
-		return s
-	}
-	return strings.ToValidUTF8(s, "�")
 }
 
 // hexEncodeSpanIDs rewrites the base64 ID strings protojson produces for

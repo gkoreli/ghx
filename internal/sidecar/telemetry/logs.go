@@ -38,6 +38,7 @@ func WriteLogs(path string, resourceAttrs []attribute.KeyValue, scopeName, scope
 			},
 		},
 	}
+	sanitizeProtoStrings(data)
 	line, err := protojson.MarshalOptions{EmitUnpopulated: false}.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal OTLP logs json: %w", err)
@@ -56,7 +57,7 @@ func WriteLogs(path string, resourceAttrs []attribute.KeyValue, scopeName, scope
 // scope is the shared instrumentation-scope shape (name + version only) used by
 // both the log and metric writers, mirroring the previous evals helper.
 func scope(name, version string) *commonpb.InstrumentationScope {
-	return &commonpb.InstrumentationScope{Name: name, Version: version}
+	return &commonpb.InstrumentationScope{Name: validUTF8(name), Version: validUTF8(version)}
 }
 
 func protoLogRecords(records []LogRecord) []*logspb.LogRecord {
@@ -71,8 +72,8 @@ func protoLogRecords(records []LogRecord) []*logspb.LogRecord {
 		out = append(out, &logspb.LogRecord{
 			TimeUnixNano:         uint64(maxInt64(0, at.UnixNano())),
 			ObservedTimeUnixNano: uint64(maxInt64(0, time.Now().UTC().UnixNano())),
-			EventName:            record.EventName,
-			Body:                 &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: record.EventName}},
+			EventName:            validUTF8(record.EventName),
+			Body:                 &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: validUTF8(record.EventName)}},
 			Attributes:           keyValues(record.Attributes),
 			TraceId:              tid[:],
 			SpanId:               sid[:],
