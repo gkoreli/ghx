@@ -192,6 +192,19 @@ wrapped `claude` that carries work credentials, point the adapter at it with
 config for you (`--claude-exe auto` resolves `claude` from your PATH; the same
 diff-and-`--force` rules apply).
 
+> **Known upstream issue (enterprise wrapper builds):** when
+> `CLAUDE_CODE_EXECUTABLE` points at a *wrapper* script/binary (e.g. a
+> corporate toolbox `claude` that resolves credentials itself), the adapter
+> can hang indefinitely at prompt time: ghx legitimately sends ACP
+> `settingSources: []` for session isolation, and some wrappers stall instead
+> of erroring when settings loading is suppressed (isolated 2026-07-06:
+> `settingSources: []` alone reproduces the hang; `strictMcpConfig` and
+> `tools` do not). Until that is fixed upstream in `claude-agent-acp`/the
+> SDK, wrap the *adapter* instead — a small script that exports your auth env
+> (Bedrock/gateway vars, or credentials from your wrapper's own export
+> command) and `exec`s `npx -y @agentclientprotocol/claude-agent-acp` — and
+> set it as `"agent"`.
+
 Embedding `env VAR=...` in the agent command makes the setting travel with the
 command itself, so it works no matter which process (CLI or resident daemon)
 spawns the agent. Exporting `CLAUDE_CODE_EXECUTABLE` in your shell also works:
