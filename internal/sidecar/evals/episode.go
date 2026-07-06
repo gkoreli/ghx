@@ -193,10 +193,13 @@ type AgentIdentity struct {
 // Episode is the durable record of one task × profile run. Serialized JSON
 // is the canonical artifact (ADR-0016: local artifacts are the source of truth).
 type Episode struct {
-	ID      string       `json:"id"`
-	TaskID  string       `json:"taskId"`
-	Repo    string       `json:"repo"`
-	Profile Profile      `json:"profile"`
+	ID      string  `json:"id"`
+	TaskID  string  `json:"taskId"`
+	Repo    string  `json:"repo"`
+	Profile Profile `json:"profile"`
+	// Checks snapshots the task's deterministic scoring contract so trace
+	// score explanations remain recomputable from the episode artifact.
+	Checks  TaskChecks   `json:"checks,omitempty"`
 	Turns   []TurnRecord `json:"turns"`
 	Actions []Action     `json:"actions,omitempty"`
 	// Observations captures bounded tool outputs; OutputSize is exact even

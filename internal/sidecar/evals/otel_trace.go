@@ -159,6 +159,8 @@ func emitRewardSpan(parent context.Context, tracer trace.Tracer, ep *Episode) {
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(rewardAttributes(ep)...),
 	)
+	span.SetAttributes(attribute.String("ghx.eval.reward.summary", rewardExplanationSummary(ep)))
+	addRewardExplanationEvents(span, ep)
 	span.End(trace.WithTimestamp(start))
 }
 
@@ -207,6 +209,9 @@ func turnAttributes(ep *Episode, turn TurnRecord) []attribute.KeyValue {
 	}
 	if turn.Error != "" {
 		attrs = append(attrs, attribute.String("error.message", boundedString(turn.Error, 512)))
+	}
+	if turn.Thinking != "" {
+		attrs = append(attrs, attribute.Int(genAIUsageReasoningOutputTokensAttr, len(turn.Thinking)))
 	}
 	return attrs
 }

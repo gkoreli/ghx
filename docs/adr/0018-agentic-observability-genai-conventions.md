@@ -1,7 +1,7 @@
 ---
 title: "ADR-0018: Agentic Observability — Official OTel GenAI Conventions, Traces, Metrics, Content"
 date: "2026-07-05"
-status: "proposed — research phase; implementation lands after the confirmatory gate run"
+status: "accepted — eval telemetry implementation landed; production-session reuse remains follow-up"
 thread: "agentic-observability"
 author: "Goga Koreli"
 ---
@@ -10,13 +10,18 @@ author: "Goga Koreli"
 
 ## Status
 
-Proposed. Opened at Goga's direction during the 2026-07-05 confirmatory
+Accepted. Opened at Goga's direction during the 2026-07-05 confirmatory
 gate run, after hand-auditing traces in a viewer exposed how far our
-emission is from full visibility. This is a new ADR thread (not 0016.x):
-observability of agentic execution is its own competence area, spans both
-evals and the production sidecar, and seeds NORTH_STAR M6 (shared SAF/SAFE
-trace infrastructure). ADR-0016.4 chose the OTLP JSON file transport; this
-thread governs *what* we emit on it.
+emission was from full visibility. The first implementation slice landed
+after the confirmatory verdict: eval episodes now emit OTLP JSON traces,
+logs, and metrics using the GenAI semantic-convention names recorded below,
+and ACP `agent_thought_chunk` reasoning is captured into episode artifacts.
+
+This remains a live ADR thread (not 0016.x): observability of agentic
+execution is its own competence area, spans both evals and the production
+sidecar, and seeds NORTH_STAR M6 (shared SAF/SAFE trace infrastructure).
+ADR-0016.4 chose the OTLP JSON file transport; this thread governs *what*
+we emit on it.
 
 ## Context: the founder hand-audit found the gaps
 
@@ -144,6 +149,51 @@ load-bearing facts, each changing part of the original proposal:
   conventions for its reasoning traces.
 - The declarative anomaly layer (ADR-0016.7 addendum) is compatible
   forward: anomaly span events fold into the conventions' event model.
+
+## Implementation notes
+
+Implemented eval/SAFE slice:
+
+- ACP capture now handles `agent_thought_chunk` in both the production
+  sidecar ACP client (`internal/sidecar/acp.go`) and the direct eval client
+  (`internal/sidecar/evals/client.go`). Reasoning is persisted additively on
+  `TurnResult.Thinking` and `TurnRecord.thinking`; replayed reasoning is
+  audit-only as `replayedThinking`.
+- `scripts/eval-agent-acp.sh` sets `MAX_THINKING_TOKENS=${MAX_THINKING_TOKENS:-4096}`
+  for the pinned `claude-agent-acp@0.55.0` adapter.
+- Content capture emits OTLP `LogsData` records into `logs.jsonl` only when
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`. The live
+  agent eval test sets this env var; normal production sidecar sessions keep
+  the default-off posture.
+- Content log records use event name
+  `gen_ai.client.inference.operation.details` and attributes
+  `gen_ai.input.messages` / `gen_ai.output.messages`. Captured thinking is
+  represented as an output part with `{"type":"reasoning"}`.
+- Metrics emit OTLP `MetricsData` into `metrics.jsonl`: official
+  `gen_ai.client.operation.duration` (`s`) and
+  `gen_ai.client.token.usage` (`{token}`, split by `gen_ai.token.type`),
+  plus `ghx.eval.reward`, `ghx.eval.anomaly.count`, and
+  `ghx.eval.report.size`.
+- Score visibility now lives inside `eval.reward.compute`: official
+  `gen_ai.evaluation.result` events carry `gen_ai.evaluation.name` and
+  `gen_ai.evaluation.score.value`; ghx-namespaced check/penalty events carry
+  expected files, required claims, evidence checks, repeat-read penalties,
+  budget penalties, and safety violations. `Episode.checks` snapshots the
+  task scoring contract so the trace explanation remains recomputable from
+  committed artifacts.
+- The traces/logs/metrics file writers use OTLP protobuf JSON mapping. Trace
+  and log trace/span IDs are rewritten to the OTLP JSON file spec's required
+  lowercase hex representation, mirroring the existing trace exporter fix.
+
+Follow-up:
+
+- Extend the same telemetry surface to long-lived production sidecar
+  sessions under `~/.ghx`, not only eval episode saves.
+- Add live viewer documentation once logs/metrics rendering has been checked
+  against otel-desktop-viewer and Phoenix with real artifacts.
+- Judge scorer ADR/work should reuse `gen_ai.evaluation.result` and emit its
+  prompt/model calibration alongside deterministic reward events rather than
+  inventing another score format.
 
 ## Cross-references
 

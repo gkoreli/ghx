@@ -30,6 +30,10 @@ type exportedSpan struct {
 	SpanID       string `json:"spanId"`
 	ParentSpanID string `json:"parentSpanId"`
 	Name         string `json:"name"`
+	Events       []struct {
+		Name       string              `json:"name"`
+		Attributes []exportedAttribute `json:"attributes"`
+	} `json:"events"`
 }
 
 type exportedLogRecord struct {
@@ -375,4 +379,63 @@ func metricNames(metrics []exportedMetric) []string {
 		names = append(names, metric.Name)
 	}
 	return names
+}
+
+func TestOTLPTraceRewardSpanIncludesEvaluationAndCheckEvents(t *testing.T) {
+	runDir := t.TempDir()
+	ep := &Episode{
+		ID:      "ep-rewards",
+		TaskID:  "task-rewards",
+		Repo:    "owner/repo",
+		Profile: ProfileGhx,
+		Checks: TaskChecks{
+			ExpectedFiles:  []string{"src/router.go"},
+			RequiredClaims: []string{"routes are configured"},
+		},
+		Turns: []TurnRecord{{
+			Turn:     0,
+			Question: "Where are routes configured?",
+			Text:     "Routes are configured in src/router.go.",
+		}},
+		Identity:  AgentIdentity{SubjectModel: "test-model"},
+		Rewards:   RewardBreakdown{Correctness: 1, Evidence: 0.5, Trajectory: 0.75, Compression: 0, Safety: 1, Overall: 0.65},
+		StartedAt: timeNowUTC(),
+	}
+	ep.EndedAt = ep.StartedAt.Add(2 * time.Second)
+
+	if err := EmitEpisodeTraces(context.Background(), runDir, ep); err != nil {
+		t.Fatal(err)
+	}
+
+	_, spans := readExportedSpans(t, runDir)
+	var rewardSpan *exportedSpan
+	for i := range spans {
+		if spans[i].Name == "eval.reward.compute" {
+			rewardSpan = &spans[i]
+			break
+		}
+	}
+	if rewardSpan == nil {
+		t.Fatal("missing eval.reward.compute span")
+	}
+	if !spanHasEventWithStringAttr(*rewardSpan, genAIEvaluationResultEvent, genAIEvaluationNameAttribute, "ghx.eval.reward.correctness") {
+		t.Fatalf("missing %s event for correctness: %+v", genAIEvaluationResultEvent, rewardSpan.Events)
+	}
+	if !spanHasEventWithStringAttr(*rewardSpan, ghxRewardCheckEvent, "ghx.eval.check.expected", "src/router.go") {
+		t.Fatalf("missing expected-file check event: %+v", rewardSpan.Events)
+	}
+}
+
+func spanHasEventWithStringAttr(span exportedSpan, eventName, key, value string) bool {
+	for _, event := range span.Events {
+		if event.Name != eventName {
+			continue
+		}
+		for _, attr := range event.Attributes {
+			if attr.Key == key && attr.Value.StringValue == value {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -37,6 +37,7 @@ func RunEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile) 
 		TaskID:    task.ID,
 		Repo:      task.Repo,
 		Profile:   profile,
+		Checks:    task.Checks,
 		StartedAt: time.Now().UTC(),
 		Identity:  agentIdentity(cfg, nil),
 	}
