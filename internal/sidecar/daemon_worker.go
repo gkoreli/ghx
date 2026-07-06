@@ -202,10 +202,14 @@ func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions)
 	}
 	if w.sessionID == "" {
 		if opts.ACPSessionID != "" && w.loadSession {
+			// Fresh worker resuming a persisted ACP session: the adapter
+			// process is new, so the full session meta must be re-asserted or
+			// the resumed session runs on adapter defaults (ADR-0020.2).
 			_, err := w.conn.LoadSession(ctx, acp.LoadSessionRequest{
 				SessionId:  acp.SessionId(opts.ACPSessionID),
 				Cwd:        cwd,
 				McpServers: reportSinkMcpServers(opts.ReportSinkPath),
+				Meta:       opts.SessionMeta,
 			})
 			if err != nil {
 				return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(w.turnCtx, err))
@@ -225,10 +229,14 @@ func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions)
 		return result, w.sessionID, nil
 	}
 	if w.loadSession {
+		// Warm-worker reload (report-sink refresh): carry the meta here too so
+		// steering never depends on which reload path the turn took
+		// (ADR-0020.2).
 		_, err := w.conn.LoadSession(ctx, acp.LoadSessionRequest{
 			SessionId:  acp.SessionId(w.sessionID),
 			Cwd:        cwd,
 			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
+			Meta:       opts.SessionMeta,
 		})
 		if err != nil {
 			return result, w.sessionID, fmt.Errorf("acp load session: %w", turnFailureCause(w.turnCtx, err))

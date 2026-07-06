@@ -251,9 +251,10 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		acpSessionID = meta.ACPSessionID
 	}
 
-	// Build session-level steering meta (ADR-0020.1 D2). Only attached to
-	// new sessions (first turn or when the adapter does not support LoadSession).
-	// Resume turns re-use the existing session, which already has the meta.
+	// Build session-level steering meta (ADR-0020.1 D2), sent on EVERY turn:
+	// NewSession applies it at creation and LoadSession re-asserts it on
+	// resume, because each turn's fresh adapter process otherwise rebuilds
+	// the session on unsteered defaults (ADR-0020.2, TRUST H8).
 	depth := req.Depth
 	if depth == "" {
 		depth = "normal"
@@ -317,9 +318,9 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 				Prompt:       turnCapWrapUpPrompt,
 				Cwd:          cfg.Cwd,
 				Env:          cfg.Env,
-				// SessionMeta rides along so the resumed wrap-up keeps the
-				// eval raw-SDK audit channel (ADR-0016.10 D2); LoadSession
-				// forwards only that subset.
+				// SessionMeta rides along so the resumed wrap-up runs under
+				// the same persona/allowlist/budgets/model pin as the turn it
+				// recovers, plus the eval raw-SDK audit channel (ADR-0020.2).
 				SessionMeta:    sessionMeta,
 				ReportSinkPath: sinkPath,
 			})
@@ -406,9 +407,8 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 			Prompt:       reportRetryPromptWithError(reason),
 			Cwd:          cfg.Cwd,
 			Env:          cfg.Env,
-			// SessionMeta rides along so the resumed retry keeps the eval
-			// raw-SDK audit channel (ADR-0016.10 D2); LoadSession forwards
-			// only that subset.
+			// SessionMeta rides along so the resumed retry stays fully
+			// steered and keeps the eval raw-SDK audit channel (ADR-0020.2).
 			SessionMeta:    sessionMeta,
 			ReportSinkPath: sinkPath,
 		})

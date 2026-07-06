@@ -246,28 +246,3 @@ func acpErrorAs(err error, target **acp.RequestError) bool {
 	}
 	return ok
 }
-
-// TestRawSDKLoadSessionMeta verifies the LoadSession meta subset: the raw
-// channel is re-enabled in eval mode and absent otherwise (ADR-0016.10 D2).
-func TestRawSDKLoadSessionMeta(t *testing.T) {
-	evalMeta := BuildSessionMeta("persona", "normal", "", true)
-	got := RawSDKLoadSessionMeta(evalMeta)
-	if got == nil {
-		t.Fatal("eval-mode session meta must yield a LoadSession raw-channel meta")
-	}
-	cc, ok := got["claudeCode"].(map[string]any)
-	if !ok || cc["emitRawSDKMessages"] != true {
-		t.Errorf("LoadSession meta = %v, want claudeCode.emitRawSDKMessages=true", got)
-	}
-	if _, present := cc["options"]; present {
-		t.Error("LoadSession meta must not forward steering options (ADR-0016.10 D2)")
-	}
-
-	prodMeta := BuildSessionMeta("persona", "normal", "", false)
-	if got := RawSDKLoadSessionMeta(prodMeta); got != nil {
-		t.Errorf("production session meta must yield nil LoadSession meta, got %v", got)
-	}
-	if got := RawSDKLoadSessionMeta(nil); got != nil {
-		t.Errorf("nil session meta must yield nil, got %v", got)
-	}
-}

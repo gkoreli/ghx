@@ -16,7 +16,10 @@
 //	MOCKAGENT_PROMPT_LOG — optional path; every LoadSession and Prompt is
 //	                       appended as "LOAD <sessionId>" / "PROMPT <text>"
 //	                       lines so tests can assert what the runtime sent
-//	                       (ADR-0027 D1 wrap-up assertions).
+//	                       (ADR-0027 D1 wrap-up assertions). Session _meta is
+//	                       appended as "NEW_META <json>" / "LOAD_META <json>"
+//	                       so tests can assert the steering meta rides on both
+//	                       NewSession and LoadSession (ADR-0020.2).
 //	MOCKAGENT_REJECT_UNKNOWN_LOAD — when "1", LoadSession rejects any session
 //	                       ID that was not created in this process with
 //	                       Resource not found (-32002).
@@ -71,6 +74,17 @@ type reply struct {
 	// ExitBeforeResponse, when true, kills the agent process mid-prompt: the
 	// dead-peer case (ADR-0027 D2).
 	ExitBeforeResponse bool `json:"exitBeforeResponse,omitempty"`
+}
+
+// logMeta appends a session _meta line ("NEW_META"/"LOAD_META") to the prompt
+// log. Go marshals map keys sorted, so the logged JSON is deterministic and
+// tests can compare the NewSession and LoadSession metas byte-for-byte.
+func logMeta(kind string, meta map[string]any) {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		data = []byte("null")
+	}
+	logEvent(kind, string(data))
 }
 
 // logEvent appends one line to MOCKAGENT_PROMPT_LOG when configured.
@@ -148,6 +162,7 @@ func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	m.captureSink(params.McpServers)
+	logMeta("NEW_META", params.Meta)
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
 }
 
@@ -160,6 +175,7 @@ func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) 
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	m.captureSink(params.McpServers)
 	logEvent("LOAD", string(params.SessionId))
+	logMeta("LOAD_META", params.Meta)
 	if os.Getenv("MOCKAGENT_REJECT_UNKNOWN_LOAD") == "1" && string(params.SessionId) != "mock-sess-1" {
 		return acp.LoadSessionResponse{}, &acp.RequestError{Code: -32002, Message: "Resource not found"}
 	}

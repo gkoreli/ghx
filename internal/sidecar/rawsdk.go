@@ -362,19 +362,7 @@ func contentBlockSize(raw json.RawMessage) int {
 	return n
 }
 
-// RawSDKLoadSessionMeta extracts the raw-channel-only _meta for LoadSession
-// requests (ADR-0016.10 D2): when the session-creation meta enabled the
-// audit channel, resumed turns must re-enable it — each RunTurn spawns a
-// fresh adapter process, and the adapter defaults emitRawSDKMessages to
-// false on load (acp-agent.js:3054). The full steering meta is deliberately
-// NOT forwarded here. Returns nil (no meta) outside eval mode.
-func RawSDKLoadSessionMeta(sessionMeta map[string]any) map[string]any {
-	cc, ok := sessionMeta["claudeCode"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	if emit, _ := cc["emitRawSDKMessages"].(bool); !emit {
-		return nil
-	}
-	return map[string]any{"claudeCode": map[string]any{"emitRawSDKMessages": true}}
-}
+// NOTE: resumed turns keep the audit channel because LoadSession forwards the
+// full session meta — the same BuildSessionMeta bag NewSession sends, whose
+// eval-mode sibling flag is emitRawSDKMessages (ADR-0020.2, superseding the
+// raw-channel-only subset from ADR-0016.10 D2).
