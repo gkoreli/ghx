@@ -15,6 +15,13 @@ import (
 var codeCmd = &cobra.Command{
 	Use:   "code [code | -]",
 	Short: "Execute JavaScript with access to all ghx tools",
+	Long: `Run a JavaScript snippet that calls the ghx tools (explore, read, search, repos,
+tree) via the ` + "`codemode`" + ` object, so an explore → filter → read chain runs in one
+round-trip instead of several commands. Reach for this when the result of one
+call decides the next; use the plain subcommands for simple one-shot lookups.
+Calls are synchronous (no ` + "`await`" + `), the body must ` + "`return`" + ` a value, console output
+goes to stderr and the return value to stdout. ` + "`--list`" + ` prints the available tools
+with TypeScript type stubs; pass ` + "`-`" + ` to read the script from stdin.`,
 	Example: `  ghx code 'var r = codemode.explore({repo: "gkoreli/ghx"}); return r.branch;'
   ghx code --list
   ghx code - < script.js`,

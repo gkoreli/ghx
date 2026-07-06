@@ -32,6 +32,13 @@ before any tool runs; tool output goes to stdout.`,
 var tier2CodemapCmd = &cobra.Command{
 	Use:   "codemap <owner/repo>",
 	Short: "Cross-file structure via the absorbed codemap tool (backend local:codemap)",
+	Long: `Run the absorbed codemap tool over a cached snapshot to see cross-file structure:
+an overview by default, the JSON context envelope with ` + "`--context`" + ` (add ` + "`--compact`" + `
+to minimize tokens), fan-in importers of a file with ` + "`--importers`" + `, or dependency
+hubs and import chains with ` + "`--deps`" + `. This is Tier-2 local analysis — snapshot
+provenance (repo, ref, resolved SHA, cache hit) prints to stderr before any tool
+output. ` + "`--importers`" + ` and ` + "`--deps`" + ` need ast-grep on PATH; exit code 3 with an
+install hint if a required binary is missing.`,
 	Example: `  ghx tier2 codemap honojs/hono
   ghx tier2 codemap gin-gonic/gin --importers gin.go
   ghx tier2 codemap openai/openai-node --ref next --context --compact
@@ -115,7 +122,7 @@ func init() {
 	tier2CodemapCmd.Flags().StringSlice("sparse", nil, "Sparse-checkout paths (candidate dirs from Tier-1 evidence)")
 	tier2CodemapCmd.Flags().Bool("context", false, "Emit the codemap JSON context envelope")
 	tier2CodemapCmd.Flags().Bool("compact", false, "Token-minimal context envelope (with --context)")
-	tier2CodemapCmd.Flags().String("importers", "", "Show importers (fan-in) of this file")
+	tier2CodemapCmd.Flags().String("importers", "", "Show importers (fan-in) of this file (needs ast-grep)")
 	tier2CodemapCmd.Flags().Bool("deps", false, "Dependency flow: hub files and import chains (needs ast-grep)")
 	tier2CodemapCmd.MarkFlagsMutuallyExclusive("context", "importers", "deps")
 	tier2Cmd.AddCommand(tier2CodemapCmd)

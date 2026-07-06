@@ -30,6 +30,15 @@ invocations so follow-up questions retain prior context.`,
 var sidecarAskCmd = &cobra.Command{
 	Use:   "ask [--repo <owner/repo>] <question>",
 	Short: "Ask a repo question using the sidecar agent",
+	Long: `Delegate a whole reconnaissance question in plain English and get back a compact,
+auditable evidence report — state the goal, not the exploration steps. Pass
+` + "`--repo owner/repo`" + ` to scope to one repo; omit it for discovery ("which repos do
+X"), where the sidecar sweeps GitHub and verifies candidates before ranking. The
+chosen session name is printed to stderr and reused by follow-ups, so later asks
+are faster and context-aware; ` + "`--json`" + ` returns the {report, artifacts} envelope
+instead of the human summary. Every answer ends with an artifacts footer —
+` + "`artifacts: <session dir> (trace <id>)`" + ` — pointing at the on-disk trace, logs,
+and reports under ~/.ghx that back the report.`,
 	Example: `  ghx sidecar ask --repo hono/hono "How is middleware chained?"
   ghx sidecar ask --repo gkoreli/ghx --depth deep "Where are sidecar reports validated?"
   ghx sidecar ask --json "Which Go repos implement ACP agents?"`,
@@ -81,6 +90,10 @@ var sidecarAskCmd = &cobra.Command{
 var sidecarDaemonCmd = &cobra.Command{
 	Use:   "daemon",
 	Short: "Run the warm sidecar daemon",
+	Long: `Run the per-user warm daemon that keeps the ACP agent resident so ` + "`ask`" + ` turns
+skip cold-start latency. You normally never run this by hand — ` + "`ask`" + ` auto-spawns
+the daemon on demand — but it is useful for pre-warming or debugging. Run in the
+foreground to watch its logs; ` + "`--stop`" + ` asks a running daemon to shut down cleanly.`,
 	Example: `  ghx sidecar daemon
   ghx sidecar daemon --stop`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -164,8 +177,14 @@ var sidecarEvalsExportCmd = &cobra.Command{
 
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
-	Use:     "doctor",
-	Short:   "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
+	Use:   "doctor",
+	Short: "Run preflight diagnostics (token, network, ghx binary, ACP agent, report sink)",
+	Long: `Verify the sidecar is ready to run: GitHub token, network reachability, the ghx
+binary, the configured ACP agent handshake, and the report sink. Run this right
+after ` + "`config init`" + ` and whenever an ` + "`ask`" + ` fails to set up — it prints the resolved
+agent command and config path first, so a failing check is immediately
+attributable, and ends with the ~/.ghx artifacts location. Exit code 3 if any
+check fails.`,
 	Example: `  ghx sidecar doctor`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
@@ -188,6 +207,11 @@ var sidecarDoctorCmd = &cobra.Command{
 var sidecarSessionsCmd = &cobra.Command{
 	Use:   "sessions",
 	Short: "Manage sidecar named sessions",
+	Long: `Inspect the named sessions the sidecar persists under ~/.ghx/sessions. Each
+session accumulates report history and an evidence ledger across ` + "`ask`" + ` turns, so
+these subcommands let you audit what a past investigation found and which session
+to resume. Use ` + "`list`" + ` to enumerate, ` + "`show`" + ` for details and report history, and
+` + "`ledger`" + ` for the raw accumulated evidence.`,
 	Example: `  ghx sidecar sessions list
   ghx sidecar sessions show hono-hono
   ghx sidecar sessions ledger hono-hono`,
@@ -196,8 +220,11 @@ var sidecarSessionsCmd = &cobra.Command{
 
 // sidecarSessionsListCmd lists all sessions.
 var sidecarSessionsListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List all named sessions",
+	Use:   "list",
+	Short: "List all named sessions",
+	Long: `List every persisted session with its repo, turn count, and last-updated time,
+one per line. Use it to find the session name to pass to ` + "`show`, `ledger`, or `view`" + `.
+Prints "(no sessions)" when none exist yet.`,
 	Example: `  ghx sidecar sessions list`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
@@ -220,6 +247,10 @@ var sidecarSessionsListCmd = &cobra.Command{
 var sidecarSessionsShowCmd = &cobra.Command{
 	Use:   "show <session-name>",
 	Short: "Show details and report history for a named session",
+	Long: `Print one session's metadata — repo, scope, turn count, timestamps, ACP session
+id — followed by its saved report files. Use it after ` + "`sessions list`" + ` to inspect
+what a past investigation produced before resuming or replaying it. The session
+name is the slug from ` + "`list`" + ` (a repo slug or a question-derived slug).`,
 	Example: `  ghx sidecar sessions show hono-hono
   ghx sidecar sessions show discovery-which-go-repos-implement-acp`,
 	Args: cobra.ExactArgs(1),
@@ -261,8 +292,12 @@ var sidecarSessionsShowCmd = &cobra.Command{
 
 // sidecarSessionsLedgerCmd prints the persisted evidence ledger for one session.
 var sidecarSessionsLedgerCmd = &cobra.Command{
-	Use:     "ledger <session-name>",
-	Short:   "Print the evidence ledger for a named session",
+	Use:   "ledger <session-name>",
+	Short: "Print the evidence ledger for a named session",
+	Long: `Print the accumulated evidence ledger for a session as JSON: the commands the
+sidecar ran and the sources it read across all turns. Use it to audit exactly
+what evidence backs a report, or to feed the trail into other tooling. Pass the
+session name from ` + "`sessions list`" + `.`,
 	Example: `  ghx sidecar sessions ledger hono-hono`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -289,6 +324,10 @@ var sidecarSessionsLedgerCmd = &cobra.Command{
 var sidecarConfigCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage sidecar configuration",
+	Long: `View and initialize the sidecar config at ~/.ghx/config.json (or $GHX_HOME),
+which selects the ACP agent command and model/visibility settings. Run
+` + "`config init`" + ` once to write it — ` + "`--claude-acp`" + ` for the pinned Claude ACP adapter,
+otherwise PATH auto-detection — then ` + "`config show`" + ` to see the resolved values.`,
 	Example: `  ghx sidecar config show
   ghx sidecar config init --claude-acp
   ghx sidecar config init --claude-acp --force`,
@@ -297,8 +336,11 @@ var sidecarConfigCmd = &cobra.Command{
 
 // sidecarConfigShowCmd prints the current config.
 var sidecarConfigShowCmd = &cobra.Command{
-	Use:     "show",
-	Short:   "Print current sidecar configuration",
+	Use:   "show",
+	Short: "Print current sidecar configuration",
+	Long: `Print the resolved sidecar configuration — agent command, model, visibility, and
+storage paths. Use it to confirm what ` + "`ask`" + ` and ` + "`doctor`" + ` will use, especially
+after editing the config or setting $GHX_HOME.`,
 	Example: `  ghx sidecar config show`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := sidecar.LoadConfig()
@@ -313,6 +355,12 @@ var sidecarConfigShowCmd = &cobra.Command{
 var sidecarConfigInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Write initial config (--claude-acp for the pinned Claude ACP adapter, else auto-detect)",
+	Long: `Write the initial sidecar config. ` + "`--claude-acp`" + ` pins the Claude ACP adapter
+(` + "`npx @agentclientprotocol/claude-agent-acp`" + `, needs Node/npx and a Claude login);
+without it, ghx auto-detects an ACP-capable agent already on PATH. This is the
+first setup step — follow it with ` + "`ghx sidecar doctor`" + `. An existing config is never
+overwritten silently: the field diff is shown first, and ` + "`--force`" + ` (only with
+` + "`--claude-acp`" + `) is required to apply it.`,
 	Example: `  ghx sidecar config init --claude-acp
   ghx sidecar config init --claude-acp --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {

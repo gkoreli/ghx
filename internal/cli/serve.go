@@ -51,6 +51,13 @@ func selectTransport(cmd *cobra.Command) Transport {
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server (stdio)",
+	Long: `Run ghx as an MCP server so an agent can call its tools over the protocol.
+Default (stdio) exposes the direct ghx tools plus the ` + "`code`" + ` meta-tool for
+composed exploration. ` + "`--recon`" + ` instead serves exactly one ` + "`recon`" + ` tool that
+takes a whole English repo question and returns an auditable evidence report —
+the recommended surface for a main agent that should delegate reconnaissance
+rather than step-drive it. ` + "`--http :PORT`" + ` switches from stdio to a streamable
+HTTP server on that address.`,
 	Example: `  ghx serve
   ghx serve --http :8080
   ghx serve --recon`,
