@@ -123,6 +123,29 @@ funding-scale competitor signal.
 | Channel-schema framing for boundary docs | LangGraph | boundary-contract docs, A2A mapping (ADR-0020.1 D3) |
 | Transcript-vs-last-message dial as cautionary tale | AutoGen | marketing narrative: the evidence-shaped middle |
 
+## Absorption watchlist (standing — the codemap pattern, generalized)
+
+Founder directive 2026-07-05: the strongest competitive move is not to
+beat a tool but to **consume it under the hood so it disappears into the
+product** (NORTH_STAR P3 "Swallow the tools", The Moat). Standing
+watchlist, impact/effort honest, each absorbed tool vanishes from the
+user's world:
+
+| Candidate | Absorbed as | Impact / effort | Route |
+|---|---|---|---|
+| otel-desktop-viewer | `ghx sidecar view [session]` — spawn viewer + auto-replay the session's artifacts; the ADR-0018 curl recipe becomes one command | HIGH / LOW | M6 polish; near-term |
+| codemap | Tier-2 internal tool: dependency graphs, importers, blast radius | HIGH / MED | M7 (ADR-0024) |
+| ast-grep | Tier-2 structural pattern search (single binary, shell-out) | MED / LOW | M7 |
+| aider repomap PageRank | algorithm absorption, no dependency: rank files by import-graph centrality to prioritize exploration | MED / LOW | persona/doctrine or M7 |
+| stack-graphs | precise call paths / implementors | HIGH / HIGH (language maturity risk) | M7, behind codemap |
+| universal-ctags | cheap symbol fallback | LOW / LOW | only if mapengine gaps appear |
+| Phoenix judge prompt configs | data absorption: committed config-file shape + adapted prompt texts (attributed) | MED / LOW | judge build (ADR-0023.1) |
+| Inspect AI epoch reducers / viewer patterns | pattern absorption (deep-dive recon in flight, session `ukgovernmentbeis-inspect-ai` turn 2) | TBD | ADR-0025 stats; artifact-viewer UX |
+
+Already absorbed and invisible: tree-sitter (inside mapengine), gh/GitHub
+API (inside ghx). The scan is standing: every prior-art review asks
+"steal the idea, or swallow the tool?"
+
 ## Cross-references
 
 - Sessions: `~/.ghx/sessions/{ukgovernmentbeis-inspect-ai, huggingface-smolagents, langchain-ai-langgraph, microsoft-autogen, arize-ai-phoenix-deep, crewaiinc-crewai}` — reports + traces (the evidence).
