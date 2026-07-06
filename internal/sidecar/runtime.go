@@ -82,6 +82,25 @@ func persistACPSessionID(sessionsDir string, meta *SessionMeta, newSessionID str
 	}
 }
 
+// runTurnWithStaleSessionFallback runs the first turn for Ask. If a persisted
+// ACP session ID is stale (LoadSession Resource not found), it creates exactly
+// one fresh ACP session and continues the same prompt; the durable ledger
+// context already rides in the prompt, so ACP resume is only an optimization.
+func runTurnWithStaleSessionFallback(ctx context.Context, opts RunTurnOptions) (TurnResult, string, error) {
+	result, newSessionID, err := runTurnWithOptions(ctx, opts)
+	if opts.ACPSessionID == "" || err == nil || !IsLoadSessionResourceNotFound(err) {
+		return result, newSessionID, err
+	}
+	freshOpts := opts
+	freshOpts.ACPSessionID = ""
+	freshResult, freshSessionID, freshErr := runTurnWithOptions(ctx, freshOpts)
+	freshResult.SessionRecreated = true
+	if freshErr != nil {
+		return freshResult, freshSessionID, freshErr
+	}
+	return freshResult, freshSessionID, nil
+}
+
 // resolveTurnReport determines the turn's report, preferring a strictly-validated
 // submit_report sink over the lenient <ghx-report> text block (ADR-0021 D2). It
 // returns the report (nil if none), whether coercion was applied on the text
@@ -224,7 +243,7 @@ func Ask(ctx context.Context, cfg Config, req AskRequest) (*Report, *TurnResult,
 	// than the eval path's per-turn ACP timing — see emit.go / the ADR gap note.
 	startedAt := time.Now().UTC()
 
-	turnResult, newSessionID, err := runTurnWithOptions(ctx, RunTurnOptions{
+	turnResult, newSessionID, err := runTurnWithStaleSessionFallback(ctx, RunTurnOptions{
 		AgentCmd:       cfg.AgentCmd,
 		ACPSessionID:   acpSessionID,
 		Prompt:         prompt,

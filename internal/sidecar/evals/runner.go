@@ -206,6 +206,7 @@ func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
 	rec.ReportRetried = turn.ReportRetried
 	rec.ReportCoerced = turn.ReportCoerced
 	rec.WrapUpRecovered = turn.WrapUpRecovered
+	rec.SessionRecreated = turn.SessionRecreated
 	for _, tr := range turn.ToolTraces {
 		rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
 	}

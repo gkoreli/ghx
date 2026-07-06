@@ -265,6 +265,16 @@ remains the orchestrator's step per the verification plan.
 
 ### Follow-ups
 
+- D1-adjacent stale-session resilience shipped in `aeb86c3` (2026-07-06):
+  when a persisted ACP session ID cannot be loaded because the adapter returns
+  Resource not found (`-32002`), the shared `Ask` runtime creates exactly one
+  fresh ACP session and continues the turn using the durable named-session
+  ledger context already embedded in the prompt. The new transport session ID
+  is persisted to `meta.json`, and the downgrade is visible as
+  `TurnResult.SessionRecreated`, `TurnRecord.sessionRecreated`,
+  `ghx.sidecar.session_recreated` / `ghx.eval.session_recreated`, and a
+  `sidecar.session.recreated` log entry. Non-resource LoadSession failures and
+  failures of the fresh session still fail loudly.
 - Live spot check per the verification plan (phoenix deep ask) — orchestrator.
 - D4 changes the sidecar product: per ADR-0021 D4's precedent, no
   reliability numbers are citable until the next pre-registered confirmatory

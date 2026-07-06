@@ -150,6 +150,9 @@ func (t turnTelemetry) emitTurnSpan(parent context.Context, tracer trace.Tracer,
 		t.emitToolSpan(turnCtx, tracer, tool)
 	}
 	logs := t.contentLogs(span.SpanContext(), start)
+	if t.Result.SessionRecreated {
+		logs = append(logs, t.sessionRecreatedLog(span.SpanContext(), start))
+	}
 	if t.Error != "" {
 		span.SetStatus(codes.Error, boundedStr(t.Error, 256))
 		logs = append(logs, t.errorLog(span.SpanContext(), end))
@@ -174,6 +177,24 @@ func (t turnTelemetry) errorLog(span trace.SpanContext, at time.Time) telemetry.
 			attribute.String("ghx.sidecar.repo", t.Repo),
 			attribute.Int("ghx.sidecar.turn", t.Turn),
 			attribute.String("error.message", boundedStr(t.Error, 2048)),
+		},
+	}
+}
+
+// sessionRecreatedLog records the soft downgrade where a stale ACP session ID
+// could not be loaded and the runtime continued on a fresh ACP session.
+func (t turnTelemetry) sessionRecreatedLog(span trace.SpanContext, at time.Time) telemetry.LogRecord {
+	return telemetry.LogRecord{
+		Time:      at,
+		Span:      span,
+		EventName: "sidecar.session.recreated",
+		Attributes: []attribute.KeyValue{
+			attribute.String("gen_ai.system", sidecarSystem),
+			attribute.String("ghx.sidecar.session", t.Session),
+			attribute.String("ghx.sidecar.repo", t.Repo),
+			attribute.Int("ghx.sidecar.turn", t.Turn),
+			attribute.Bool("ghx.sidecar.session_recreated", true),
+			attribute.String("reason", "acp_load_session_resource_not_found"),
 		},
 	}
 }
@@ -229,6 +250,7 @@ func (t turnTelemetry) turnAttributes() []attribute.KeyValue {
 		attribute.Bool("ghx.sidecar.report_retried", r.ReportRetried),
 		attribute.Bool("ghx.sidecar.report_coerced", r.ReportCoerced),
 		attribute.Bool("ghx.sidecar.wrap_up_recovered", r.WrapUpRecovered),
+		attribute.Bool("ghx.sidecar.session_recreated", r.SessionRecreated),
 	}
 	if t.Model != "" {
 		attrs = append(attrs, semconv.GenAIRequestModel(t.Model))

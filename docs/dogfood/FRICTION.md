@@ -83,4 +83,4 @@ config and let the recon skill do the talking._
 - Attempted: `sidecar ask --repo gin-gonic/gin` (default session `gin-gonic-gin`, which existed from an earlier smoke with a prior binary).
 - Ground: the runtime resumed the persisted ACP session ID from meta.json; the adapter answered `Resource not found` (-32002) and the whole ask failed. A LoadSession miss must fall back to a fresh ACP session (the ledger already carries cross-turn context) — resume is an optimization, never a hard dependency (ADR-0027 spirit).
 - Trace: ~/.ghx/sessions/gin-gonic-gin/ (meta.json holds the dead session ID).
-- Disposition: open — fix: on LoadSession "Resource not found", create a new session, keep the named-session ledger context, log the downgrade.
+- Disposition: fixed aeb86c3 — on LoadSession Resource-not-found (-32002), `Ask` now creates exactly one fresh ACP session, continues the turn with the named-session ledger prompt, persists the new ACP session ID, and records the soft downgrade as `SessionRecreated` plus a `sidecar.session.recreated` session log entry.
