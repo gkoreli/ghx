@@ -17,7 +17,7 @@ founder dogfooding. New thread (`sidecar-adoption`) — it is about the
 customer-facing boundary, not the runtime (ADR-0015) or the evals
 (ADR-0016.x).
 
-D1-D4 were implemented on 2026-07-06. The ADR remains open for the M5 exit
+D1-D4 were implemented on 2026-07-05. The ADR remains open for the M5 exit
 bar: one week of founder dogfooding with breaking friction fixed or explicitly
 deferred.
 
@@ -150,7 +150,7 @@ the same OTel traces as evals, so friction reports can cite traces.
 - AGENTS.md "Visibility and Truthfulness" — verdict-is-a-floor rationale
   that makes ergonomics the highest-leverage post-M4 work.
 
-## Implementation Notes (2026-07-06)
+## Implementation Notes (2026-07-05)
 
 - D1 landed as `skills/ghx-recon/SKILL.md`, embedded via `skills/doc.go` and
   printed by `ghx skill --recon`. `skills/doc_test.go` now verifies the embed
