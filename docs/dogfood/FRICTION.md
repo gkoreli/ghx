@@ -32,7 +32,25 @@ Entry format:
 
 ---
 
-_No entries yet. Setup for the week: `go build -o ghx ./cmd/ghx`,
+## 2026-07-05 cross-repo discovery gap — soft [tier2-demand]
+- Attempted: "find open-source prior art similar to our agent sidecar framework and evals" — a discovery question spanning unknown repos.
+- Ground: `sidecar ask` is repo-scoped (`--repo` required); the candidate list had to come from the operator's own knowledge/web search first. The sidecar can answer "how does X work in repo Y" but not "which repos do X" — reconnaissance starts one step before the sidecar can.
+- Trace: n/a (question never reached the sidecar).
+- Disposition: open — candidate product surface: a discovery tier (ghx search/explore across GitHub) inside the sidecar brain.
+
+## 2026-07-05 ACP agent setup is the hardest step — soft
+- Attempted: first-time production setup (`~/.ghx/config.json`).
+- Ground: the default agent `claude` fails the ACP handshake (correct fail-fast), but the fix requires knowing about `@agentclientprotocol/claude-agent-acp` and hand-writing a wrapper command; the only working wrapper lives in this repo's `scripts/` for evals. A real user has neither. `config init` detection can only find agents that already speak ACP on PATH.
+- Trace: doctor run (preflight PASS after manual config).
+- Disposition: open — ship a documented default agent command (or `config init --claude-acp` that writes the npx adapter line) so setup is one command.
+
+## 2026-07-05 report-sink depends on a current ghx binary — soft
+- Attempted: real asks with PATH ghx 2.1.13 (released) while the sidecar features live on unreleased mainline.
+- Ground: the submit_report MCP server is served by the ghx binary itself; a stale binary silently degrades the contract to the text fallback (loud stderr warning exists, but only if you read stderr). Needed manual `GHX_REPORT_SINK_EXE` to a fresh build.
+- Trace: session dirs under ~/.ghx (see reports/ presence as the tell).
+- Disposition: open — release cadence question + doctor should check the sink-server version matches.
+
+_Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
 "<question>"` directly or wire `ghx serve --recon` into your agent's MCP
 config and let the recon skill do the talking._
