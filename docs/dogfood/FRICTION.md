@@ -50,6 +50,18 @@ Entry format:
 - Trace: session dirs under ~/.ghx (see reports/ presence as the tell).
 - Disposition: open — release cadence question + doctor should check the sink-server version matches.
 
+## 2026-07-05 max-turns exhaustion destroys the exploration — breaking
+- Attempted: `sidecar ask --repo Arize-ai/phoenix "how does LLM-as-judge eval work..."` (large repo, sprawling internals) at default depth.
+- Ground: the agent explored ~20+ tool calls, then the adapter killed the prompt with `Internal error: Reached maximum number of turns (24)`. The entire exploration was lost — no report, not even a partial. The budget safety net fires as a hard error instead of forcing a "submit what you have" wrap-up.
+- Trace: ~/.ghx/sessions/arize-ai-phoenix/ — see next entry.
+- Disposition: open — runtime should catch the max-turns error and send a forced submit_report follow-up in the same session (the session survives; a fresh query gets fresh turns); depth heuristics may also need repo-size awareness.
+
+## 2026-07-05 failed turns leave zero artifacts — breaking
+- Attempted: audit the failed phoenix ask above.
+- Ground: the session dir has only meta.json — no traces.jsonl, no logs, nothing. Emission happens after a successful turn, so exactly the turns that fail (the ones most needing audit) are invisible. Violates the visibility tenet at its most valuable moment.
+- Trace: ~/.ghx/sessions/arize-ai-phoenix/ (absence of artifacts is the evidence).
+- Disposition: open — emit per-turn artifacts incrementally or flush on error path.
+
 _Setup for the week: `go build -o ghx ./cmd/ghx`,
 `./ghx sidecar doctor`, then either `ghx sidecar ask --repo <owner/repo>
 "<question>"` directly or wire `ghx serve --recon` into your agent's MCP
