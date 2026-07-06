@@ -547,6 +547,23 @@ func TestMockSidecarEpisodeMaxTurnsWrapUp(t *testing.T) {
 	if !strings.Contains(string(logData), "PROMPT wrap up: call submit_report now with what you have; mark unverified items unverified") {
 		t.Fatalf("exact wrap-up prompt not sent:\n%s", logData)
 	}
+	// The wrap-up's LoadSession must carry the FULL steering meta (ADR-0020.2):
+	// persona system prompt, tools allowlist, and the eval raw-SDK audit flag —
+	// not the raw-channel-only subset ADR-0016.10 D2 used to send.
+	for _, line := range strings.Split(string(logData), "\n") {
+		meta, ok := strings.CutPrefix(line, "LOAD_META ")
+		if !ok {
+			continue
+		}
+		for _, want := range []string{`"systemPrompt"`, `"tools":["Bash","Read"]`, `"emitRawSDKMessages":true`, `"maxTurns"`} {
+			if !strings.Contains(meta, want) {
+				t.Fatalf("wrap-up LoadSession meta missing %s (unsteered resume, TRUST H8):\n%s", want, meta)
+			}
+		}
+	}
+	if !strings.Contains(string(logData), "LOAD_META ") {
+		t.Fatalf("mockagent logged no LOAD_META line:\n%s", logData)
+	}
 
 	found := false
 	for _, a := range DetectAnomalies(ep) {

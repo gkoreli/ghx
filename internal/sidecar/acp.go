@@ -625,11 +625,13 @@ type RunTurnOptions struct {
 	Prompt       string
 	Cwd          string
 	Env          []string
-	// SessionMeta is the _meta map forwarded to the adapter on session creation
-	// (NewSession). LoadSession forwards only the raw-SDK audit subset via
-	// RawSDKLoadSessionMeta (ADR-0016.10 D2) — resumed turns never receive the
-	// steering options. Nil means no steering options. Populated by Ask via
-	// BuildSessionMeta (ADR-0020.1 D2).
+	// SessionMeta is the _meta map forwarded to the adapter on BOTH session
+	// creation (NewSession) and resume (LoadSession) — one map, built once by
+	// BuildSessionMeta, carrying the full ADR-0020.1 D2 steering surface plus
+	// the eval raw-SDK audit flag. Resumed turns must re-assert it because each
+	// RunTurn spawns a fresh adapter process whose session options otherwise
+	// fall back to adapter defaults (ADR-0020.2, TRUST H8). Nil means no
+	// steering options.
 	SessionMeta map[string]any
 	// ReportSinkPath, when non-empty, registers the session-scoped report-sink
 	// MCP server (ADR-0021 D1). The adapter spawns `<this executable> sidecar
@@ -814,15 +816,18 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		}
 		sessionID = resp.SessionId
 	} else {
-		// Resumed turns re-enable only the eval raw-SDK audit channel
-		// (ADR-0016.10 D2): each RunTurn is a fresh adapter process and the
-		// adapter defaults emitRawSDKMessages to false on load. The full
-		// steering meta is deliberately not forwarded here.
+		// Resumed turns re-assert the FULL session meta (ADR-0020.2): each
+		// RunTurn is a fresh adapter process, and without the meta the adapter
+		// rebuilds the session on defaults — no persona system prompt, no
+		// tools allowlist, no budgets/model pin, no isolation, and (in eval
+		// mode) no raw-SDK audit channel. The same map NewSession sends is
+		// forwarded verbatim; the adapter's session fingerprint excludes
+		// _meta, so this cannot fork the session (ADR-0016.10 D2 recon).
 		_, err := conn.LoadSession(turnCtx, acp.LoadSessionRequest{
 			SessionId:  acp.SessionId(opts.ACPSessionID),
 			Cwd:        cwd,
 			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
-			Meta:       RawSDKLoadSessionMeta(opts.SessionMeta),
+			Meta:       opts.SessionMeta,
 		})
 		if err != nil {
 			return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(turnCtx, err))

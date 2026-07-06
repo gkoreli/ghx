@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -369,6 +370,10 @@ func TestAskWrapsUpOnMaxTurns(t *testing.T) {
 	}
 	if calls[1].ReportSinkPath == "" || calls[1].ReportSinkPath != calls[0].ReportSinkPath {
 		t.Fatalf("wrap-up must reuse the turn's report sink: %q vs %q", calls[1].ReportSinkPath, calls[0].ReportSinkPath)
+	}
+	if calls[1].SessionMeta == nil || !reflect.DeepEqual(calls[1].SessionMeta, calls[0].SessionMeta) {
+		t.Fatalf("wrap-up must carry the same full session meta as the primary turn (ADR-0020.2):\nwrap-up: %v\nprimary: %v",
+			calls[1].SessionMeta, calls[0].SessionMeta)
 	}
 	if report.Answer != "recovered by wrap-up" {
 		t.Fatalf("answer = %q, want the wrap-up's report", report.Answer)
