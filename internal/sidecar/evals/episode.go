@@ -24,8 +24,21 @@ type TaskChecks struct {
 	RequiredClaims []string `json:"requiredClaims,omitempty"`
 	// UnacceptableClaims zero out correctness when present (hallucinations).
 	UnacceptableClaims []string `json:"unacceptableClaims,omitempty"`
+	// UnacceptableClaimExceptions are exact context substrings (ADR-0016.8
+	// D7): when one appears within unacceptableClaimExceptionWindow chars
+	// before an unacceptable-claim match, that occurrence is a
+	// negation/history mention ("moved from lib/router/index.js"), not the
+	// wrong claim, and does not zero correctness. Pre-registered per task;
+	// a growing exception list is the signal to simplify the check and let
+	// the judge scorer (ADR-0023.1) handle the nuance instead.
+	UnacceptableClaimExceptions []string `json:"unacceptableClaimExceptions,omitempty"`
 	// AvoidPaths are path substrings the agent should not touch (e.g. "test/").
 	AvoidPaths []string `json:"avoidPaths,omitempty"`
+	// ContaminationPaths are path prefixes inside the subject repo that carry
+	// pre-registered answers for this task (e.g. its own ADRs, ADR-0016.8 D2).
+	// An episode whose tool calls read a matching path is flagged with the
+	// answer_doc_contamination anomaly and excluded from gate aggregates.
+	ContaminationPaths []string `json:"contaminationPaths,omitempty"`
 }
 
 // Task is one reconnaissance scenario: a repo, one or more question turns,
@@ -81,6 +94,23 @@ func (t Task) Validate() error {
 				}
 			}
 		}
+	}
+	// Blank-only validation for the non-answer check lists: they never gate
+	// on answer text, so question leakage is harmless, but a blank entry
+	// would match every episode (exclude everything / excuse everything).
+	blankGroups := map[string][]string{
+		"unacceptableClaimExceptions": c.UnacceptableClaimExceptions,
+		"contaminationPaths":          c.ContaminationPaths,
+	}
+	for group, checks := range blankGroups {
+		for _, check := range checks {
+			if strings.TrimSpace(check) == "" {
+				return fmt.Errorf("task %s: %s contains a blank entry (matches everything)", t.ID, group)
+			}
+		}
+	}
+	if len(c.UnacceptableClaimExceptions) > 0 && len(c.UnacceptableClaims) == 0 {
+		return fmt.Errorf("task %s: unacceptableClaimExceptions without unacceptableClaims has no effect", t.ID)
 	}
 	if err := t.Judge.validate(t.ID); err != nil {
 		return err

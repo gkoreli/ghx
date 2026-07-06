@@ -56,6 +56,15 @@ const (
 	// auto-degrade parallelism mid-run — the signal is surfaced so a human
 	// decides whether to lower GHX_EVAL_PARALLEL and re-run the affected cell.
 	AnomalyParallelRateLimited = "eval_parallel_rate_limited"
+	// AnomalyAnswerDocContamination: a tool call read a path matching one of
+	// the task's pre-registered checks.contaminationPaths prefixes — an
+	// answer-bearing document inside the subject repo (e.g. ghx's own ADRs on
+	// a self-referential task, ADR-0016.8 D2). Soft and declarative like the
+	// rest of the taxonomy, but gate aggregates exclude flagged episodes: the
+	// score no longer measures exploration once the answer sheet was read.
+	// Applies to every profile equally — it protected the baseline in the
+	// 2026-07-05 audit; next time it could inflate the sidecar.
+	AnomalyAnswerDocContamination = "answer_doc_contamination"
 )
 
 // Anomaly is one declaratively-detected failure pattern on an episode.
@@ -115,6 +124,24 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 			}
 		}
 	}
+	// Contamination guard (ADR-0016.8 D2): declarative substring detection
+	// over live tool calls only — replayed traces were already accounted on
+	// the turn that originally ran them (ADR-0016.5). One anomaly per
+	// turn × prefix keeps the list bounded on doc-heavy trajectories.
+	for _, turn := range ep.Turns {
+		for _, prefix := range ep.Checks.ContaminationPaths {
+			lp := strings.ToLower(prefix)
+			for _, call := range turn.ToolCalls {
+				if strings.Contains(strings.ToLower(call), lp) {
+					out = append(out, Anomaly{
+						Kind: AnomalyAnswerDocContamination, Severity: SeveritySoft, Turn: turn.Turn,
+						Detail: fmt.Sprintf("tool call read answer-bearing path %q: %s", prefix, boundedString(call, 256)),
+					})
+					break
+				}
+			}
+		}
+	}
 	if ep.Profile == ProfileGhx && !invokesGhx(ep) {
 		out = append(out, Anomaly{
 			Kind: AnomalyDirectGhxNoncompliance, Severity: SeveritySoft, Turn: 0,
@@ -159,6 +186,7 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalySidecarReportCoerced, SeveritySoft},
 		{AnomalyDirectGhxNoncompliance, SeveritySoft},
 		{AnomalyParallelRateLimited, SeveritySoft},
+		{AnomalyAnswerDocContamination, SeveritySoft},
 	}
 	counts := map[string]int{}
 	episodesWith := map[string]int{}

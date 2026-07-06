@@ -1,13 +1,23 @@
 package evals
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 )
 
 // perQuestionBudget mirrors the command budget in the sidecar persona
 // (internal/sidecar/prompt.go): max 8 ghx commands per question.
 const perQuestionBudget = 8
+
+// unacceptableClaimExceptionWindow is how many characters before an
+// unacceptable-claim match an exception substring must appear to suppress
+// the zeroing (ADR-0016.8 D7). 64 covers the committed false-zero contexts
+// ("express 4.x had the router inlined at `lib/router/index.js`" puts the
+// marker ~40 chars before the match) without reaching into unrelated prose.
+const unacceptableClaimExceptionWindow = 64
 
 // ComputeRewards scores one episode against its task with the deterministic
 // checklist from ADR-0016.1. All rewards are in [0, 1]. No LLM involved.
@@ -34,13 +44,13 @@ func ComputeRewards(task Task, ep *Episode) RewardBreakdown {
 	return r
 }
 
-// answerText gathers everything the episode "said": structured report fields
-// when a report exists, plus all raw turn text (direct profiles only have
-// the latter). Lowercased for case-insensitive matching.
+// answerText gathers everything the episode "said": the union of all
+// per-turn report fields when reports exist (ADR-0016.8 D1), plus all raw
+// turn text (direct profiles only have the latter). Lowercased for
+// case-insensitive matching.
 func answerText(ep *Episode) string {
 	var sb strings.Builder
-	if ep.Report != nil {
-		rep := ep.Report
+	if rep := scoringReport(ep); rep != nil {
 		sb.WriteString(rep.Answer)
 		sb.WriteByte('\n')
 		for _, c := range rep.Verified {
@@ -63,22 +73,137 @@ func answerText(ep *Episode) string {
 	return strings.ToLower(sb.String())
 }
 
+// scoringReport is the union of all accepted per-turn reports plus the final
+// episode report (ADR-0016.8 D1). Checks span the whole task, but a
+// well-behaved multi-turn sidecar delta-reports — the final turn carries only
+// what is new — so scoring only ep.Report penalizes exactly the compression
+// the product exists to provide. The final ep.Report stays the *contract*
+// artifact (what the consumer got); this union is the *scoring* input.
+//
+// Single-turn episodes are unchanged (union of one report returns that report
+// verbatim, preserving even within-report duplicates so single-turn fractions
+// do not shift). Across turns, duplicate claims/files/evidence/commands dedupe
+// by content so repetition is not rewarded. Nil when no report exists at all
+// (direct profiles keep their fallback scoring).
+func scoringReport(ep *Episode) *sidecar.Report {
+	var reports []*sidecar.Report
+	seen := map[string]bool{}
+	add := func(r *sidecar.Report) {
+		if r == nil {
+			return
+		}
+		key := ""
+		if data, err := json.Marshal(r); err == nil {
+			key = string(data)
+		}
+		if key != "" && seen[key] {
+			return
+		}
+		seen[key] = true
+		reports = append(reports, r)
+	}
+	for _, t := range ep.Turns {
+		add(t.Report)
+	}
+	add(ep.Report)
+
+	switch len(reports) {
+	case 0:
+		return nil
+	case 1:
+		return reports[0]
+	}
+	return mergeReports(reports)
+}
+
+// mergeReports folds several turn reports into one union report, deduping
+// every list-valued field by content (ADR-0016.8 D1).
+func mergeReports(reports []*sidecar.Report) *sidecar.Report {
+	union := &sidecar.Report{}
+	dedupe := map[string]bool{}
+	once := func(kind string, parts ...string) bool {
+		key := kind + "\x00" + strings.Join(parts, "\x00")
+		if dedupe[key] {
+			return false
+		}
+		dedupe[key] = true
+		return true
+	}
+
+	var answers []string
+	for _, r := range reports {
+		if r.Answer != "" && once("answer", r.Answer) {
+			answers = append(answers, r.Answer)
+		}
+		for _, c := range r.Verified {
+			if once("verified", c.Summary, c.Evidence) {
+				union.Verified = append(union.Verified, c)
+			}
+		}
+		for _, c := range r.Inferred {
+			if once("inferred", c.Summary, c.Evidence) {
+				union.Inferred = append(union.Inferred, c)
+			}
+		}
+		for _, c := range r.Unverified {
+			if once("unverified", c.Summary, c.Evidence) {
+				union.Unverified = append(union.Unverified, c)
+			}
+		}
+		for _, f := range r.RelevantFiles {
+			if once("file", f.Path, f.Reason) {
+				union.RelevantFiles = append(union.RelevantFiles, f)
+			}
+		}
+		for _, e := range r.Evidence {
+			if once("evidence", e.Source, e.Summary) {
+				union.Evidence = append(union.Evidence, e)
+			}
+		}
+		for _, b := range r.BackendsUsed {
+			if once("backend", b) {
+				union.BackendsUsed = append(union.BackendsUsed, b)
+			}
+		}
+		for _, c := range r.CommandsRun {
+			if once("command", c) {
+				union.CommandsRun = append(union.CommandsRun, c)
+			}
+		}
+		for _, u := range r.Uncertainty {
+			if once("uncertainty", u) {
+				union.Uncertainty = append(union.Uncertainty, u)
+			}
+		}
+		for _, n := range r.NextReads {
+			if once("nextread", n) {
+				union.NextReads = append(union.NextReads, n)
+			}
+		}
+	}
+	union.Answer = strings.Join(answers, "\n")
+	return union
+}
+
 // correctnessReward: mean of expected-file, expected-symbol, and
-// required-claim hit fractions. Any unacceptable claim zeroes the reward.
+// required-claim hit fractions. Any unacceptable claim zeroes the reward,
+// unless every occurrence sits in a pre-registered exception context
+// (ADR-0016.8 D7).
 func correctnessReward(task Task, ep *Episode) float64 {
 	text := answerText(ep)
 	c := task.Checks
 
 	for _, bad := range c.UnacceptableClaims {
-		if strings.Contains(text, strings.ToLower(bad)) {
+		if unacceptableClaimAsserted(text, bad, c.UnacceptableClaimExceptions) {
 			return 0
 		}
 	}
 
+	rep := scoringReport(ep)
 	var parts []float64
 	if len(c.ExpectedFiles) > 0 {
 		parts = append(parts, hitFraction(c.ExpectedFiles, func(f string) bool {
-			return fileIdentified(ep, text, f)
+			return fileIdentified(rep, text, f)
 		}))
 	}
 	if len(c.ExpectedSymbols) > 0 {
@@ -92,6 +217,45 @@ func correctnessReward(task Task, ep *Episode) float64 {
 		}))
 	}
 	return mean(parts)
+}
+
+// unacceptableClaimAsserted reports whether an unacceptable claim is actually
+// asserted in the text (ADR-0016.8 D7). A negation-adjacent or historical
+// mention is not the wrong claim: an occurrence is excused when one of the
+// task's pre-registered exception substrings (e.g. "moved from",
+// "previously at") appears within unacceptableClaimExceptionWindow chars
+// before the match. Only if every occurrence is excused is the zeroing
+// suppressed — one bare assertion still zeroes correctness.
+func unacceptableClaimAsserted(lowerText, claim string, exceptions []string) bool {
+	lc := strings.ToLower(claim)
+	for from := 0; ; {
+		idx := strings.Index(lowerText[from:], lc)
+		if idx < 0 {
+			return false
+		}
+		at := from + idx
+		if !claimOccurrenceExcused(lowerText, at, exceptions) {
+			return true
+		}
+		from = at + len(lc)
+	}
+}
+
+func claimOccurrenceExcused(lowerText string, at int, exceptions []string) bool {
+	start := at - unacceptableClaimExceptionWindow
+	if start < 0 {
+		start = 0
+	}
+	window := lowerText[start:at]
+	for _, exc := range exceptions {
+		if exc == "" {
+			continue
+		}
+		if strings.Contains(window, strings.ToLower(exc)) {
+			return true
+		}
+	}
+	return false
 }
 
 // symbolIdentified reports whether a symbol appears as a whole word in the
@@ -117,11 +281,12 @@ func citesEvidence(evidence string) bool {
 }
 
 // fileIdentified reports whether an expected file was surfaced: by suffix
-// match in the report's relevant files, or by mention anywhere in the text.
-func fileIdentified(ep *Episode, lowerText, file string) bool {
+// match in the (union) report's relevant files, or by mention anywhere in
+// the text. rep may be nil for report-less episodes.
+func fileIdentified(rep *sidecar.Report, lowerText, file string) bool {
 	lf := strings.ToLower(file)
-	if ep.Report != nil {
-		for _, rf := range ep.Report.RelevantFiles {
+	if rep != nil {
+		for _, rf := range rep.RelevantFiles {
 			if strings.HasSuffix(strings.ToLower(rf.Path), lf) {
 				return true
 			}
@@ -131,12 +296,14 @@ func fileIdentified(ep *Episode, lowerText, file string) bool {
 }
 
 // evidenceReward measures whether claims are anchored to inspectable evidence.
-// With a structured report: fraction of verified claims carrying evidence,
-// presence of a command trail, and fraction of relevant files with reasons.
-// Without one (direct profiles): tool usage plus at least one concrete file
-// path in the answer is the deterministic floor we can check.
+// With a structured report (the union of all turn reports, ADR-0016.8 D1):
+// fraction of verified claims carrying evidence, presence of a command trail,
+// and fraction of relevant files with reasons. Without one (direct profiles):
+// tool usage plus at least one concrete file path in the answer is the
+// deterministic floor we can check (ADR-0016.8 D8 documents this fallback).
 func evidenceReward(ep *Episode) float64 {
-	if ep.Report == nil {
+	rep := scoringReport(ep)
+	if rep == nil {
 		var parts []float64
 		if len(allToolCalls(ep)) > 0 {
 			parts = append(parts, 1)
@@ -151,7 +318,6 @@ func evidenceReward(ep *Episode) float64 {
 		return mean(parts)
 	}
 
-	rep := ep.Report
 	var parts []float64
 
 	if len(rep.Verified) > 0 {
@@ -191,10 +357,12 @@ func evidenceReward(ep *Episode) float64 {
 // ratio, over-budget ratio, and avoid-path touch ratio. Floor 0.
 func trajectoryReward(task Task, ep *Episode) float64 {
 	cmds := allToolCalls(ep)
-	if len(cmds) == 0 && ep.Report != nil {
+	if len(cmds) == 0 {
 		// Some agents run tools without emitting tool_call events; fall back
-		// to the self-reported command trail.
-		cmds = ep.Report.CommandsRun
+		// to the self-reported command trail (union across turns, ADR-0016.8 D1).
+		if rep := scoringReport(ep); rep != nil {
+			cmds = rep.CommandsRun
+		}
 	}
 	if len(cmds) == 0 {
 		return 0

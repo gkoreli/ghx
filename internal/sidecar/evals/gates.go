@@ -28,6 +28,7 @@ const (
 // but the output must not be read as the project verdict.
 const (
 	minGateRunTasks          = 6
+	minGateRunRepos          = 3
 	minGateRunTrials         = 5
 	minGateRunMultiTurnTasks = 2
 )
@@ -63,16 +64,25 @@ type GateResult struct {
 // Verdict is the run-level outcome: aggregates, gate results, and the
 // thesis call per the ADR-0016.1 verdict rules.
 type Verdict struct {
-	Aggregates      map[Profile]*ProfileAggregate `json:"aggregates"`
-	Gates           []GateResult                  `json:"gates"`
-	Anomalies       []AnomalyCount                `json:"anomalies,omitempty"`
-	ThesisSupported bool                          `json:"thesisSupported"`
+	Aggregates map[Profile]*ProfileAggregate `json:"aggregates"`
+	Gates      []GateResult                  `json:"gates"`
+	Anomalies  []AnomalyCount                `json:"anomalies,omitempty"`
+	// ThesisSupported is true only when the run is valid, the thesis gates
+	// (G1, G2, G3, G5) pass, AND the sample meets the pre-registered
+	// gate-run minimums (ADR-0016.8 D3): a below-contract sample can never
+	// read as a citable supported verdict in the JSON.
+	ThesisSupported bool `json:"thesisSupported"`
+	// Preliminary mirrors !DataSufficient explicitly in the JSON so machine
+	// consumers see the PRELIMINARY label the markdown always carried
+	// (ADR-0016.2 via ADR-0016.8 D3).
+	Preliminary bool `json:"preliminary"`
 	// Valid is false when compliance or identity checks invalidate the run.
 	Valid bool `json:"valid"`
 	// DataSufficient reports whether the episode set meets the
-	// pre-registered gate-run minimums (≥ 6 tasks, ≥ 5 trials per
-	// task × profile, ≥ 2 multi-turn tasks, all profiles present).
-	// When false the verdict is PRELIMINARY regardless of gate results.
+	// pre-registered gate-run minimums (≥ 6 tasks across ≥ 3 repos,
+	// ≥ 5 trials per task × profile, ≥ 2 multi-turn tasks, all profiles
+	// present). When false the verdict is PRELIMINARY regardless of gate
+	// results.
 	DataSufficient bool `json:"dataSufficient"`
 	// Notes carries verdict-rule context (e.g. G4 blocking ADR-0017),
 	// data-sufficiency caveats, and data-quality warnings.
@@ -189,6 +199,7 @@ func EvaluateGates(episodes []*Episode) Verdict {
 
 	var sufficiencyNotes []string
 	v.DataSufficient, sufficiencyNotes = sampleSufficiency(filtered)
+	v.Preliminary = !v.DataSufficient
 	v.Notes = append(v.Notes, sufficiencyNotes...)
 	v.Notes = append(v.Notes, dataQualityNotes(filtered, agg)...)
 
@@ -234,8 +245,13 @@ func EvaluateGates(episodes []*Episode) Verdict {
 
 	// Verdict rules from ADR-0016.1: thesis supported iff G1, G2, G3, G5 pass.
 	// G4 does not overturn the thesis but blocks ADR-0017 until the evidence
-	// ledger exists.
-	v.ThesisSupported = v.Valid && g1.Pass && g2.Pass && g3.Pass && g5.Pass
+	// ledger exists. ADR-0016.8 D3: a below-minimum sample additionally caps
+	// the verdict at PRELIMINARY — thesisSupported requires DataSufficient.
+	v.ThesisSupported = v.Valid && v.DataSufficient && g1.Pass && g2.Pass && g3.Pass && g5.Pass
+	if !v.DataSufficient && v.Valid && g1.Pass && g2.Pass && g3.Pass && g5.Pass {
+		v.Notes = append(v.Notes,
+			"PRELIMINARY: all thesis gates pass but the sample is below the pre-registered gate-run minimums — thesisSupported stays false until a sufficient run measures it (ADR-0016.8 D3)")
+	}
 	if !g4.Pass {
 		v.Notes = append(v.Notes,
 			"G4 failed: session resumption/memory is not proven — ADR-0017 framework standardization is blocked until the ADR-0014.1 evidence ledger lands")
@@ -286,6 +302,17 @@ func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool
 			}
 			continue
 		}
+		// Contamination guard (ADR-0016.8 D2): an episode that read a
+		// pre-registered answer-bearing doc is excluded from gate aggregates
+		// and listed in the verdict, like BLOCKED episodes in the anomaly
+		// table. It does not invalidate the run — the remaining episodes
+		// still measure exploration.
+		if detail, contaminated := answerDocContamination(ep); contaminated {
+			notes = append(notes, fmt.Sprintf(
+				"CONTAMINATION: episode %s excluded from gate aggregates — %s (answer_doc_contamination)",
+				episodeLabel(ep), detail))
+			continue
+		}
 		filtered = append(filtered, ep)
 	}
 
@@ -294,6 +321,19 @@ func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool
 		notes = append(notes, fmt.Sprintf("IDENTITY: mixed agent identities in one run (%d distinct identities) — verdict invalid", len(identityKeys)))
 	}
 	return filtered, notes, valid
+}
+
+// answerDocContamination reports whether the episode carries the
+// answer_doc_contamination anomaly (ADR-0016.8 D2), with the first
+// offending detail for the verdict note. Derived from the artifact via
+// DetectAnomalies so the exclusion is recomputable offline.
+func answerDocContamination(ep *Episode) (string, bool) {
+	for _, a := range DetectAnomalies(ep) {
+		if a.Kind == AnomalyAnswerDocContamination {
+			return a.Detail, true
+		}
+	}
+	return "", false
 }
 
 func identityKey(id AgentIdentity) string {
@@ -329,13 +369,19 @@ func containsString(items []string, want string) bool {
 
 // sampleSufficiency checks the episode set against the pre-registered
 // gate-run minimums and returns whether they are met plus caveat notes for
-// each shortfall (ADR-0016.2).
+// each shortfall (ADR-0016.2). The repo minimum enforces ADR-0016.1's
+// "≥ 6 tasks across ≥ 3 repos" — six tasks on one repo would measure that
+// repo, not the tool (ADR-0016.8 D4).
 func sampleSufficiency(episodes []*Episode) (bool, []string) {
 	tasks := map[string]bool{}
+	repos := map[string]bool{}
 	multiTurnTasks := map[string]bool{}
 	trials := map[string]int{} // taskID + "/" + profile → episode count
 	for _, ep := range episodes {
 		tasks[ep.TaskID] = true
+		if ep.Repo != "" {
+			repos[ep.Repo] = true
+		}
 		if len(ep.Turns) > 1 {
 			multiTurnTasks[ep.TaskID] = true
 		}
@@ -358,6 +404,11 @@ func sampleSufficiency(episodes []*Episode) (bool, []string) {
 	if len(tasks) < minGateRunTasks {
 		notes = append(notes, fmt.Sprintf(
 			"PRELIMINARY: %d distinct tasks < gate-run minimum %d", len(tasks), minGateRunTasks))
+	}
+	if len(repos) < minGateRunRepos {
+		notes = append(notes, fmt.Sprintf(
+			"PRELIMINARY: %d distinct repos < gate-run minimum %d (ADR-0016.1 requires ≥ %d tasks across ≥ %d repos)",
+			len(repos), minGateRunRepos, minGateRunTasks, minGateRunRepos))
 	}
 	if minTrials < minGateRunTrials {
 		notes = append(notes, fmt.Sprintf(
@@ -481,6 +532,20 @@ func SaveVerdict(runDir string, v Verdict) (string, error) {
 	return mdPath, os.WriteFile(mdPath, []byte(FormatVerdict(v)), 0o644)
 }
 
+// thesisGatesPass reports whether every thesis gate (G1, G2, G3, G5 — G4
+// blocks ADR-0017 but does not overturn the thesis) passed.
+func thesisGatesPass(gates []GateResult) bool {
+	for _, g := range gates {
+		if g.ID == "G4" {
+			continue
+		}
+		if !g.Pass {
+			return false
+		}
+	}
+	return len(gates) > 0
+}
+
 // FormatVerdict renders the verdict as the markdown summary committed with
 // gate runs.
 func FormatVerdict(v Verdict) string {
@@ -520,15 +585,21 @@ func FormatVerdict(v Verdict) string {
 
 	sb.WriteString("\n## Verdict\n\n")
 	prefix := ""
-	if !v.DataSufficient {
+	if v.Preliminary {
 		prefix = "**PRELIMINARY (below pre-registered gate-run sample — not the project verdict)** "
 	}
 	if !v.Valid {
 		prefix += "**INVALID (compliance/identity checks failed)** "
 	}
-	if v.ThesisSupported {
+	switch {
+	case v.ThesisSupported:
 		sb.WriteString(prefix + "**THESIS SUPPORTED** — G1, G2, G3, G5 pass.\n")
-	} else {
+	case v.Valid && v.Preliminary && thesisGatesPass(v.Gates):
+		// ADR-0016.8 D3: gates pass but the sample is below contract — the
+		// JSON says thesisSupported=false, and the markdown must not imply
+		// gate failures that did not happen.
+		sb.WriteString(prefix + "**THESIS NOT SUPPORTED** — thesis gates pass, but the sample is below the pre-registered gate-run minimums; rerun at contract size for a citable verdict.\n")
+	default:
 		sb.WriteString(prefix + "**THESIS NOT SUPPORTED** — see failed gates above.\n")
 	}
 	for _, n := range v.Notes {

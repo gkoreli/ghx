@@ -157,6 +157,56 @@ func TestCountAnomaliesAggregatesCountsAndEpisodes(t *testing.T) {
 	}
 }
 
+// TestDetectAnomaliesAnswerDocContamination pins ADR-0016.8 D2: reading a
+// pre-registered answer-bearing path flags the episode, on any profile;
+// replayed traces and non-matching reads do not.
+func TestDetectAnomaliesAnswerDocContamination(t *testing.T) {
+	checks := TaskChecks{
+		ExpectedFiles:      []string{"internal/mapengine/types.go"},
+		ContaminationPaths: []string{"docs/adr/", "docs/evals/"},
+	}
+	contaminated := &Episode{
+		Profile: ProfilePlain,
+		Checks:  checks,
+		Turns: []TurnRecord{{
+			Turn: 0,
+			ToolCalls: []string{
+				"gh api repos/gkoreli/ghx/contents/docs/adr/0013-ghx-map-command.md (completed)",
+			},
+		}},
+	}
+	a, ok := anomalyByKind(DetectAnomalies(contaminated), AnomalyAnswerDocContamination)
+	if !ok {
+		t.Fatalf("missing %s anomaly", AnomalyAnswerDocContamination)
+	}
+	if a.Severity != SeveritySoft || !strings.Contains(a.Detail, "docs/adr/") {
+		t.Fatalf("unexpected anomaly: %#v", a)
+	}
+
+	clean := &Episode{
+		Profile: ProfilePlain,
+		Checks:  checks,
+		Turns: []TurnRecord{{
+			Turn:      0,
+			ToolCalls: []string{"gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go (completed)"},
+			// Replayed history is audit-only (ADR-0016.5) — never contamination.
+			ReplayedToolTraces: []ToolCallTrace{{Title: "ghx read gkoreli/ghx docs/adr/0013-ghx-map-command.md"}},
+		}},
+	}
+	if _, ok := anomalyByKind(DetectAnomalies(clean), AnomalyAnswerDocContamination); ok {
+		t.Fatal("non-matching/replayed reads must not flag contamination")
+	}
+
+	// Without registered paths the detector is inert regardless of reads.
+	unguarded := &Episode{
+		Profile: ProfilePlain,
+		Turns:   contaminated.Turns,
+	}
+	if _, ok := anomalyByKind(DetectAnomalies(unguarded), AnomalyAnswerDocContamination); ok {
+		t.Fatal("tasks without contaminationPaths must not flag")
+	}
+}
+
 func anomalyByKind(anomalies []Anomaly, kind string) (Anomaly, bool) {
 	for _, a := range anomalies {
 		if a.Kind == kind {

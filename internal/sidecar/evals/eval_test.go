@@ -6,7 +6,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -57,22 +56,22 @@ func TestEpisodes(t *testing.T) {
 		AgentCmd:    agentCmd,
 		SessionsDir: t.TempDir(),
 	}
-	// ExpectedEpisodes defaults to one trial's worth (tasks × profiles). A
-	// multi-trial gate run accumulating into one GHX_EVAL_RUN_DIR sets
-	// GHX_EVAL_EXPECTED_EPISODES to the whole planned total so the ADR-0025 D1
-	// sequential-stopping bounds see the true remaining count.
-	expectedEpisodes := len(tasks) * len(AllProfiles())
-	if override := os.Getenv("GHX_EVAL_EXPECTED_EPISODES"); override != "" {
-		if n, convErr := strconv.Atoi(override); convErr == nil && n > 0 {
-			expectedEpisodes = n
-		}
+	// Each invocation plans one trial of the full tasks × profiles matrix;
+	// multi-trial gate runs accumulating into one GHX_EVAL_RUN_DIR append a
+	// round per invocation, so the manifest carries the whole planned matrix
+	// and the derived expected total (ADR-0016.8 D5). The ADR-0025 D1
+	// sequential-stopping bounds read that accumulated total; the
+	// GHX_EVAL_EXPECTED_EPISODES escape hatch (applied and recorded inside
+	// RecordManifestRound) remains for pre-declaring a bigger planned run.
+	manifest, err := RecordManifestRound(runDir, PlannedRound{
+		Tasks:    len(tasks),
+		Profiles: len(AllProfiles()),
+		Trials:   1,
+	}, agentIdentity(cfg, nil))
+	if err != nil {
+		t.Fatalf("record manifest round: %v", err)
 	}
-	if err := SaveRunManifest(runDir, RunManifest{
-		ExpectedEpisodes: expectedEpisodes,
-		Identity:         agentIdentity(cfg, nil),
-	}); err != nil {
-		t.Fatalf("save run manifest: %v", err)
-	}
+	expectedEpisodes := manifest.ExpectedEpisodes
 
 	// ADR-0025 D3: bound episode-level parallelism. Each task × profile cell is
 	// a distinct subtest, so trials of the same cell never overlap within one
@@ -101,7 +100,10 @@ func TestEpisodes(t *testing.T) {
 						// them. Set before SaveEpisode so the marker reaches the
 						// episode JSON and the emitted duration metrics.
 						ep.Parallel = gate.enabled()
-						ep.Anomalies = DetectAnomalies(ep)
+						// SaveEpisode re-derives ep.Anomalies just before
+						// persistence (ADR-0016.8 D6) — the Parallel marker
+						// above must be set first so the rate-limit detector
+						// sees it.
 						if path, saveErr := SaveEpisode(runDir, ep); saveErr != nil {
 							t.Errorf("save episode: %v", saveErr)
 						} else {
@@ -138,11 +140,10 @@ func TestEpisodes(t *testing.T) {
 	if len(eps) > 0 {
 		manifestIdentity = eps[0].Identity
 	}
-	if err := SaveRunManifest(runDir, RunManifest{
-		ExpectedEpisodes: expectedEpisodes,
-		Identity:         manifestIdentity,
-	}); err != nil {
-		t.Fatalf("save final run manifest: %v", err)
+	// Refresh identity with what the live episodes actually reported; the
+	// planned rounds recorded above must not be overwritten (ADR-0016.8 D5).
+	if err := UpdateManifestIdentity(runDir, manifestIdentity); err != nil {
+		t.Fatalf("update run manifest identity: %v", err)
 	}
 	verdict := EvaluateGates(eps)
 	// ADR-0025 D1: record the sequential-stopping recommendation next to the

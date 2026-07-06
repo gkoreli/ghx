@@ -106,13 +106,14 @@ func addEvaluationResultEvents(span trace.Span, ep *Episode) {
 
 func addCorrectnessEvents(span trace.Span, ep *Episode) {
 	text := answerText(ep)
+	rep := scoringReport(ep)
 	c := ep.Checks
 	for _, file := range c.ExpectedFiles {
 		span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
 			attribute.String("ghx.eval.reward.component", "correctness"),
 			attribute.String("ghx.eval.check.kind", "expected_file"),
 			attribute.String("ghx.eval.check.expected", file),
-			attribute.Bool("ghx.eval.check.matched", fileIdentified(ep, text, file)),
+			attribute.Bool("ghx.eval.check.matched", fileIdentified(rep, text, file)),
 		))
 	}
 	for _, symbol := range c.ExpectedSymbols {
@@ -132,19 +133,26 @@ func addCorrectnessEvents(span trace.Span, ep *Episode) {
 		))
 	}
 	for _, claim := range c.UnacceptableClaims {
+		// matched = the substring occurs at all; penalty applied only when an
+		// occurrence sits outside the pre-registered exception contexts
+		// (ADR-0016.8 D7) — mirrors correctnessReward exactly.
 		hit := strings.Contains(text, strings.ToLower(claim))
+		asserted := unacceptableClaimAsserted(text, claim, c.UnacceptableClaimExceptions)
 		span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
 			attribute.String("ghx.eval.reward.component", "correctness"),
 			attribute.String("ghx.eval.check.kind", "unacceptable_claim"),
 			attribute.String("ghx.eval.check.expected", claim),
 			attribute.Bool("ghx.eval.check.matched", hit),
-			attribute.Bool("ghx.eval.penalty.applied", hit),
+			attribute.Bool("ghx.eval.penalty.applied", asserted),
 		))
 	}
 }
 
 func addEvidenceEvents(span trace.Span, ep *Episode) {
-	if ep.Report == nil {
+	// Union of all turn reports (ADR-0016.8 D1) — same input the evidence
+	// scorer reads, so explanations match scores.
+	rep := scoringReport(ep)
+	if rep == nil {
 		toolsUsed := len(allToolCalls(ep)) > 0
 		pathsMentioned := len(pathTokens(answerText(ep))) > 0
 		span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
@@ -160,7 +168,7 @@ func addEvidenceEvents(span trace.Span, ep *Episode) {
 		return
 	}
 
-	for i, claim := range ep.Report.Verified {
+	for i, claim := range rep.Verified {
 		span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
 			attribute.String("ghx.eval.reward.component", "evidence"),
 			attribute.String("ghx.eval.check.kind", "verified_claim_evidence"),
@@ -173,10 +181,10 @@ func addEvidenceEvents(span trace.Span, ep *Episode) {
 	span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
 		attribute.String("ghx.eval.reward.component", "evidence"),
 		attribute.String("ghx.eval.check.kind", "commands_run"),
-		attribute.Bool("ghx.eval.check.matched", len(ep.Report.CommandsRun) > 0),
-		attribute.Int("ghx.eval.commands.count", len(ep.Report.CommandsRun)),
+		attribute.Bool("ghx.eval.check.matched", len(rep.CommandsRun) > 0),
+		attribute.Int("ghx.eval.commands.count", len(rep.CommandsRun)),
 	))
-	for i, file := range ep.Report.RelevantFiles {
+	for i, file := range rep.RelevantFiles {
 		span.AddEvent(ghxRewardCheckEvent, trace.WithAttributes(
 			attribute.String("ghx.eval.reward.component", "evidence"),
 			attribute.String("ghx.eval.check.kind", "relevant_file_reason"),
@@ -189,8 +197,10 @@ func addEvidenceEvents(span trace.Span, ep *Episode) {
 
 func addTrajectoryEvents(span trace.Span, ep *Episode) {
 	cmds := allToolCalls(ep)
-	if len(cmds) == 0 && ep.Report != nil {
-		cmds = ep.Report.CommandsRun
+	if len(cmds) == 0 {
+		if rep := scoringReport(ep); rep != nil {
+			cmds = rep.CommandsRun
+		}
 	}
 	if len(cmds) == 0 {
 		span.AddEvent(ghxRewardPenaltyEvent, trace.WithAttributes(
