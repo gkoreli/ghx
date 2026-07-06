@@ -125,7 +125,10 @@ The expected outcomes in D4 remain expectations, not results.
   `DecodeReportStrict` — `json.Decoder` with `DisallowUnknownFields`, a
   trailing-token check, and the shared `ValidateReport` (non-empty answer).
   **No coercion on this path.** A valid submission writes canonical JSON to the
-  sink atomically and returns `"report accepted — finish your reply now"`; an
+  sink atomically and returns `"report accepted — end your turn now; do not
+  repeat the answer in text"` (wording tightened 2026-07-05 after the spot
+  check showed a model re-narrating its full answer post-acceptance —
+  wasted subject tokens); an
   invalid one returns the exact validation error as an MCP tool error
   (`isError`). The server is registered on the ACP session at both `NewSession`
   and `LoadSession` (internal/sidecar/acp.go `reportSinkMcpServers`, command =

@@ -119,6 +119,9 @@ func TestBuildSessionMetaShape(t *testing.T) {
 	if th["type"] != "enabled" || th["budgetTokens"] != float64(2048) {
 		t.Errorf("options.thinking = %v for depth=normal, want {enabled, 2048}", th)
 	}
+	if th["display"] != "summarized" {
+		t.Errorf("options.thinking.display = %v, want summarized — the API-default 'omitted' streams empty thinking text the adapter drops", th["display"])
+	}
 	if eff, _ := opts["effort"].(string); eff != "medium" {
 		t.Errorf("options.effort = %q for depth=normal, want medium (SDK enum has no 'normal')", eff)
 	}

@@ -37,7 +37,7 @@ const SubmitReportToolID = "mcp__" + ReportSinkServerName + "__" + SubmitReportT
 
 // reportAcceptedMessage is returned to the model on a valid submission. It is
 // the completion signal: the turn is done once the tool returns this.
-const reportAcceptedMessage = "report accepted — finish your reply now"
+const reportAcceptedMessage = "report accepted — end your turn now; do not repeat the answer in text"
 
 // DecodeReportStrict validates and decodes a submit_report payload with NO
 // coercion (ADR-0021 D1). It is the single validation authority, derived from
@@ -195,7 +195,7 @@ func NewReportSinkServer(outPath string) *server.MCPServer {
 		SubmitReportToolName,
 		"Submit your final ghx-sidecar evidence report. This is the ONLY way to "+
 			"complete an investigation turn. The report is validated strictly against "+
-			"the report schema: on success it is accepted and you may finish your reply; "+
+			"the report schema: on success it is accepted and you end your turn without repeating the answer; "+
 			"on failure the exact validation error is returned so you can fix the report "+
 			"and call submit_report again. No coercion is applied.",
 		reportInputSchema(),

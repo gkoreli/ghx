@@ -88,3 +88,15 @@ committed record**. ADR-0017 (framework standardization / training
 investment) unblocks; next milestones are M5 (adoption/dogfooding — the
 concise recon skill) and M6/ADR-0018 (agentic observability), with the
 judge scorer required before M9 per the eval-truthfulness tenet.
+
+## Postscript (2026-07-05, later the same day — nothing above altered)
+
+The before/after table's "reports lost to parsing … known gap, fix on
+branch" is no longer current: the coercion fix merged as 2889342 (with
+regression fixtures extracted from these exact episodes), and the
+open-loop parsing architecture it patched was then superseded entirely by
+ADR-0021 (report contract enforcement — a validated `submit_report` MCP
+tool; lenient parsing survives only as a fallback path that flags a
+`sidecar_report_coerced` anomaly). The numbers in this record describe
+the build at 6f69ff9 and remain the project's only citable verdict until
+the pre-registered confirmatory re-run of the post-ADR-0020.1/0021 build.
