@@ -34,31 +34,47 @@ func TestAnticipationPredictionMatching(t *testing.T) {
 	}
 }
 
+// TestWriteAnticipationPredictorArtifacts is hermetic: it mines only the
+// COMMITTED eval corpus (in-repo artifacts) and writes to a temp dir. The
+// committed analysis under docs/evals/anticipation-predictor-2026-07/ is the
+// worker's frozen 2026-07-06 snapshot and must never be rewritten by a test
+// run — regenerating it (e.g. after a report-contract revision per the
+// ADR-0031.1 implementation note) is an explicit act: set
+// GHX_ANTICIPATION_OUT_DIR to the target directory and, for the dogfood
+// corpus, GHX_ANTICIPATION_LOCAL_SESSIONS to a sessions dir; local ~/.ghx
+// mining is machine-specific and never part of the default suite.
 func TestWriteAnticipationPredictorArtifacts(t *testing.T) {
 	repoRoot := testRepoRoot(t)
 	evalRunDir := filepath.Join(repoRoot, "docs", "evals", "gate-run-2026-07-06-fixbatch")
-	outDir := filepath.Join(repoRoot, "docs", "evals", "anticipation-predictor-2026-07")
 
 	evalPairs, evalSummary, err := MineAnticipationEvalCorpus(evalRunDir)
 	if err != nil {
 		t.Fatalf("mine eval corpus: %v", err)
 	}
-	localPairs, localSummary, err := MineAnticipationLocalSessions(filepath.Join(homeDir(t), ".ghx", "sessions"))
-	if err != nil {
-		t.Fatalf("mine local sessions: %v", err)
+	if evalSummary.Pairs != 30 {
+		t.Fatalf("eval pairs = %d, want 30", evalSummary.Pairs)
+	}
+
+	var localPairs []AnticipationPairResult
+	var localSummary AnticipationCorpusSummary
+	if sessionsDir := os.Getenv("GHX_ANTICIPATION_LOCAL_SESSIONS"); sessionsDir != "" {
+		localPairs, localSummary, err = MineAnticipationLocalSessions(sessionsDir)
+		if err != nil {
+			t.Fatalf("mine local sessions: %v", err)
+		}
+	}
+
+	outDir := os.Getenv("GHX_ANTICIPATION_OUT_DIR")
+	if outDir == "" {
+		outDir = t.TempDir()
 	}
 	if err := WriteAnticipationPredictorArtifacts(outDir, evalPairs, localPairs, evalSummary, localSummary); err != nil {
 		t.Fatalf("write artifacts: %v", err)
 	}
-
-	if evalSummary.Pairs != 30 {
-		t.Fatalf("eval pairs = %d, want 30", evalSummary.Pairs)
-	}
-	if localSummary.Pairs == 0 {
-		t.Fatal("local dogfood corpus produced no pairs")
-	}
 	t.Logf("committed-evals recall=%.3f precision=%.3f pairs=%d seeded=%d", evalSummary.MicroRecall, evalSummary.MicroPrecision, evalSummary.Pairs, evalSummary.SeededPairs)
-	t.Logf("local-dogfood recall=%.3f precision=%.3f pairs=%d seeded=%d", localSummary.MicroRecall, localSummary.MicroPrecision, localSummary.Pairs, localSummary.SeededPairs)
+	if localSummary.Pairs > 0 {
+		t.Logf("local-dogfood recall=%.3f precision=%.3f pairs=%d seeded=%d", localSummary.MicroRecall, localSummary.MicroPrecision, localSummary.Pairs, localSummary.SeededPairs)
+	}
 }
 
 func testRepoRoot(t *testing.T) string {
@@ -68,13 +84,4 @@ func testRepoRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
-}
-
-func homeDir(t *testing.T) string {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return home
 }

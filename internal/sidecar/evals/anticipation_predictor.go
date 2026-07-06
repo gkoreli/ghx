@@ -113,16 +113,18 @@ func MineAnticipationEvalCorpus(runDir string) ([]AnticipationPairResult, Antici
 		}
 		for i := 0; i+1 < len(ep.Turns); i++ {
 			pairs = append(pairs, measureAnticipationPair(pairInput{
-				Corpus:             "committed-evals",
-				EpisodeID:          ep.ID,
-				TaskID:             ep.TaskID,
-				Repo:               ep.Repo,
-				Profile:            string(ep.Profile),
-				FromTurn:           ep.Turns[i].Turn,
-				ToTurn:             ep.Turns[i+1].Turn,
-				NextReads:          reportNextReads(ep.Turns[i].Report),
-				ActualReads:        actualReadsFromEvalTurn(ep.Repo, ep.Turns[i+1]),
-				SourceArtifactPath: path,
+				Corpus:      "committed-evals",
+				EpisodeID:   ep.ID,
+				TaskID:      ep.TaskID,
+				Repo:        ep.Repo,
+				Profile:     string(ep.Profile),
+				FromTurn:    ep.Turns[i].Turn,
+				ToTurn:      ep.Turns[i+1].Turn,
+				NextReads:   reportNextReads(ep.Turns[i].Report),
+				ActualReads: actualReadsFromEvalTurn(ep.Repo, ep.Turns[i+1]),
+				// Machine-portable provenance: committed artifacts must not
+				// embed the mining machine's absolute paths.
+				SourceArtifactPath: filepath.Base(path),
 			}))
 		}
 	}
@@ -170,7 +172,7 @@ func MineAnticipationLocalSessions(sessionsDir string) ([]AnticipationPairResult
 				ToTurn:             turn + 1,
 				NextReads:          reportNextReads(from),
 				ActualReads:        setToSortedSlice(tracesByTurn[turn+1]),
-				SourceArtifactPath: sessionDir,
+				SourceArtifactPath: filepath.Base(sessionDir),
 			}))
 		}
 	}
