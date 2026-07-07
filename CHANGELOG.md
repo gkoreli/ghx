@@ -10,8 +10,12 @@ prose here.
 
 ## [Unreleased]
 
-Staged on `mainline`, not yet released. Ergonomics for the main-agent consumer
-plus architecture and eval-trust hardening.
+Nothing released yet in this cycle.
+
+## [2.7.0] — 2026-07-07
+
+Ergonomics for the main-agent consumer plus architecture and eval-trust
+hardening.
 
 ### Added
 
