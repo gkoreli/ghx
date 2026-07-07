@@ -31,6 +31,12 @@ type DaemonMetadata struct {
 	ConfigDigest string `json:"configDigest"`
 	// StartedAt is the UTC daemon start timestamp.
 	StartedAt time.Time `json:"startedAt"`
+	// ExePath is the executable the daemon process is running. Part of the
+	// client health handshake: two dev builds share Version "dev", so version
+	// alone cannot detect a stale warm daemon serving old code (live incident
+	// 2026-07-06: a fresh client was silently served by a 3-hour-old spot
+	// binary and shipped no live.jsonl).
+	ExePath string `json:"exePath,omitempty"`
 }
 
 // DaemonPing is the health response returned by ghx.sidecar.Ping.
@@ -45,6 +51,9 @@ type DaemonPing struct {
 	Socket string `json:"socket"`
 	// StartedAt is the UTC daemon start timestamp.
 	StartedAt time.Time `json:"startedAt"`
+	// ExePath is the executable the daemon process is running (see
+	// DaemonMetadata.ExePath). Empty on daemons older than this field.
+	ExePath string `json:"exePath,omitempty"`
 }
 
 // AskResponse is the daemon JSON-RPC response for ghx.sidecar.Ask.
@@ -86,12 +95,14 @@ func NewDaemonServer(version string, cfg Config) (*DaemonServer, error) {
 		return nil, fmt.Errorf("mkdir runtime dir: %w", err)
 	}
 	socket := SocketPath()
+	exe, _ := os.Executable()
 	meta := DaemonMetadata{
 		PID:          os.Getpid(),
 		Socket:       socket,
 		Version:      version,
 		ConfigDigest: ConfigDigest(cfg),
 		StartedAt:    time.Now().UTC(),
+		ExePath:      exe,
 	}
 	return &DaemonServer{version: version, cfg: cfg, pool: NewAgentPool(), meta: meta, stop: make(chan struct{})}, nil
 }
@@ -191,7 +202,7 @@ func (s *DaemonServer) handleConn(conn net.Conn) {
 func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error) {
 	switch req.Method {
 	case "ghx.sidecar.Ping":
-		return DaemonPing{PID: s.meta.PID, Version: s.meta.Version, ConfigDigest: s.meta.ConfigDigest, Socket: s.meta.Socket, StartedAt: s.meta.StartedAt}, nil
+		return DaemonPing{PID: s.meta.PID, Version: s.meta.Version, ConfigDigest: s.meta.ConfigDigest, Socket: s.meta.Socket, StartedAt: s.meta.StartedAt, ExePath: s.meta.ExePath}, nil
 	case "ghx.sidecar.Ask":
 		var ask AskRequest
 		if err := json.Unmarshal(req.Params, &ask); err != nil {
@@ -420,12 +431,42 @@ func (c DaemonClient) Ask(ctx context.Context, cfg Config, req AskRequest) (*Ask
 	return c.ask(ctx, cfg, req)
 }
 
+// exeMatches reports whether a running daemon's executable identity is
+// compatible with this client. Version strings cannot distinguish two dev
+// builds ("dev" == "dev" across arbitrary code), so the daemon's recorded
+// executable path must match the one this client would spawn; a mismatch
+// restarts the daemon (cheap — one cold start) instead of silently serving
+// stale code. Empty ping.ExePath (pre-field daemons) is accepted.
+func (c DaemonClient) exeMatches(ping *DaemonPing) bool {
+	if ping.ExePath == "" {
+		return true
+	}
+	want := c.ExePath
+	if want == "" {
+		if exe, err := os.Executable(); err == nil {
+			want = exe
+		}
+	}
+	return want == "" || canonicalExe(ping.ExePath) == canonicalExe(want)
+}
+
+// canonicalExe normalizes an executable path for identity comparison:
+// os.Executable resolves symlinks (macOS /tmp → /private/tmp) while a
+// caller-configured ExePath may not, and that skew must not read as a
+// different binary (it would restart-loop the daemon).
+func canonicalExe(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
 func (c DaemonClient) ensure(ctx context.Context, cfg Config) error {
 	ping, err := c.ping(ctx)
-	if err == nil && ping.Version == c.Version && ping.ConfigDigest == ConfigDigest(cfg) {
+	if err == nil && ping.Version == c.Version && ping.ConfigDigest == ConfigDigest(cfg) && c.exeMatches(ping) {
 		return nil
 	}
-	if err == nil && (ping.Version != c.Version || ping.ConfigDigest != ConfigDigest(cfg)) {
+	if err == nil {
 		_, _ = c.call(ctx, "ghx.sidecar.Shutdown", map[string]any{})
 		time.Sleep(150 * time.Millisecond)
 	}
@@ -439,7 +480,7 @@ func (c DaemonClient) ensure(ctx context.Context, cfg Config) error {
 	var last error
 	for time.Now().Before(deadline) {
 		ping, last = c.ping(ctx)
-		if last == nil && ping.Version == c.Version && ping.ConfigDigest == ConfigDigest(cfg) {
+		if last == nil && ping.Version == c.Version && ping.ConfigDigest == ConfigDigest(cfg) && c.exeMatches(ping) {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -506,6 +547,13 @@ func (c DaemonClient) spawn() error {
 		if err != nil {
 			return err
 		}
+	}
+	// A `go test` binary cannot serve `sidecar daemon`: spawning it forks a
+	// duplicate test run that lingers forever (leak observed 2026-07-06 —
+	// every full-suite run left a `sidecar.test sidecar daemon --background`
+	// process behind). Same rule as ResolveReportSinkExe.
+	if strings.HasSuffix(exe, ".test") {
+		return fmt.Errorf("refusing to spawn daemon from test binary %s", exe)
 	}
 	logPath := filepath.Join(RuntimeDir(), "daemon.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
