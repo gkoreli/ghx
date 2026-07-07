@@ -10,7 +10,51 @@ prose here.
 
 ## [Unreleased]
 
-_Nothing released yet. Work in progress lands here before it ships._
+Staged on `mainline`, not yet released. Ergonomics for the main-agent consumer
+plus architecture and eval-trust hardening.
+
+### Added
+
+- **CLI errors name the fix-it invocation** (workstream A4). Upstream failures
+  (GitHub 404s, `gh` auth, rate limits) now append a `→` recovery line naming the
+  exact command to run next — an error is an affordance, not a dead end. Exit-code
+  semantics (0/1/2/3) are unchanged
+  ([ADR-0028.1](docs/adr/0028.1-cli-ergonomics-batch.md)).
+- **Depth dial on the MCP recon tool** (NORTH_STAR capability 3). The `recon`
+  tool now takes an optional `depth` — `cheap|normal|deep`, default `normal` —
+  forwarded through the same path as `ask --depth`, so a main agent can steer the
+  reconnaissance budget without touching config. Invalid values are rejected,
+  naming the valid set.
+- **Host-task eval corpus** — 6 hand-authored, provenance-verified fixtures
+  (each cloned at its pinned SHA and confirmed fails-before / passes-after) with
+  memorization-canary enforcement at load. Completes ADR-0032.1's build (slices
+  S1–S4) ([ADR-0032.1](docs/adr/0032.1-host-task-evals-decision.md)).
+
+### Fixed
+
+- **`ToolCallTrace.Locations` is now populated from ACP tool-call notifications.**
+  The field was declared but never written, so the host-task R6 path-scope
+  detector ran on always-empty data and reported false-clean — a
+  visibility/truthfulness gap closed ahead of any host-task run (ADR-0032.1 S2).
+
+### Changed
+
+- **Zero-CLI recon consumer surface tightened** (workstream B2). The recon skill
+  and MCP tool now describe ghx purely as a delegation service — no CLI flag
+  grammar leaks into the main agent's context; the tool description spells out the
+  evidence-report contract and that follow-ups auto-route.
+- **Internal architecture** (from the [2026-07-07 audit](docs/audits/architecture-2026-07-07.md)):
+  removed the dead `callTool` codemode compat binding so `codemode.<tool>()` is the
+  sole API (ADR-0010); decomposed the 1012-line `acp.go` into concern-cohesive
+  files (pure relocation, byte-identical).
+
+### Docs
+
+- [ADR-0034](docs/adr/0034-failure-class-model.md) **(proposed)** — unify the
+  failure-class taxonomy in core so CLI exit codes, MCP tool errors, and sidecar
+  reports map from one source of truth (audit M2). Architecture audit report;
+  trust-ledger H3 re-verified from committed artifacts; CHANGELOG backfilled for
+  v2.3.0–v2.5.0.
 
 ## [2.6.0] — 2026-07-06
 
