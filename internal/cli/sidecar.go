@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/evals"
@@ -259,6 +261,55 @@ check fails.`,
 			return WithExitCode(ExitUpstreamFailure, fmt.Errorf("sidecar preflight failed"))
 		}
 		return nil
+	},
+}
+
+// sidecarTailCmd renders a session's live.jsonl (ADR-0022.1) as a
+// human-readable activity stream — the ergonomic replacement for
+// `tail -f ~/.ghx/sessions/<name>/live.jsonl`.
+var sidecarTailCmd = &cobra.Command{
+	Use:   "tail [session]",
+	Short: "Human-readable live view of a session's turn activity",
+	Long: `ghx sidecar tail — render a session's realtime turn activity (live.jsonl) as
+one concise line per event: turn start/end, streamed text and thinking, and
+every tool call and update as the agent works.
+
+With no argument it picks the most recently active session (so running it
+during an ` + "`ask`" + ` just works). By default it prints the last turn's events and
+exits; ` + "`--follow`" + ` keeps watching from the current turn's start and waits for
+live.jsonl when it does not exist yet — the human-readable ` + "`tail -f`" + ` for a
+running question. ` + "`--raw`" + ` prints the NDJSON lines verbatim instead.`,
+	Example: `  ghx sidecar tail
+  ghx sidecar tail --follow
+  ghx sidecar tail hono-hono --follow
+  ghx sidecar tail --raw`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		follow, _ := cmd.Flags().GetBool("follow")
+		raw, _ := cmd.Flags().GetBool("raw")
+		cfg := sidecar.LoadConfig()
+		name := ""
+		if len(args) == 1 {
+			name = args[0]
+		}
+		if name == "" {
+			resolved, err := sidecar.ResolveTailSession(cfg.SessionsDir)
+			if err != nil {
+				return err
+			}
+			name = resolved
+		}
+		fmt.Fprintf(os.Stderr, "session: %s\n", name)
+		ctx := cmd.Context()
+		if follow {
+			// Ctrl-C is the normal way to leave a follow; treat it as a
+			// clean exit, mirroring `sidecar view`.
+			var stop context.CancelFunc
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			defer stop()
+		}
+		return sidecar.TailLiveLog(ctx, os.Stdout, sidecar.LiveLogPath(cfg.SessionsDir, name),
+			sidecar.LiveTailOptions{Follow: follow, Raw: raw})
 	},
 }
 
@@ -623,6 +674,9 @@ func init() {
 
 	sidecarDoctorCmd.Flags().Bool("live", false, "Also run a real one-prompt turn through the agent (spawns it; diagnoses failures ACP initialize misses)")
 
+	sidecarTailCmd.Flags().Bool("follow", false, "Keep watching for new events; waits for live.jsonl when it does not exist yet")
+	sidecarTailCmd.Flags().Bool("raw", false, "Print the NDJSON event lines verbatim instead of rendering them")
+
 	sidecarReportSinkCmd.Flags().String("out", "", "Path to write the accepted report JSON (required)")
 	sidecarDaemonCmd.Flags().Bool("background", false, "Internal: daemon was auto-spawned in the background")
 	_ = sidecarDaemonCmd.Flags().MarkHidden("background")
@@ -639,7 +693,7 @@ func init() {
 	sidecarSessionsCmd.AddCommand(sidecarSessionsListCmd, sidecarSessionsShowCmd, sidecarSessionsLedgerCmd, sidecarSessionsRerouteCmd)
 	sidecarConfigCmd.AddCommand(sidecarConfigShowCmd, sidecarConfigInitCmd)
 	sidecarEvalsCmd.AddCommand(sidecarEvalsExportCmd)
-	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarEvalsCmd, sidecarSessionsCmd, sidecarConfigCmd)
+	sidecarCmd.AddCommand(sidecarAskCmd, sidecarDaemonCmd, sidecarDoctorCmd, sidecarReportSinkCmd, sidecarEvalsCmd, sidecarSessionsCmd, sidecarConfigCmd, sidecarTailCmd)
 }
 
 // questionSession derives a stable session slug from the question when the ask

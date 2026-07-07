@@ -76,7 +76,9 @@ turn activity in realtime — turn start/end, text and thought chunks, every too
 call and update as the agent works — so
 `tail -f ~/.ghx/sessions/<name>/live.jsonl` watches a running question instead
 of waiting minutes for the final report
-(see [ADR-0022.1](docs/adr/0022.1-live-turn-log.md)).
+(see [ADR-0022.1](docs/adr/0022.1-live-turn-log.md)). `ghx sidecar tail --follow`
+renders that stream as one human-readable line per event, so you rarely need
+the raw `tail -f`.
 
 Sessions persist, so follow-up questions on the same repo are cheaper and
 context-aware. The traces are **official OpenTelemetry** (OTLP/JSON, GenAI
@@ -281,6 +283,7 @@ ghx sidecar sessions list                 # all sessions
 ghx sidecar sessions show <session>       # details + report history
 ghx sidecar sessions ledger <session>     # the accumulated evidence ledger
 ghx sidecar sessions reroute <s> <turn> <dest>  # move a mis-routed turn; both ledgers rebuilt by replay
+ghx sidecar tail [session] --follow       # human-readable live view of a running question
 ghx sidecar view [session]                # spawn a local trace UI over the session's artifacts
 ghx sidecar view --list                   # sessions with turn/report counts
 ghx sidecar view --port 9000              # viewer UI port (default 8000)
@@ -425,6 +428,7 @@ ghx sidecar sessions list                   # List persisted sidecar sessions
 ghx sidecar sessions show <session>         # Metadata + report history
 ghx sidecar sessions ledger <session>       # Accumulated evidence ledger JSON
 ghx sidecar sessions reroute <s> <turn> <dest> # Move a mis-routed turn and rebuild ledgers
+ghx sidecar tail [session] --follow         # Human-readable live view of turn activity (live.jsonl)
 ghx sidecar view [session]                  # Local OTel viewer over session artifacts
 ghx sidecar evals export --format sft --run <dir> --out <file> # Export committed eval episodes
 ghx sidecar report-sink --out <path>        # Internal report-sink MCP server used by ACP turns
