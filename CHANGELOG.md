@@ -30,6 +30,12 @@ Staged on `mainline`, not yet released.
   now names the correct invocation (`ghx explore owner/repo src` /
   `ghx grep owner/repo PATTERN --path PATH`) instead of a bare error
   (workstream A4).
+- **Sidecar daemon is now supervisor-hardened** — a panic in one turn is
+  isolated to that request instead of taking down the daemon and all warm
+  sessions; a disconnected/cancelled client actually cancels its turn; and the
+  daemon drains active turns gracefully on shutdown
+  ([ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md)
+  A1; implements ADR-0030 D6).
 
 ### Fixed
 
