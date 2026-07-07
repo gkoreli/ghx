@@ -295,6 +295,13 @@ func init() {
 	_ = readCmd.Flags().MarkHidden("limit")
 }
 
+// searchFn is the seam through which searchCmd reaches the code-search backend.
+// It exists so a test can drive the command's error path (e.g. a live 401) and
+// prove the upstream error is surfaced through upstreamError — i.e. the fix-it
+// affordance wiring, not just the affordance table in errors.go, is what dogfood
+// friction F3 (docs/dogfood/FRICTION.md) is about. Production keeps ghxlib.Search.
+var searchFn = ghxlib.Search
+
 var searchCmd = &cobra.Command{
 	Use:   "search [<owner/repo>] <query> [--limit N] [--full]",
 	Short: "Code search (AND matching, matching context)",
@@ -316,7 +323,7 @@ topic use ` + "`ghx repos`" + ` instead. Exit code 1 means no code matched.`,
 		glob, _ := cmd.Flags().GetString("glob")
 		query := buildSearchQuery(args, lang, glob)
 
-		result, err := ghxlib.Search(query, ghxlib.SearchOpts{
+		result, err := searchFn(query, ghxlib.SearchOpts{
 			Limit:    limit,
 			FullMode: fullMode,
 			Budget:   budget,

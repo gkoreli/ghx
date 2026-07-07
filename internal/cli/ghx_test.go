@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	ghxlib "github.com/gkoreli/ghx/v2/internal/ghx"
 	"github.com/spf13/cobra"
 )
 
@@ -225,6 +226,41 @@ func TestSemanticExitCodes(t *testing.T) {
 	}
 	if got := CodeForError(errors.New("plain")); got != ExitBadInvocation {
 		t.Fatalf("plain error code = %d, want %d", got, ExitBadInvocation)
+	}
+}
+
+// TestSearchCommand401AttachesAuthAffordance pins dogfood friction F3
+// (docs/dogfood/FRICTION.md): a live upstream 401 on `ghx search` must surface
+// the `gh auth login` fix-it affordance rather than the bare HTTP string, while
+// keeping the upstream exit code (3). It drives the command's real error path
+// through the searchFn seam, so a future change that surfaces the error without
+// upstreamError — the exact F3 regression — fails here even though the
+// errors.go affordance table (TestUpstreamAffordanceClassifies) stays green.
+func TestSearchCommand401AttachesAuthAffordance(t *testing.T) {
+	orig := searchFn
+	defer func() { searchFn = orig }()
+	// Byte-for-byte the error text internal/ghx.Search wraps around a go-gh 401
+	// (captured from a live bad-token run), so the classifier is exercised on the
+	// real shape, not a synthetic one.
+	searchFn = func(string, ghxlib.SearchOpts) (*ghxlib.SearchResult, error) {
+		return nil, errors.New("search failed: HTTP 401: Bad credentials (https://api.github.com/search/code?q=%22func+eventLoop%22+repo%3Acharmbracelet%2Fbubbletea&per_page=30)")
+	}
+
+	err := searchCmd.RunE(searchCmd, []string{"charmbracelet/bubbletea", "func eventLoop"})
+	if err == nil {
+		t.Fatal("search RunE returned nil for a 401; want an upstream error")
+	}
+	if got := CodeForError(err); got != ExitUpstreamFailure {
+		t.Fatalf("exit code = %d, want %d (a 401 must stay upstream/exit 3)", got, ExitUpstreamFailure)
+	}
+	if !strings.Contains(err.Error(), "gh auth login") {
+		t.Fatalf("401 error did not name the fix; want `gh auth login` in:\n%s", err.Error())
+	}
+	// The fix-it line lands behind the affordance marker on its own trailing line,
+	// the single predictable parse point for an agent reading the tail of stderr.
+	lines := strings.Split(err.Error(), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, affordanceMarker) {
+		t.Fatalf("affordance not on final line: %q", last)
 	}
 }
 
