@@ -96,7 +96,7 @@ brain itself, dogfooded live during the audit, *worked* — proving the thesis i
 - **AX · Orchestration/compose · report schema.** Empty-`verified` / unverified answers are not elevated to the `answer` surface (F4); cited paths carry no repo qualifier, so they 404 on scope-drift (F5) (`PA-0001.1`). → **workstream B**.
 
 ### L1 — Number drift in the strategy docs  ·  Severity: Low-Med (L3×I1)
-- **North-Star + Platform · strategy-doc-as-product · `NORTH_STAR.md`/ADRs.** SPT quoted four ways (16×/24×/25×/35×; the 24×≈compression identity is reclassified into H2 as *proof*, not drift). The "~400-line persona doctrine" anchoring the **P4 exit trigger** is **overstated**: the rendered recon doctrine is `BuildPersonaSystemPrompt()` (`internal/sidecar/prompt.go:37`), ~**130–141 lines** of raw-string prompt — not ~400, and not the 350-line *whole file* (which also holds `BuildDiscoveryPersonaSystemPrompt()` at :221 + assembly helpers). **Correction (PF1, via the PA-0001 process retrospective):** my initial judge note dismissed the persona's "141" by comparing it to the 350-line whole file — a non-comparable measurement (evidence-drift); the persona was substantially right and "~400" *is* overstated. → reconcile the figures; cite the **measured rendered-doctrine / cache-stable token cost** for the exit trigger. Recompute: `sed -n '37,220p' internal/sidecar/prompt.go | wc -l`.
+- **North-Star + Platform · strategy-doc-as-product · `NORTH_STAR.md`/ADRs.** SPT quoted four ways (16×/24×/25×/35×; the 24×≈compression identity is reclassified into H2 as *proof*, not drift). The "~400-line persona doctrine" anchoring the **P4 exit trigger** is **overstated**: the rendered recon doctrine is `BuildPersonaSystemPrompt()` (`internal/sidecar/prompt.go:37`), ~**130–141 lines** of raw-string prompt — not ~400, and not the 350-line *whole file* (which also holds `BuildDiscoveryPersonaSystemPrompt()` at :221 + assembly helpers). **Correction (PF1, via the PA-0001 process retrospective):** my initial judge note dismissed the persona's "141" by comparing it to the 350-line whole file — a non-comparable measurement (evidence-drift); the persona was substantially right and "~400" *is* overstated. **Sharpened + verified (PA-0001.9):** `prompt.go:32` uses "~400 *tokens*" for the per-turn *savings* of moving the persona to the system prompt — a **different quantity** than NORTH_STAR's "~400 *lines*" of doctrine; the actual rendered doctrine is ~137 lines / ~1.6k tokens, so "~400" is both ~3× inflated (vs lines) *and* **unit-conflated** (lines vs tokens) across the docs/code. → reconcile the figures; cite the **measured rendered-doctrine cost** (~137 lines / ~1.6k tokens) for the exit trigger. Recompute: `sed -n '37,220p' internal/sidecar/prompt.go | wc -l`.
 
 ### L2 — A failed milestone risks reading as working  ·  Severity: Low (L2×I1)
 - **AI-PM + North-Star + Platform · capability-claims · `NORTH_STAR.md`/M8.** M8 anticipation's D1 gate FAILED (nextReads recall 0.071/0.000) but is described in prose alongside working capabilities; `nextReads` is promised-but-unenforced (`PA-0001.3` F6 → ADR-0031.2). The failed gate already halted the build correctly — the fix is narrative, ensuring nothing cites M8 as evidence it works.
@@ -132,6 +132,34 @@ and sharpened four:
 
 **Status:** the High findings are now **self-verified + same-family-adjudicated**; the
 **cross-family (Codex/gpt-5.5 or Goga) check is still owed** before any feeds a milestone go/no-go.
+
+## Distillation outcome (PA-0001.9 — convergence pass, judged)
+
+A fresh no-stake distiller mined the intersection and cross-validated against the codebase. My
+judge verdicts:
+
+- **Convergence, correctly re-scored (shared-prior discipline).** The finding that *looked* most
+  convergent — H2, "two personas agree" — is **shared-prior** (both read `corpus-discrimination`);
+  its HIGH signal comes from the distiller's **independent recompute**, not head-count. The one
+  **genuinely independent** cross-persona convergence is **H3** (Helmer 7-Powers *and* Thompson
+  aggregation, different evidence paths). Signal ≠ head-count. **Supported.**
+- **Top 3 to act on (cross-validated, ranked by leverage):** **H1** (flip the default install —
+  one-file, zero measurement dependency) › **H2** (align the banner with the ledgers) › **M1**
+  (clean the recon MCP contract). **Supported.**
+- **F7 / L1 — the distiller REFUTED my earlier dismissal, and it is right** (L1 now corrected):
+  rendered doctrine ~137 lines / ~1.6k tokens; "~400" inflated *and* unit-conflated. **Accepted
+  against my own prior — the process caught the judge twice.**
+- **H3 Explore → firmly NUANCE:** native `Explore` is local-filesystem-only; it does not touch
+  ghx's *measured* remote / no-clone / discovery domain — which is therefore **uncontested**.
+  **Supported.**
+- **Bones thrown away (I concur):** "Explore commoditizes ghx" (over-reach); the "SPT is *not* a
+  quality meter / value-free" label (the numerator *is* a quality proxy; the real issue — the
+  unmeasured quality half — is already in H2); "the named SPT is non-load-bearing" (SPT-not-a-gate
+  is good hygiene, the zealot's own least-confident call); L2 "M8 reads as working" (already
+  halted, ADR-0031.2). **Vetoed as findings.**
+
+**Net actionable core: H1 › H2 › M1** (+ the license/trust and unversioned-report items); **H3 is
+the highest-*stakes* strategic watch.** Cross-family adjudication still owed before any go/no-go.
 
 ## What is actually fine (checked with equal rigor — and load-bearing here)
 
