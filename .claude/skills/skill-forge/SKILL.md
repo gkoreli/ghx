@@ -37,6 +37,7 @@ mechanical config change, or anything a single sharp pass already nails — the 
 | **2 — Adversarial review (breadth)** | M background reviewers, distinct scopes | ranked `reviews/*.md` critiques |
 | **3 — Reconcile (the judge)** | the orchestrator | accept/decline decisions + a revision |
 | **↻ iterate** | — | another review round only if marginal value remains |
+| **↳ Distil (conditional)** | *if the deliverable is a multi-agent synthesis:* a fresh no-stake agent mines the intersection, then the orchestrator judges | one distilled `*.9-distilled` artifact |
 | **4 — Finalize** | the orchestrator | committed skill dir + provenance + a story in the log |
 
 ---
@@ -115,7 +116,9 @@ You are the authoritative judge, and a model adjudicating its own delegated work
   rule that shouldn't be leaned on without checking.)
 - **Accept only what is verified and high-value. Decline** cargo-cult additions, changes the
   reviewer itself rated low-confidence, and scope creep — and **record what you declined and
-  why.** Adding has a real cost (signal dilution); removals and "no" are valid outcomes.
+  why.** Adding has a real cost (signal dilution); removals and "no" are valid outcomes — up to
+  concluding the **premise itself is wrong**, or that a load-bearing source (even a *canonical*
+  one) has gone stale and should be flagged for evolution rather than deferred to.
 - **Treat agreement among same-family reviewers as possible shared-prior, not independent
   corroboration.** For the highest-stakes decisions, get an **independent cross-family check**
   (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or the human). If the cross-family
@@ -131,10 +134,24 @@ You are the authoritative judge, and a model adjudicating its own delegated work
 - **Finalize:** the skill directory ships as `SKILL.md` + `research/` + `reviews/`, and the
   commit history tells the story (research → draft → review → reconcile). Commit provenance;
   don't leave it in scratch.
-- **For multi-agent *outputs* (e.g. an audit), add a convergence/distillation pass:** a fresh,
-  no-stake agent mines the intersection of the fan-out — *genuine* cross-agent convergence is
-  high signal, *shared-prior* convergence (same source) is not — into one distilled artifact the
-  orchestrator then judges (support/veto with evidence; eat the fish, throw the bones).
+## Convergence & distillation (when the deliverable is a multi-agent synthesis)
+
+When the artifact you are producing is itself a **synthesis of a multi-agent fan-out** — an audit,
+a research compendium, a multi-perspective report — add a dedicated final pass (this is the
+product-audit Process step 8, generalized):
+
+- After the synthesis, delegate a **fresh, no-stake agent** to mine the **intersection** of the
+  fan-out, **cross-validate against the source material**, and **re-run reproduction/recompute
+  steps** — distilling everything into one final artifact.
+- **Genuine convergence across *independent* agents and evidence is high signal; a lone
+  suggestion is low signal — but discount *shared-prior* convergence:** agreement because agents
+  read the same source is not independent corroboration (in the worked example, the finding that
+  *looked* most convergent — two agents agreeing — was shared-prior; its real signal came from the
+  distiller's independent recompute, not the head-count).
+- **You remain the judge.** Read and respect every perspective, then support or veto each distilled
+  idea with evidence and cross-references — **eat the fish, throw the bones** (there are many). The
+  distiller surfaces and ranks; it never stands unjudged. A dedicated clean agent reduces bias, but
+  the final document — and the accept/veto call — is still yours.
 
 ---
 
@@ -142,6 +159,13 @@ You are the authoritative judge, and a model adjudicating its own delegated work
 
 - **Delegate breadth, keep judgment.** Research and review fan out; authorship and the
   accept/reject call stay in the orchestrator.
+- **Every delegated agent holds the big picture — none goes blindsided.** Ground each research,
+  review, validation, and distillation agent in the goal *and* the project's canonical context and
+  tenets (the vision, the north star, `AGENTS.md`) before it starts, and demand a **forward-looking
+  lens**: this is 2026 — learn from history, but never cargo-cult a pre-AI-scale idea just because
+  it once worked (that world had no AI at this scale of capacity, influence, or coherence). The
+  context-re-pricing pass (Wave 2) is the mechanism; holding the vision is *every* agent's job. An
+  agent that forgets the big picture optimizes a local artifact against the whole.
 - **Sourcing discipline is the top quality lever** — specific URLs + rationale + verification
   + disclosed degradations + labelled synthesis. Enforce it on every delegated agent.
 - **The context re-pricing pass is a standing Round-0 step, not an afterthought** — one agent
