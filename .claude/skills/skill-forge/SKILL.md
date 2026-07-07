@@ -118,7 +118,10 @@ You are the authoritative judge, and a model adjudicating its own delegated work
   why.** Adding has a real cost (signal dilution); removals and "no" are valid outcomes.
 - **Treat agreement among same-family reviewers as possible shared-prior, not independent
   corroboration.** For the highest-stakes decisions, get an **independent cross-family check**
-  (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or the human).
+  (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or the human). If the cross-family
+  checker is unavailable, a **fresh, no-stake Claude** adjudicator is a partial fallback —
+  it removes stake/shared-context bias, not model-family bias; flag findings checked only
+  same-family.
 - **Revise, then commit** with a message that states what was accepted *and* declined.
 
 ## Iterate / finalize

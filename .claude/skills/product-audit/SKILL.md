@@ -82,6 +82,19 @@ for a product finding, but its findings are always framed in product terms.
    discipline to *this audit's* judge (see Process step 5). Treat agreement among Claude
    personas as possible shared-prior, **not** independent corroboration.
 
+6. **Scope the attack surface — focused, not exhaustive; narrow *and* holistic.** Every audit
+   declares a **focus** up front — a milestone, feature, goal, vision thread, or surface: the
+   *attack surface* for this run. Do **not** re-audit the whole product from inception. As ghx
+   grows, whole-product sweeps still happen but stay occasional, event-driven, and *still carry
+   a focus*; re-litigating settled features every run is a smell — a finding already raised and
+   dispositioned in a prior `PA-000N` is **referenced, not re-derived**. **But scoped ≠
+   narrow-minded:** assess the focus both *narrowly* (is this feature/milestone good on its
+   own?) and *holistically* (does it align with the whole ghx product, the agentic-first
+   engineering tenets, the north-star vision, and the *cohesion* of what already exists?). A
+   feature can be locally sensible yet globally futile or counterproductive to product
+   cohesion — naming that is one of the audit's highest-value outputs. Record the focus and this
+   run's in-scope / out-of-scope in the artifact frontmatter (Output contract).
+
 ---
 
 ## Process (how the orchestrator runs an audit)
@@ -91,8 +104,11 @@ quick targeted pass is the default (mirrors the repo's eval cadence: spot-check 
 big runs are rare and event-driven). Spin up the full multi-persona delegation only for a
 milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by reflex.
 
-1. **Ground.** Read `docs/NORTH_STAR.md` (+ the relevant ADR/milestone). Write the audit's
-   goal in one sentence and the decision it informs.
+1. **Ground & focus.** Read `docs/NORTH_STAR.md` (+ the relevant ADR/milestone). Declare the
+   audit's **focus / attack surface** (the milestone / feature / goal / vision thread under
+   audit), its goal in one sentence, the decision it informs, and this run's **in-scope /
+   out-of-scope** — then hold the whole product, tenets, and vision in mind while auditing that
+   focus (directive 6). No focus ⇒ don't run it; a from-inception sweep is not a focus.
 2. **Scope the audit — cap all three axes.** Choose **3–5 personas** (span the axes; ★
    near-mandatory), **3–5 scopes** (Tier A and/or Tier B — Tier B is *selective*, not
    automatic), and **only the surfaces where those scopes' evidence lives**. Personas,
@@ -107,9 +123,13 @@ milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by refle
    *your own* re-derivation? Is it DH5/DH6? Does it respect the agentic-first re-pricing
    (not cargo-culted)? Is it in scope? Reject, merge duplicates, re-severity. **For every
    High / thesis-invalidating finding, the "orchestrator is judge" claim only holds with a
-   mechanism, not a vibe:** re-derive it from raw evidence yourself, get an **independent
-   cross-family check** (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or Goga)
-   before it is citable, and record *who judged it and how a reader checks the judge* —
+   mechanism, not a vibe:** re-derive it from raw evidence yourself, get an **independent adjudication** before it is
+   citable — *prefer* a cross-family checker (Codex/gpt-5.5 via `fable-delegation`) to
+   neutralize model-family self-preference; if unavailable (e.g. usage-capped), fall back to a
+   **fresh, independent Claude adjudicator** (a new agent, no stake, adversarial brief) — a
+   *partial* mitigation that removes the stake/shared-context bias but **not** the same-family
+   bias, so flag any finding that got only a same-family check. Record *who judged it and how a
+   reader checks the judge* —
    the same calibration the product demands of its own eval judge (`AGENTS.md`
    Visibility/Truthfulness). Do not run a milestone decision on an unchecked judge.
 6. **Rank & synthesize** into one report (contract below): summary → ranked findings →
@@ -152,8 +172,10 @@ Write to `docs/product-audit/` — **numbered and threaded like ADRs**, and kept
 the *code* audits in `docs/audits/`. An audit round is `PA-000N` (the synthesis report); each
 persona-agent writes a threaded artifact `PA-000N.k-<persona>.md`; the synthesis is
 `PA-000N-<focus>.md`. Match the repo's audit house style. Frontmatter: `title`, `date`,
-`status: "audit"`, `audit: "PA-000N"`, `persona`/`author`, `scope` (one line: surfaces +
-personas + "read-only, no code changes"). Then (for the synthesis `PA-000N`):
+`status: "audit"`, `audit: "PA-000N"`, `focus` (the milestone / feature / goal / vision under
+audit), `in-scope` / `out-of-scope` (what this run examines vs. deliberately defers — distinct
+from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one line: surfaces
++ personas + "read-only, no code changes"). Then (for the synthesis `PA-000N`):
 
 - **Executive summary** — the single highest-leverage finding first, in north-star terms.
 - **Ranked findings**, each with:
@@ -340,7 +362,11 @@ frame in plain language → **key-assumptions check** → **pre-mortem** → **i
 
 ---
 
-## In scope / out of scope (hard boundary)
+## In scope / out of scope (the skill's fixed charter boundary)
+
+This section is the skill's *charter* — what a product audit **ever** covers — and is distinct
+from the **per-run focus / attack surface** each audit declares in its frontmatter (directive 6).
+The charter is fixed; the focus narrows it further, run by run.
 
 **In scope** — product-framed findings: north-star (mis)alignment; PMF/market/competitive/
 positioning/moat/monetization; capability & JTBD gaps; adjacent-idea proposals; agent-
