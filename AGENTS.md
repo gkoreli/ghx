@@ -198,6 +198,25 @@ attribution and stewardship (MIT in, MIT out). Binding rules:
   sidecar tool per NORTH_STAR M7) over rebuilding it.
 - **Be vocal about inspiration.** Credit upstream projects in docs and
   README; hiding influences is both bad stewardship and bad marketing.
+- **Competitive analysis is generative, not defensive** (Goga, 2026-07-07).
+  In-depth study of open-source and real-world competitors never triggers
+  retreat — it doubles down on our advantages and consistently surfaces
+  things to **absorb**: a small idea, a utility, a feature, a vision, or an
+  entire tool/library/product swallowed under the hood (NORTH_STAR P3
+  "swallow the tools" is this rule in the large). Our vision is unique;
+  competitors are a supply of building blocks and inspiration, not a threat.
+  The only gate on absorbing something is vision alignment (the north-star
+  filter) plus the Picasso rule above — adopt openly, with attribution;
+  hand-roll only when nothing serves the vision. The question a competitor
+  raises is never "do we back down" but "what — from one idea to the whole
+  thing — do we take, and where does it plug in."
+- **Dogfood ghx for the exploration itself.** When reconnoitering the
+  open-source / GitHub world (competitive analysis, discovery, absorption
+  scouting), use ghx to do it — the discovery tier (repo-optional,
+  GitHub-wide recon) is exactly this job. Dogfooding our own exploration is
+  both the ergonomics bar (NORTH_STAR §5) and free eval signal; where ghx
+  can't yet do the job, that gap is itself a finding, not a reason to reach
+  past it silently.
 
 ## Engineering Tenets (core tenet — code quality)
 

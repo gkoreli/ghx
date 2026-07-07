@@ -98,7 +98,9 @@ milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by refle
    automatic), and **only the surfaces where those scopes' evidence lives**. Personas,
    scopes, *and* surfaces are all capped; running everything drowns signal.
 3. **Delegate breadth.** Spawn read-only background persona-agents (text-only tools; no
-   worktrees needed), one per persona, using the template below.
+   worktrees needed), one per persona, using the template below. Any GitHub/OSS exploration
+   in the audit (competitive, discovery, absorption scouting) **dogfoods ghx itself** — using
+   the product to audit the product both proves it and yields free eval signal.
 4. **Each persona-agent** returns a findings artifact *and* a "what I checked and found
    sound" (nulls) section — persona-level honesty, not just report-level.
 5. **Judge (the load-bearing step).** For each returned finding: does the evidence hold on
@@ -130,6 +132,9 @@ Scopes to apply: <chosen 3–5>  (frameworks + agentic-first HOLDS/ADAPT/INVERTE
 Surfaces: <only where evidence lives> — CLI/MCP/sidecar output · docs · evals+traces
   (~/.ghx/sessions/, docs/evals/) · a live manual run · the strategy docs themselves.
 Tools: text-only (WebSearch/WebFetch/curl/gh). No browser automation, no screenshots.
+  For GitHub/OSS exploration (competitive/discovery/absorption scouting), DOGFOOD ghx itself
+  (its discovery tier is built for this) — fall back to gh/web only where ghx can't yet do
+  the job, and log that gap as a finding.
 Deliver a findings artifact. Each finding: persona·scope·surface | evidence (file:line /
   command+output / trace path / doc quote) | severity (Likelihood×Impact) | north-star
   relationship | a SPECIFIC cross-ref URL + one line on why it matters. DH5/DH6 bar: quote
@@ -164,6 +169,10 @@ personas + "read-only, no code changes"). Then:
 - **"What is actually fine"** — supposed problems checked and found sound, equal rigor.
 - **Adjacent-idea proposals** — labelled as proposals, each filtered against the north star
   and named on the Ansoff grid (penetration / development / diversification).
+- **Absorption candidates** — open-source/competitor components worth absorbing (idea →
+  utility → feature → whole tool under the hood), each with *what to take*, *where it plugs
+  in*, and its *north-star-filter alignment*. Steal openly, with attribution; competition is
+  a supply of building blocks, not a threat (`AGENTS.md` Open Source Leverage).
 - **What was not audited** — axes deliberately omitted this round.
 
 ---
@@ -249,6 +258,16 @@ Apply each with its agentic-first verdict (directive 2). Pick 3–5 total.
 > discovery — but the competitive/positioning/moat scopes only work if this is the named
 > comparison, and ablation baselines (PMF scope) should include native-Explore, not only
 > plain/ghx/ghx-sidecar. (Verify current behavior: `code.claude.com/docs` sub-agents.)
+
+> **Competitive analysis here is generative, not defensive** (`AGENTS.md` Open Source
+> Leverage). Score every competitor / OSS tool for what we can **absorb** — a small idea, a
+> utility, a feature, a vision, or the whole tool swallowed under the hood (NORTH_STAR P3) —
+> gated only by the north-star filter and the Picasso rule (steal openly, with attribution;
+> hand-roll only when nothing serves the vision). Our vision is unique; competition is a
+> supply of building blocks, never a reason to retreat. So these scopes feed **Absorption
+> candidates** in the report, not only threat lists — that is what the Competitive-Paranoid
+> (#7) lens turns *into*: doing more, not backing down. (Artifact 07 is this in action —
+> AX rubrics absorbed from `axprobe`/`promptfoo`, prior-art negative kept.)
 
 ### Tier B — Agent-native (the AX umbrella; ghx's home turf) — selective, pick what the goal needs
 
