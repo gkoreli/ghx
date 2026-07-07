@@ -201,6 +201,29 @@ Run with:
 claude -p --model sonnet --effort low --dangerously-skip-permissions "<wrapper prompt>"
 ```
 
+## Landing a worker branch (rebase, no merge commit)
+
+When a worker (Codex or Claude) has committed on its branch, land it **linearly**
+— rebase onto `mainline` and fast-forward. No squash (preserve each worker
+commit), no `--no-ff` (no merge bubble). Verify the worker's evidence against the
+governing ADR/tenets *before* landing; run the suite/race gate *after* code lands.
+
+```bash
+# from the repo root on mainline. Remove the worktree first so the branch is free
+# to be checked out for the rebase (the commits are safe on the branch ref).
+git worktree remove --force <worktree-path>
+git rebase mainline <worker-branch>   # replay the worker's commits onto mainline's tip
+                                      # (disjoint files => no conflicts; resolve if any)
+git switch mainline
+git merge --ff-only <worker-branch>   # linear fast-forward, no merge commit
+git branch -d <worker-branch>
+git worktree prune
+```
+
+This is the canonical integration path (rule in `AGENTS.md` "Integrating
+Delegated Work"). The old `git merge --no-ff` per worker is retired — it left a
+merge bubble per ephemeral branch and made the log hard to read.
+
 ## Evidence Contract
 
 Every delegated worker must return:

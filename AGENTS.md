@@ -291,6 +291,26 @@ slice passing, a completed refactor step, a committed eval verdict. Rules:
 - `.ghx-evals/` is gitignored; curated eval evidence goes under `docs/evals/`.
 - Never commit secrets, tokens, or personal config.
 
+## Integrating Delegated Work
+
+Background workers and the orchestrator (Fable) have split responsibilities so
+history stays linear and clean:
+
+- **Workers** commit atomic, well-messaged units on their own worktree branch
+  and stop. Never merge, never rebase, never push, and never sync `mainline`
+  into your branch — leave integration to the orchestrator. Keep each commit a
+  coherent unit so it rebases cleanly.
+- **The orchestrator** lands a finished worker branch by **rebasing it onto
+  `mainline` and fast-forwarding** — linear history, **no squash** (every
+  worker commit is preserved individually), **no merge commit**. Verify the
+  worker's evidence against the ADRs/tenets before landing, and run the
+  suite/race gate after landing code changes.
+
+Rationale: worker branches are ephemeral and touch disjoint files; a merge
+commit per worker adds topology noise without information (the "which worker"
+context already lives in the commit message). A linear log is easier to read,
+bisect, and revert.
+
 ## Changelog
 
 `CHANGELOG.md` records every released version, newest first, in
