@@ -263,22 +263,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 
 	if liveness > 0 {
-		go func() {
-			for {
-				idle := time.Duration(time.Now().UnixNano() - lastActivity.Load())
-				remaining := liveness - idle
-				if remaining <= 0 {
-					cancelTurn(fmt.Errorf("%w: no ACP session update for %s (set %s to adjust)",
-						ErrLivenessTimeout, liveness, LivenessTimeoutEnv))
-					return
-				}
-				select {
-				case <-turnCtx.Done():
-					return
-				case <-time.After(remaining):
-				}
-			}
-		}()
+		startACPWatchdog(turnCtx, &lastActivity, cancelTurn, liveness)
 	}
 
 	// cwd is the ACP session workspace. The authoritative neutral-workspace
@@ -309,84 +294,15 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 		}
 	}
 
-	var sessionID acp.SessionId
-	if opts.ACPSessionID == "" || !initResp.AgentCapabilities.LoadSession {
-		// New session: forward the session-level steering meta (ADR-0020.1 D2).
-		// The _meta bag is adapter-specific; the ACP spec treats it as opaque.
-		req := acp.NewSessionRequest{
-			Cwd:        cwd,
-			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
-		}
-		if opts.SessionMeta != nil {
-			req.Meta = opts.SessionMeta
-		}
-		resp, err := conn.NewSession(turnCtx, req)
-		if err != nil {
-			return result, "", fmt.Errorf("acp new session: %w", turnFailureCause(turnCtx, err))
-		}
-		sessionID = resp.SessionId
-	} else {
-		// Resumed turns re-assert the FULL session meta (ADR-0020.2): each
-		// RunTurn is a fresh adapter process, and without the meta the adapter
-		// rebuilds the session on defaults — no persona system prompt, no
-		// tools allowlist, no budgets/model pin, no isolation, and (in eval
-		// mode) no raw-SDK audit channel. The same map NewSession sends is
-		// forwarded verbatim; the adapter's session fingerprint excludes
-		// _meta, so this cannot fork the session (ADR-0016.10 D2 recon).
-		_, err := conn.LoadSession(turnCtx, acp.LoadSessionRequest{
-			SessionId:  acp.SessionId(opts.ACPSessionID),
-			Cwd:        cwd,
-			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
-			Meta:       opts.SessionMeta,
-		})
-		if err != nil {
-			return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(turnCtx, err))
-		}
-		sessionID = acp.SessionId(opts.ACPSessionID)
+	sessionState := acpSessionState{loadSession: initResp.AgentCapabilities.LoadSession}
+	sessionID, err := configureACPSession(turnCtx, turnCtx, conn, &sessionState, opts, cwd)
+	if err != nil {
+		return result, "", err
 	}
 	touch()
 
 	client.markPromptSent()
-	promptDone := make(chan error, 1)
-	go func() {
-		_, perr := conn.Prompt(turnCtx, acp.PromptRequest{
-			SessionId: sessionID,
-			Prompt:    []acp.ContentBlock{acp.TextBlock(opts.Prompt)},
-		})
-		promptDone <- perr
-	}()
-
-	var promptErr error
-	select {
-	case promptErr = <-promptDone:
-	case <-conn.Done():
-		// Dead peer: fail the turn immediately (ADR-0027 D2) — never wait for
-		// a timer on a connection that cannot answer. Give the in-flight
-		// Prompt call a short grace to unwind first: when both channels are
-		// ready (agent answered and then exited) the completed prompt wins.
-		perr, finished := awaitPromptOrGrace(promptDone)
-		if finished {
-			promptErr = perr
-		} else {
-			promptErr = errors.New(peerClosedMarker + " before the prompt turn completed")
-		}
-		if promptErr != nil && !IsPeerClosedError(promptErr) {
-			promptErr = fmt.Errorf("%s: %w", peerClosedMarker, promptErr)
-		}
-	case <-turnCtx.Done():
-		// Watchdog or parent cancellation. The SDK's own wait also selects on
-		// this context; the grace only covers its unwinding.
-		if perr, finished := awaitPromptOrGrace(promptDone); finished {
-			promptErr = perr
-		} else {
-			promptErr = context.Cause(turnCtx)
-		}
-	}
-	// Prefer the watchdog cause over the SDK's stringified rendering of it so
-	// errors.Is(err, ErrLivenessTimeout) works for callers.
-	if cause := context.Cause(turnCtx); errors.Is(cause, ErrLivenessTimeout) {
-		promptErr = cause
-	}
+	promptErr := waitForACPPrompt(runPrompt(turnCtx, conn, acp.SessionId(sessionID), opts.Prompt), conn.Done(), nil, nil, turnCtx.Done(), turnCtx)
 	// Freeze the result before returning: late notifications from a dying
 	// peer must not race the caller's reads (D3 flushes partial results).
 	result = client.closeAndSnapshot()

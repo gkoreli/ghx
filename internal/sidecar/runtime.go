@@ -270,8 +270,7 @@ func AskWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	return askWithTurnRunner(ctx, cfg, req, runner, false, route)
 }
 
-func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool, route *RouteDecision) (*Report, *TurnResult, error) {
-	sessionsDir := cfg.SessionsDir
+func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool, route *RouteDecision) (report *Report, result *TurnResult, err error) {
 	if preflight {
 		if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
 			return nil, nil, err
@@ -280,19 +279,72 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	if runner == nil {
 		runner = runTurnWithOptions
 	}
-	// Session routing (ADR-0030.1 D1): both the daemonless path and the
-	// daemon evaluate the same deterministic cascade; R1/R2 preserve the
-	// ADR-0019.1 precedence byte-for-byte.
+	state, err := prepareSession(cfg, req, route)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer state.cleanupSink()
+
+	liveLog := NewLiveLog(state.livePath)
+	defer func() {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		liveLog.TurnCompleted(err == nil, errMsg, len(state.turnResult.ToolCalls), len(state.turnResult.FullText))
+		liveLog.Close()
+	}()
+
+	liveLog.TurnStarted(state.req.Session, state.req.Repo, state.req.Question)
+	err = runPrimaryTurn(ctx, runner, state)
+	blockedReport, maxTurnsHandled := recoverMaxTurns(ctx, runner, state, err)
+	if maxTurnsHandled {
+		err = nil
+	}
+
+	if err != nil {
+		emitFailedTurnArtifacts(ctx, state, err)
+		return nil, &state.turnResult, DiagnoseTurnError(fmt.Errorf("run turn: %w", err), state.stderrLog)
+	}
+
+	report = resolveReportWithRetry(ctx, runner, state, blockedReport)
+	tierDecision := persistTurn(state, report)
+	emitArtifacts(ctx, state, report, tierDecision)
+
+	return report, &state.turnResult, nil
+}
+
+type askTurnState struct {
+	cfg          Config
+	req          AskRequest
+	route        *RouteDecision
+	sessionsDir  string
+	meta         *SessionMeta
+	ledger       *Ledger
+	workspace    string
+	stderrLog    string
+	livePath     string
+	spawnEnv     []string
+	prompt       string
+	acpSessionID string
+	sessionMeta  map[string]any
+	sinkPath     string
+	cleanupSink  func()
+	startedAt    time.Time
+	turnResult   TurnResult
+	newSessionID string
+}
+
+func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnState, error) {
+	sessionsDir := cfg.SessionsDir
 	if route == nil {
 		d := RouteQuestion(sessionsDir, req, RouteConfigFor(cfg))
 		route = &d
 	}
 	req.Session = route.Session
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-
-	// Ensure session exists on disk.
 	if !IsInitialized(sessionsDir, req.Session) {
 		scope := req.Scope
 		if scope == "" {
@@ -303,50 +355,28 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		}
 		repo := req.Repo
 		if repo == "" {
-			// R2 fired on an owner/repo token in the question text: the new
-			// repo-slug session records that repo, exactly as a --repo ask
-			// would have created it.
 			repo = route.DetectedRepo
 		}
 		if err := InitSession(sessionsDir, req.Session, repo, scope, route.sessionNamedBy()); err != nil {
-			return nil, nil, fmt.Errorf("init session: %w", err)
+			return nil, fmt.Errorf("init session: %w", err)
 		}
 	}
-
 	meta, err := ReadMeta(sessionsDir, req.Session)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read meta: %w", err)
+		return nil, fmt.Errorf("read meta: %w", err)
 	}
-
-	// Resolve the neutral, deterministic ACP session workspace and record agent
-	// provenance (ADR-0033 D1/D5). Precedence: an explicit Config.Cwd override
-	// (evals pin a checkout) > the persisted SessionMeta.Cwd (resume
-	// determinism) > the ghx-owned session directory (default). Persist the
-	// resolution plus the agent command, this process's spawn cwd, and the
-	// agent-relevant env-var NAMES so an environment-specific failure is
-	// diagnosable from committed artifacts. This runs on the creating turn
-	// (session just initialized above) and backfills legacy sessions on write.
 	workspace := resolveSessionWorkspace(cfg, sessionsDir, req.Session, meta)
 	stderrLog := AgentStderrLogPath(sessionsDir, req.Session)
 	livePath := LiveLogPath(sessionsDir, req.Session)
-
-	// Resolve the agent spawn environment (ADR-0033.1). Precedence: an
-	// explicit Config.Env (eval profiles pin the whole environment) > the
-	// asking client's auth env overlaid on this process's environment > nil
-	// (exec inherits this process's env). This makes the auth rule
-	// deterministic on the daemon path: the agent authenticates as the shell
-	// that asked, not as whatever context first auto-started the daemon.
 	spawnEnv := cfg.Env
 	if spawnEnv == nil {
 		spawnEnv = MergeAgentEnv(nil, req.AgentAuthEnv)
 	}
 	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd, spawnEnv)
-
 	ledger, err := LoadLedger(sessionsDir, req.Session)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read ledger: %w", err)
+		return nil, fmt.Errorf("read ledger: %w", err)
 	}
-
 	prompt := BuildPrompt(Request{
 		Session:         req.Session,
 		Repo:            req.Repo,
@@ -354,292 +384,198 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 		Depth:           req.Depth,
 		AllowedBackends: req.AllowedBackends,
 	}, meta, ledger)
-
 	acpSessionID := ""
 	if meta != nil {
 		acpSessionID = meta.ACPSessionID
 	}
+	sinkPath, cleanupSink := newReportSinkPath()
+	return &askTurnState{
+		cfg:          cfg,
+		req:          req,
+		route:        route,
+		sessionsDir:  sessionsDir,
+		meta:         meta,
+		ledger:       ledger,
+		workspace:    workspace,
+		stderrLog:    stderrLog,
+		livePath:     livePath,
+		spawnEnv:     spawnEnv,
+		prompt:       prompt,
+		acpSessionID: acpSessionID,
+		sessionMeta:  buildTurnSessionMeta(cfg, req),
+		sinkPath:     sinkPath,
+		cleanupSink:  cleanupSink,
+		startedAt:    time.Now().UTC(),
+	}, nil
+}
 
-	// Build session-level steering meta (ADR-0020.1 D2), sent on EVERY turn:
-	// NewSession applies it at creation and LoadSession re-asserts it on
-	// resume, because each turn's fresh adapter process otherwise rebuilds
-	// the session on unsteered defaults (ADR-0020.2, TRUST H8).
+func buildTurnSessionMeta(cfg Config, req AskRequest) map[string]any {
 	depth := req.Depth
 	if depth == "" {
 		depth = "normal"
 	}
-	// Persona selection (ADR-0019.1 D4): a repo-scoped ask keeps the exact
-	// existing persona; an ask without repo scope gets the discovery persona
-	// (same doctrine plus the discovery-mode section).
 	persona := BuildPersonaSystemPrompt()
 	if req.Repo == "" {
 		persona = BuildDiscoveryPersonaSystemPrompt()
 	}
-	sessionMeta := BuildSessionMeta(
-		persona,
-		depth,
-		cfg.Model,
-		cfg.EvalMode,
-		cfg.AgentSettingSources,
-	)
+	return BuildSessionMeta(persona, depth, cfg.Model, cfg.EvalMode, cfg.AgentSettingSources)
+}
 
-	// Runtime-owned sink for the strict submit_report path (ADR-0021 D1). When
-	// the executable/temp dir is available, the report-sink MCP server is
-	// registered on the session and its accepted report is preferred over any
-	// text block. On failure sinkPath is "" and the loop degrades to the
-	// <ghx-report> text path.
-	sinkPath, cleanupSink := newReportSinkPath()
-	defer cleanupSink()
-
-	// Wall-clock window for the whole Ask (including any corrective retries),
-	// used for the production duration metric (ADR-0022 D2). This is coarser
-	// than the eval path's per-turn ACP timing — see emit.go / the ADR gap note.
-	startedAt := time.Now().UTC()
-
-	// Runtime-owned live turn log (ADR-0022.1): the turn boundary events. The
-	// ACP client appends per-update activity to the same file via
-	// opts.LiveLogPath; append mode makes the two writers safe. The deferred
-	// turn.completed fires on EVERY exit path — right before (or instead of)
-	// emitTurnArtifacts-time — so a tail-follower always sees the turn close.
-	var turnResult TurnResult
-	var newSessionID string
-	liveLog := NewLiveLog(livePath)
-	defer func() {
-		errMsg := ""
-		if err != nil {
-			errMsg = err.Error()
-		}
-		liveLog.TurnCompleted(err == nil, errMsg, len(turnResult.ToolCalls), len(turnResult.FullText))
-		liveLog.Close()
-	}()
-
-	liveLog.TurnStarted(req.Session, req.Repo, req.Question)
-	turnResult, newSessionID, err = runTurnWithStaleSessionFallback(ctx, runner, RunTurnOptions{
-		AgentCmd:        cfg.AgentCmd,
+func buildTurnOptions(state *askTurnState, acpSessionID, prompt string) RunTurnOptions {
+	return RunTurnOptions{
+		AgentCmd:        state.cfg.AgentCmd,
 		ACPSessionID:    acpSessionID,
 		Prompt:          prompt,
-		Cwd:             workspace,
-		Env:             spawnEnv,
-		SessionMeta:     sessionMeta,
-		ReportSinkPath:  sinkPath,
-		AgentStderrPath: stderrLog,
-		LiveLogPath:     livePath,
-	})
+		Cwd:             state.workspace,
+		Env:             state.spawnEnv,
+		SessionMeta:     state.sessionMeta,
+		ReportSinkPath:  state.sinkPath,
+		AgentStderrPath: state.stderrLog,
+		LiveLogPath:     state.livePath,
+	}
+}
 
-	// Resume-as-recovery (ADR-0027 D1): the adapter's max-turns error is a
-	// session-resume problem, not error handling. LoadSession-resume the same
-	// ACP session and send exactly one wrap-up prompt; a fresh query gets a
-	// fresh turn budget while the exploration's context survives. If the
-	// wrap-up also fails, the turn is BLOCKED — with artifacts (D3).
-	var blockedReport *Report
-	if err != nil && IsMaxTurnsError(err) {
-		turnCapErr := err
-		resumeID := newSessionID
-		if resumeID == "" {
-			resumeID = acpSessionID
-		}
-		var wrapUpErr error
-		if resumeID == "" {
-			wrapUpErr = fmt.Errorf("no ACP session id available to resume")
+func runPrimaryTurn(ctx context.Context, runner TurnRunner, state *askTurnState) error {
+	var err error
+	state.turnResult, state.newSessionID, err = runTurnWithStaleSessionFallback(ctx, runner, buildTurnOptions(state, state.acpSessionID, state.prompt))
+	return err
+}
+
+func recoverMaxTurns(ctx context.Context, runner TurnRunner, state *askTurnState, err error) (*Report, bool) {
+	if err == nil || !IsMaxTurnsError(err) {
+		return nil, false
+	}
+	turnCapErr := err
+	resumeID := state.newSessionID
+	if resumeID == "" {
+		resumeID = state.acpSessionID
+	}
+	var wrapUpErr error
+	if resumeID == "" {
+		wrapUpErr = fmt.Errorf("no ACP session id available to resume")
+	} else {
+		wrapResult, wrapSessionID, werr := runner(ctx, buildTurnOptions(state, resumeID, turnCapWrapUpPrompt))
+		mergeWrapUpTurn(&state.turnResult, wrapResult)
+		if werr != nil {
+			wrapUpErr = werr
 		} else {
-			wrapResult, wrapSessionID, werr := runner(ctx, RunTurnOptions{
-				AgentCmd:     cfg.AgentCmd,
-				ACPSessionID: resumeID,
-				Prompt:       turnCapWrapUpPrompt,
-				Cwd:          workspace,
-				Env:          spawnEnv,
-				// SessionMeta rides along so the resumed wrap-up runs under
-				// the same persona/allowlist/budgets/model pin as the turn it
-				// recovers, plus the eval raw-SDK audit channel (ADR-0020.2).
-				SessionMeta:     sessionMeta,
-				ReportSinkPath:  sinkPath,
-				AgentStderrPath: stderrLog,
-				LiveLogPath:     livePath,
-			})
-			// Fold the wrap-up's telemetry in on both outcomes: even a failed
-			// wrap-up attempt is part of this turn's auditable activity (D3).
-			mergeWrapUpTurn(&turnResult, wrapResult)
-			if werr != nil {
-				wrapUpErr = werr
-			} else {
-				turnResult.WrapUpRecovered = true
-				if wrapSessionID != "" {
-					newSessionID = wrapSessionID
-				}
-				err = nil
+			state.turnResult.WrapUpRecovered = true
+			if wrapSessionID != "" {
+				state.newSessionID = wrapSessionID
 			}
-		}
-		if wrapUpErr != nil {
-			blockedReport = &Report{
-				Answer: "BLOCKED: the exploration hit the adapter's max-turns safety net and the one-shot wrap-up attempt also failed; partial artifacts were kept in the session directory.",
-				Uncertainty: []string{
-					"turn-cap error: " + turnCapErr.Error(),
-					"wrap-up failure: " + wrapUpErr.Error(),
-				},
-			}
-			err = nil
+			return nil, true
 		}
 	}
+	return &Report{
+		Answer: "BLOCKED: the exploration hit the adapter's max-turns safety net and the one-shot wrap-up attempt also failed; partial artifacts were kept in the session directory.",
+		Uncertainty: []string{
+			"turn-cap error: " + turnCapErr.Error(),
+			"wrap-up failure: " + wrapUpErr.Error(),
+		},
+	}, true
+}
 
-	if err != nil {
-		// Unrecovered turn failure (liveness watchdog, dead peer, transport
-		// error). Never leave zero artifacts (ADR-0027 D3): persist the ACP
-		// session ID for later resumption, flush the partial turn's
-		// traces/logs/metrics with the error recorded, and hand the partial
-		// TurnResult back so eval callers can audit the failed turn too.
-		persistACPSessionID(sessionsDir, meta, newSessionID)
-		turn := 1
-		if meta != nil {
-			turn = meta.TurnCount + 1
-		}
-		// Failed turns still record a tier decision (ADR-0024.2 D3): the
-		// policy evaluation over whatever activity was observed is part of
-		// the failure's audit trail. No report exists, so no backfill.
-		tierDecision := recordTierDecision(sessionsDir, req, turn, &turnResult, nil)
-		turnResult.Route = route
-		turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
-			SessionsDir:    sessionsDir,
-			Session:        req.Session,
-			Repo:           req.Repo,
-			Model:          cfg.Model,
-			Turn:           turn,
-			Question:       req.Question,
-			Result:         turnResult,
-			TierDecision:   tierDecision,
-			Route:          route,
-			Error:          err.Error(),
-			StartedAt:      startedAt,
-			EndedAt:        time.Now().UTC(),
-			CaptureContent: cfg.CaptureContent(),
-		})
-		// Surface the failure loudly (ADR-0033 D3): splice the tail of the
-		// per-session adapter stderr log and its path into the error the CLI
-		// caller sees, with the workspace-trust hint when that warning is
-		// present. DiagnoseTurnError preserves the errors.Is chain so the
-		// ADR-0027 resilience classifiers still match.
-		return nil, &turnResult, DiagnoseTurnError(fmt.Errorf("run turn: %w", err), stderrLog)
-	}
-
-	// Completion gate (ADR-0021 D2): prefer the strictly-validated sink report,
-	// else the lenient text block. If neither yields a report, send a corrective
-	// follow-up carrying the CONCRETE reason, bounded at maxReportRetries. The
-	// exploration is done and paid for; a missing report should cost a bounded
-	// number of nudges, not the whole turn's evidence.
-	// Evaluate the report against the most recent turn's own text (plus the
-	// cumulative sink), not the concatenated FullText: a stale invalid block
-	// from an earlier attempt must not shadow a corrected block emitted by a
-	// retry (the <ghx-report> regex takes the first block it finds).
-	latestText := turnResult.FullText
-	report, coerced, reason := resolveTurnReport(sinkPath, latestText)
-	// A failed wrap-up ships the BLOCKED report (ADR-0027 D1) unless the agent
-	// managed to submit a real report before dying; no corrective retries are
-	// spent on a session that already exhausted its budget twice.
+func resolveReportWithRetry(ctx context.Context, runner TurnRunner, state *askTurnState, blockedReport *Report) *Report {
+	latestText := state.turnResult.FullText
+	report, coerced, reason := resolveTurnReport(state.sinkPath, latestText)
 	if report == nil && blockedReport != nil {
 		report = blockedReport
 	}
 	for retries := 0; report == nil && retries < maxReportRetries; retries++ {
-		retrySessionID := newSessionID
+		retrySessionID := state.newSessionID
 		if retrySessionID == "" {
-			retrySessionID = acpSessionID
+			retrySessionID = state.acpSessionID
 		}
 		if retrySessionID == "" {
 			break
 		}
-		retryResult, retryNewID, retryErr := runner(ctx, RunTurnOptions{
-			AgentCmd:     cfg.AgentCmd,
-			ACPSessionID: retrySessionID,
-			Prompt:       reportRetryPromptWithError(reason),
-			Cwd:          workspace,
-			Env:          spawnEnv,
-			// SessionMeta rides along so the resumed retry stays fully
-			// steered and keeps the eval raw-SDK audit channel (ADR-0020.2).
-			SessionMeta:     sessionMeta,
-			ReportSinkPath:  sinkPath,
-			AgentStderrPath: stderrLog,
-			LiveLogPath:     livePath,
-		})
+		retryResult, retryNewID, retryErr := runner(ctx, buildTurnOptions(state, retrySessionID, reportRetryPromptWithError(reason)))
 		if retryErr != nil {
 			break
 		}
-		mergeRetryTurn(&turnResult, retryResult)
+		mergeRetryTurn(&state.turnResult, retryResult)
 		latestText = retryResult.FullText
 		if retryNewID != "" {
-			newSessionID = retryNewID
+			state.newSessionID = retryNewID
 		}
-		report, coerced, reason = resolveTurnReport(sinkPath, latestText)
+		report, coerced, reason = resolveTurnReport(state.sinkPath, latestText)
 	}
 	if report != nil {
-		turnResult.ReportCoerced = coerced
-	} else {
-		// No report after the bounded retries. This is the exact silent-failure
-		// shape the founder hit (empty turn, err == nil). Promote it from mute to
-		// loud (ADR-0033 D3): always point the caller at the per-session adapter
-		// stderr log, and when the adapter reported the untrusted-workspace
-		// warning, carry its remedy. The turn genuinely completed, so this stays
-		// a report (artifacts and contract preserved), never a dead end.
-		report = &Report{Answer: warnNoReportAnswer(stderrLog)}
+		state.turnResult.ReportCoerced = coerced
+		return report
 	}
+	return &Report{Answer: warnNoReportAnswer(state.stderrLog)}
+}
 
-	// Persist the ACP session ID so the next turn can resume. Runs after
-	// the retry block, which may advance the session ID.
-	persistACPSessionID(sessionsDir, meta, newSessionID)
-
-	turn := 1
-	if meta != nil {
-		turn = meta.TurnCount + 1
-	}
-
-	// Tier decision (ADR-0024.2): evaluate the pre-registered escalation
-	// policy over this turn's recorded observables, backfill report tierUsed
-	// provenance when the agent did not declare it, and persist the decision
-	// to tier-decisions.jsonl. Runs before ledger/report persistence so the
-	// backfilled provenance lands in every artifact.
-	tierDecision := recordTierDecision(sessionsDir, req, turn, &turnResult, report)
-
-	UpdateLedgerFromTurn(ledger, meta, report, turnResult.ToolTraces, turn)
-	if saveErr := SaveLedger(sessionsDir, req.Session, ledger); saveErr != nil {
+func persistTurn(state *askTurnState, report *Report) *TierDecisionRecord {
+	persistACPSessionID(state.sessionsDir, state.meta, state.newSessionID)
+	turn := state.turnNumber()
+	tierDecision := recordTierDecision(state.sessionsDir, state.req, turn, &state.turnResult, report)
+	UpdateLedgerFromTurn(state.ledger, state.meta, report, state.turnResult.ToolTraces, turn)
+	if saveErr := SaveLedger(state.sessionsDir, state.req.Session, state.ledger); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save ledger: %v\n", saveErr)
 	}
-
-	if err := RecordTurn(sessionsDir, req.Session); err != nil {
-		// Non-fatal: metadata is informational.
+	if err := RecordTurn(state.sessionsDir, state.req.Session); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to record turn: %v\n", err)
 	}
-
-	if _, saveErr := SaveTurnReportArtifact(sessionsDir, req.Session, turn, ReportArtifact{
+	if _, saveErr := SaveTurnReportArtifact(state.sessionsDir, state.req.Session, turn, ReportArtifact{
 		Report:              report,
-		ActualCommandLedger: actualCommandLedger(turnResult.ToolCalls),
-		// Persist the exact trace-derived commands the ledger consumed so
-		// replaying reports/ reproduces ledger.json (ADR-0030.1 D5).
-		TraceCommands: TraceCommandLedger(turnResult.ToolTraces),
+		ActualCommandLedger: actualCommandLedger(state.turnResult.ToolCalls),
+		TraceCommands:       TraceCommandLedger(state.turnResult.ToolTraces),
 	}); saveErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to save report: %v\n", saveErr)
 	}
+	return tierDecision
+}
 
-	// Production visibility: append this turn's traces/logs/metrics to the
-	// session artifact set via the shared telemetry runtime (ADR-0022 D2).
-	// No reward/evaluation events — that is the eval layer. Failures degrade to
-	// a stderr warning inside emitTurnArtifacts and never fail the ask. The
-	// returned ArtifactsRef travels back on the TurnResult so every response
-	// surface can point the caller at the audit trail.
-	turnResult.Route = route
-	turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
-		SessionsDir:    sessionsDir,
-		Session:        req.Session,
-		Repo:           req.Repo,
-		Model:          cfg.Model,
+func emitArtifacts(ctx context.Context, state *askTurnState, report *Report, tierDecision *TierDecisionRecord) {
+	turn := state.turnNumber()
+	state.turnResult.Route = state.route
+	state.turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
+		SessionsDir:    state.sessionsDir,
+		Session:        state.req.Session,
+		Repo:           state.req.Repo,
+		Model:          state.cfg.Model,
 		Turn:           turn,
-		Question:       req.Question,
-		Result:         turnResult,
-		Route:          route,
+		Question:       state.req.Question,
+		Result:         state.turnResult,
+		Route:          state.route,
 		Report:         report,
 		TierDecision:   tierDecision,
-		StartedAt:      startedAt,
+		StartedAt:      state.startedAt,
 		EndedAt:        time.Now().UTC(),
-		CaptureContent: cfg.CaptureContent(),
+		CaptureContent: state.cfg.CaptureContent(),
 	})
+}
 
-	return report, &turnResult, nil
+func emitFailedTurnArtifacts(ctx context.Context, state *askTurnState, turnErr error) {
+	persistACPSessionID(state.sessionsDir, state.meta, state.newSessionID)
+	turn := state.turnNumber()
+	tierDecision := recordTierDecision(state.sessionsDir, state.req, turn, &state.turnResult, nil)
+	state.turnResult.Route = state.route
+	state.turnResult.Artifacts = emitTurnArtifacts(ctx, turnTelemetry{
+		SessionsDir:    state.sessionsDir,
+		Session:        state.req.Session,
+		Repo:           state.req.Repo,
+		Model:          state.cfg.Model,
+		Turn:           turn,
+		Question:       state.req.Question,
+		Result:         state.turnResult,
+		TierDecision:   tierDecision,
+		Route:          state.route,
+		Error:          turnErr.Error(),
+		StartedAt:      state.startedAt,
+		EndedAt:        time.Now().UTC(),
+		CaptureContent: state.cfg.CaptureContent(),
+	})
+}
+
+func (state *askTurnState) turnNumber() int {
+	turn := 1
+	if state.meta != nil {
+		turn = state.meta.TurnCount + 1
+	}
+	return turn
 }
 
 // Slug lowercases s and collapses every non-alphanumeric run into one dash.

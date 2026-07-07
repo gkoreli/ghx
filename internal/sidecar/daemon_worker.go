@@ -2,7 +2,6 @@ package sidecar
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -225,7 +224,7 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 	w.client = &denyClient{result: &TurnResult{}, onActivity: touch}
 	w.conn = acp.NewClientSideConnection(w.client, stdin, stdout)
 	if liveness > 0 {
-		go w.watchLiveness(w.turnCtx, w.cancelTurnCtx, liveness)
+		startACPWatchdog(w.turnCtx, &w.lastActivity, w.cancelTurnCtx, liveness)
 	}
 	initResp, err := w.conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
@@ -251,93 +250,15 @@ func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions,
 	if cwd == "" {
 		cwd = w.cfg.Cwd
 	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	if w.sessionID == "" {
-		if opts.ACPSessionID != "" && w.loadSession {
-			// Fresh worker resuming a persisted ACP session: the adapter
-			// process is new, so the full session meta must be re-asserted or
-			// the resumed session runs on adapter defaults (ADR-0020.2).
-			_, err := w.conn.LoadSession(ctx, acp.LoadSessionRequest{
-				SessionId:  acp.SessionId(opts.ACPSessionID),
-				Cwd:        cwd,
-				McpServers: reportSinkMcpServers(opts.ReportSinkPath),
-				Meta:       opts.SessionMeta,
-			})
-			if err != nil {
-				return result, "", fmt.Errorf("acp load session: %w", turnFailureCause(w.turnCtx, err))
-			}
-			w.sessionID = opts.ACPSessionID
-			return result, w.sessionID, nil
-		}
-		req := acp.NewSessionRequest{Cwd: cwd, McpServers: reportSinkMcpServers(opts.ReportSinkPath)}
-		if opts.SessionMeta != nil {
-			req.Meta = opts.SessionMeta
-		}
-		resp, err := w.conn.NewSession(ctx, req)
-		if err != nil {
-			return result, "", fmt.Errorf("acp new session: %w", turnFailureCause(w.turnCtx, err))
-		}
-		w.sessionID = string(resp.SessionId)
-		return result, w.sessionID, nil
-	}
-	if w.loadSession {
-		// Warm-worker reload (report-sink refresh): carry the meta here too so
-		// steering never depends on which reload path the turn took
-		// (ADR-0020.2).
-		_, err := w.conn.LoadSession(ctx, acp.LoadSessionRequest{
-			SessionId:  acp.SessionId(w.sessionID),
-			Cwd:        cwd,
-			McpServers: reportSinkMcpServers(opts.ReportSinkPath),
-			Meta:       opts.SessionMeta,
-		})
-		if err != nil {
-			return result, w.sessionID, fmt.Errorf("acp load session: %w", turnFailureCause(w.turnCtx, err))
-		}
-	}
-	return result, w.sessionID, nil
+	state := acpSessionState{sessionID: w.sessionID, loadSession: w.loadSession}
+	sessionID, err := configureACPSession(ctx, w.turnCtx, w.conn, &state, opts, cwd)
+	w.sessionID = state.sessionID
+	return result, sessionID, err
 }
 
 func (w *AgentWorker) prompt(ctx context.Context, opts RunTurnOptions, sessionID acp.SessionId) (TurnResult, error) {
 	w.client.markPromptSent()
-	promptDone := make(chan error, 1)
-	go func() {
-		_, perr := w.conn.Prompt(ctx, acp.PromptRequest{
-			SessionId: sessionID,
-			Prompt:    []acp.ContentBlock{acp.TextBlock(opts.Prompt)},
-		})
-		promptDone <- perr
-	}()
-	var promptErr error
-	select {
-	case promptErr = <-promptDone:
-	case <-w.conn.Done():
-		perr, finished := awaitPromptOrGrace(promptDone)
-		if finished {
-			promptErr = perr
-		} else {
-			promptErr = errors.New(peerClosedMarker + " before the prompt turn completed")
-		}
-		if promptErr != nil && !IsPeerClosedError(promptErr) {
-			promptErr = fmt.Errorf("%s: %w", peerClosedMarker, promptErr)
-		}
-	case <-ctx.Done():
-		if perr, finished := awaitPromptOrGrace(promptDone); finished {
-			promptErr = perr
-		} else {
-			promptErr = ctx.Err()
-		}
-	case <-w.turnCtx.Done():
-		if perr, finished := awaitPromptOrGrace(promptDone); finished {
-			promptErr = perr
-		} else {
-			promptErr = context.Cause(w.turnCtx)
-		}
-	}
-	if cause := context.Cause(w.turnCtx); errors.Is(cause, ErrLivenessTimeout) {
-		promptErr = cause
-	}
+	promptErr := runACPPrompt(ctx, w.turnCtx, w.conn, sessionID, opts.Prompt)
 	result := w.client.closeAndSnapshot()
 	if promptErr != nil {
 		return result, fmt.Errorf("acp prompt: %w", promptErr)
@@ -356,23 +277,6 @@ func (w *AgentWorker) resetClient(result *TurnResult, live *LiveLog) {
 	w.client.closed = false
 	w.client.live = live
 	w.client.mu.Unlock()
-}
-
-func (w *AgentWorker) watchLiveness(ctx context.Context, cancel context.CancelCauseFunc, liveness time.Duration) {
-	for {
-		idle := time.Duration(time.Now().UnixNano() - w.lastActivity.Load())
-		remaining := liveness - idle
-		if remaining <= 0 {
-			cancel(fmt.Errorf("%w: no ACP session update for %s (set %s to adjust)",
-				ErrLivenessTimeout, liveness, LivenessTimeoutEnv))
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(remaining):
-		}
-	}
 }
 
 func (w *AgentWorker) shutdownLocked() {
