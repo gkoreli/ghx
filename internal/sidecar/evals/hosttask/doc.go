@@ -50,8 +50,10 @@
 //     before any test command, in order, inside the container; a setup
 //     failure aborts the attempt's remaining commands. Setup effects that
 //     land outside the bind-mounted workspace live only as long as the
-//     container (one grade attempt); effects inside the workspace persist
-//     across attempts, so setup commands should be idempotent.
+//     container (one grade attempt); with the production per-attempt
+//     workspace copies (NewGrader wires CopyWorkspacePerAttempt,
+//     ADR-0032.1 S3) effects inside the workspace also last one attempt —
+//     attempts are independent by construction.
 //   - failToPassCmds: commands that FAIL on the pinned SHA and must PASS
 //     after a correct fix (SWE-bench F2P). The test patch/expectation they
 //     encode is withheld from the agent — only the grader runs them.
@@ -89,7 +91,12 @@
 // command failure triggers exactly two re-runs, and any per-command
 // pass/fail flip across the three attempts marks the result Flaky — the
 // TASK is disqualified and the grade must never be scored. A stable failure
-// is a real grade.
+// is a real grade. Attempts are on equal footing: the production grader
+// (NewGrader) runs every attempt against a pristine copy of the graded tree
+// (CopyWorkspacePerAttempt, ADR-0032.1 S3), so a tree-mutating test — a
+// cache or marker written by the first attempt — cannot flip a re-run and
+// convert a deterministic failure into a false Flaky disqualification, and
+// the graded workspace itself is never modified by grading.
 //
 // Docker being unavailable surfaces as ErrDockerUnavailable, a typed error
 // the eval layer (S3+) translates into a BLOCKED anomaly; S1 reports it

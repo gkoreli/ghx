@@ -32,9 +32,11 @@ const (
 // TOOL IDENTITY and PATH SCOPE only — never by content heuristics
 // (ADR-0032 trap 6: a heuristic classifier can be gamed by an arm, so the
 // rules are structural, unit-tested, and frozen with the measurement
-// stack). For execute-kind calls the recorded trace title is the command
-// line (the ACP title contract for terminal tools); its leading tokens are
-// the command's identity.
+// stack). For execute-kind calls the command line comes from the trace's
+// RawInput "command" field — live claude-agent-acp execute tool calls carry
+// the title "Terminal", NOT the command (sighted 2026-07-06, ADR-0032.1 S3
+// note) — with the title as fallback for adapters that do title the command
+// line. The command's leading tokens are its identity.
 //
 // Rules, evaluated in order, first match wins:
 //
@@ -171,13 +173,43 @@ func (c Classifier) classify(tr sidecar.ToolCallTrace) ToolCallClass {
 	case acp.ToolKindFetch:
 		return ClassExploration // R2
 	case acp.ToolKindExecute:
-		return c.classifyCommand(tr.Title) // R3–R5
+		return c.classifyCommand(ExecuteCommandLine(tr.RawInput, tr.Title)) // R3–R5
 	case acp.ToolKindRead, acp.ToolKindEdit, acp.ToolKindDelete, acp.ToolKindMove, acp.ToolKindSearch:
 		return c.classifyLocations(tr.Locations) // R6
 	case acp.ToolKindThink:
 		return ClassEngineering // R7
 	}
 	return ClassUnclassified // R8
+}
+
+// adapterTerminalTitle is the fixed label live claude-agent-acp puts on
+// every execute tool call (sighted 2026-07-06; ADR-0032.1 S3 note). It is a
+// tool label, never a command line — an execute trace with this title and no
+// rawInput command carries no command identity at all.
+const adapterTerminalTitle = "Terminal"
+
+// ExecuteCommandLine returns the command-line identity of one execute-kind
+// tool call, given its recorded rawInput and title. The authoritative source
+// is rawInput's "command" field: the adapter forwards the SDK tool input,
+// and live claude-agent-acp execute tool calls carry the title "Terminal",
+// not the command (live sighting 2026-07-06; ADR-0032.1 S3 note). The title
+// is the fallback for adapters — and older artifacts — whose execute titles
+// are the command line, except the known "Terminal" label, which yields the
+// empty command (rule R3: cannot be checked ⇒ unclassified, never guessed).
+// JSON-roundtripped artifacts decode rawInput as map[string]any, so live and
+// reloaded episodes resolve identically. Shared by the classifier (R3–R5)
+// and the evals host_execute_outside_workspace detector — one extraction
+// authority.
+func ExecuteCommandLine(rawInput any, title string) string {
+	if m, ok := rawInput.(map[string]any); ok {
+		if s, ok := m["command"].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	if title == adapterTerminalTitle {
+		return ""
+	}
+	return title
 }
 
 // classifyCommand applies rules R3–R5 to an execute-kind command line.

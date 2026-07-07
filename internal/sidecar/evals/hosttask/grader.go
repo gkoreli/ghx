@@ -89,10 +89,24 @@ type Result struct {
 type Grader struct {
 	// Runtime is the container engine; tests inject a fake.
 	Runtime ContainerRuntime
+	// AttemptWorkspace provisions the directory one grade attempt actually
+	// runs against, from the graded workspace. The production seam is
+	// CopyWorkspacePerAttempt: every attempt — including the trap-7 flake
+	// re-runs — sees a pristine copy of the host's fixed tree, so a first
+	// attempt's tree mutations (test caches, marker files) can neither
+	// convert a deterministic failure into a false Flaky disqualification
+	// nor leak state between attempts (ADR-0032.1 S3). nil runs every
+	// attempt directly against workspaceDir — sound only when grade
+	// commands cannot mutate the tree (unit tests with fake runtimes).
+	AttemptWorkspace func(ctx context.Context, workspaceDir string, attempt int) (dir string, cleanup func(), err error)
 }
 
-// NewGrader returns a Grader backed by the docker CLI.
-func NewGrader() *Grader { return &Grader{Runtime: DockerCLI{}} }
+// NewGrader returns a Grader backed by the docker CLI, with per-attempt
+// workspace copies (CopyWorkspacePerAttempt) so flake re-runs are on equal
+// footing with the first attempt.
+func NewGrader() *Grader {
+	return &Grader{Runtime: DockerCLI{}, AttemptWorkspace: CopyWorkspacePerAttempt}
+}
 
 // Grade grades one trial. It verifies the engine is available (returning an
 // ErrDockerUnavailable-wrapping error when not), runs one attempt, and — on
@@ -108,7 +122,7 @@ func (g *Grader) Grade(ctx context.Context, f Fixture, workspaceDir string) (Res
 	}
 
 	res := Result{FixtureID: f.ID, Image: f.Image, WorkspaceDir: workspaceDir}
-	first, err := g.attempt(ctx, f, workspaceDir)
+	first, err := g.attempt(ctx, f, workspaceDir, 0)
 	if err != nil {
 		return Result{}, err
 	}
@@ -118,7 +132,7 @@ func (g *Grader) Grade(ctx context.Context, f Fixture, workspaceDir string) (Res
 		// Flake rule (ADR-0032 trap 7): on grader failure, exactly two
 		// re-runs; any flip disqualifies the task.
 		for i := 0; i < 2; i++ {
-			rerun, err := g.attempt(ctx, f, workspaceDir)
+			rerun, err := g.attempt(ctx, f, workspaceDir, i+1)
 			if err != nil {
 				return Result{}, err
 			}
@@ -140,9 +154,20 @@ func (g *Grader) Grade(ctx context.Context, f Fixture, workspaceDir string) (Res
 // order (a setup failure aborts the rest of the attempt — later commands are
 // recorded as not-run), then every failToPass and passToPass command
 // regardless of individual failures (they are independent measurements).
-func (g *Grader) attempt(ctx context.Context, f Fixture, workspaceDir string) (Attempt, error) {
+// With the AttemptWorkspace seam set, the pass runs against a per-attempt
+// workspace provisioned from workspaceDir (equal footing across attempts).
+func (g *Grader) attempt(ctx context.Context, f Fixture, workspaceDir string, attempt int) (Attempt, error) {
+	dir := workspaceDir
+	if g.AttemptWorkspace != nil {
+		attemptDir, cleanup, err := g.AttemptWorkspace(ctx, workspaceDir, attempt)
+		if err != nil {
+			return Attempt{}, fmt.Errorf("grade %s: attempt %d workspace: %w", f.ID, attempt, err)
+		}
+		defer cleanup()
+		dir = attemptDir
+	}
 	id, err := g.Runtime.Start(ctx, ContainerSpec{
-		Image: f.Image, WorkspaceDir: workspaceDir, Network: f.NetworkMode(),
+		Image: f.Image, WorkspaceDir: dir, Network: f.NetworkMode(),
 	})
 	if err != nil {
 		return Attempt{}, fmt.Errorf("grade %s: %w", f.ID, err)
