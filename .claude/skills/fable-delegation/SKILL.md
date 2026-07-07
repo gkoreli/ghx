@@ -64,6 +64,44 @@ codex exec --help
 codex exec review --help
 ```
 
+## Background Codex: run the shell directly, never via a parking sub-agent
+
+To delegate a coding task to Codex in the background, run `codex exec`
+**directly from Fable's own session** as a background shell, into a git worktree
+Fable created by hand. Do **not** spawn a Claude sub-agent (Agent tool) whose
+only job is to launch Codex and wait.
+
+Why (incident 2026-07-07, cost two lost delegations): a sub-agent started with
+`isolation: worktree` gets a harness-managed worktree that is **auto-cleaned the
+moment the agent's turn ends without a commit**. If that sub-agent launches
+Codex as a background job and then parks (ends its turn to wait), the harness
+sees an "unchanged" worktree and deletes it **out from under the still-running
+Codex process** — Codex then reports "worktree became inaccessible" / "did not
+exist", no commit or branch survives, and the orphaned uncommitted files can
+even leak into a sibling worker's worktree. The parking sub-agent races the
+worktree GC and loses.
+
+Correct pattern:
+
+```bash
+# 1. Fable creates a real, self-managed worktree (NOT harness-managed) off mainline:
+git worktree add -b codex-<task> "$SCRATCH/wt-<task>" mainline
+
+# 2. Fable runs Codex directly as a background shell — Fable's own session is
+#    never auto-cleaned and is reliably re-invoked when the job exits:
+codex exec -C "$SCRATCH/wt-<task>" --dangerously-bypass-approvals-and-sandbox \
+  "<self-contained prompt; end with: do NOT git commit — Fable handles git>" \
+  </dev/null > /tmp/codex-<task>.log 2>&1 &
+
+# 3. On completion Fable verifies (go test), commits the worktree branch,
+#    merges from the repo root, and removes the worktree last.
+```
+
+One background `codex exec` per parallel task; Fable is the serial
+verify/commit/merge point. Reserve the "Claude Wrapper Prompt" below strictly
+for **synchronous** workflow slots that only accept Claude models — never as a
+background launcher for Codex.
+
 ## When to Use Which Worker
 
 Use Codex CLI for:
@@ -143,7 +181,7 @@ Review instructions should ask for findings first, ordered by severity, with fil
 
 ## Claude Wrapper Prompt
 
-Use this when a workflow only accepts Claude models but the desired worker is Codex:
+Use this **only** for a *synchronous* workflow slot that accepts a Claude model but not Codex — the wrapper runs Codex in the foreground and returns its report. **Never** use it as a background launcher for Codex (see "Background Codex: run the shell directly" above — the parking sub-agent races the worktree GC and loses the work):
 
 ```text
 You are a thin Claude wrapper. Do not solve the task yourself.
