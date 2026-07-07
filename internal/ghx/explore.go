@@ -12,6 +12,7 @@ type FileEntry struct {
 type ExploreResult struct {
 	Description string      `json:"description"`
 	Branch      string      `json:"branch"`
+	Snapshot    Snapshot    `json:"snapshot"`
 	Files       []FileEntry `json:"files"`
 	Readme      string      `json:"readme"` // full README text, empty if not found
 }
@@ -30,7 +31,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 	if path == "" {
 		query := fmt.Sprintf(`{
 			repository(owner: %q, name: %q) {
-				defaultBranchRef { name }
+				defaultBranchRef { name target { oid } }
 				description
 				tree: object(expression: "HEAD:") {
 					... on Tree { entries { name type } }
@@ -50,7 +51,10 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 		var resp struct {
 			Repository struct {
 				DefaultBranchRef struct {
-					Name string `json:"name"`
+					Name   string `json:"name"`
+					Target struct {
+						OID string `json:"oid"`
+					} `json:"target"`
 				} `json:"defaultBranchRef"`
 				Description string `json:"description"`
 				Tree        struct {
@@ -92,6 +96,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 		return &ExploreResult{
 			Description: resp.Repository.Description,
 			Branch:      resp.Repository.DefaultBranchRef.Name,
+			Snapshot:    Snapshot{Repo: repo, SHA: resp.Repository.DefaultBranchRef.Target.OID},
 			Files:       files,
 			Readme:      readme,
 		}, nil
@@ -99,7 +104,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 
 	query := fmt.Sprintf(`{
 		repository(owner: %q, name: %q) {
-			defaultBranchRef { name }
+			defaultBranchRef { name target { oid } }
 			tree: object(expression: "HEAD:%s") {
 				... on Tree { entries { name type } }
 			}
@@ -109,7 +114,10 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 	var resp struct {
 		Repository struct {
 			DefaultBranchRef struct {
-				Name string `json:"name"`
+				Name   string `json:"name"`
+				Target struct {
+					OID string `json:"oid"`
+				} `json:"target"`
 			} `json:"defaultBranchRef"`
 			Tree struct {
 				Entries []struct {
@@ -130,7 +138,8 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 	}
 
 	return &ExploreResult{
-		Branch: resp.Repository.DefaultBranchRef.Name,
-		Files:  files,
+		Branch:   resp.Repository.DefaultBranchRef.Name,
+		Snapshot: Snapshot{Repo: repo, SHA: resp.Repository.DefaultBranchRef.Target.OID},
+		Files:    files,
 	}, nil
 }

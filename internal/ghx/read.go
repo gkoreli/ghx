@@ -17,6 +17,7 @@ type GrepMatch struct {
 
 type FileResult struct {
 	Path        string      `json:"path"`
+	Snapshot    Snapshot    `json:"snapshot"`
 	Content     string      `json:"content"` // full text (empty if using grep/map)
 	ByteSize    int         `json:"byteSize"`
 	NotFound    bool        `json:"notFound"`
@@ -103,6 +104,7 @@ func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 
 	query := fmt.Sprintf(`{
 		repository(owner: %q, name: %q) {
+			defaultBranchRef { target { oid } }
 			%s
 		}
 	}`, owner, name, strings.Join(aliases, "\n"))
@@ -120,6 +122,8 @@ func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 		return results, nil
 	}
 
+	snapshot := Snapshot{Repo: repo, SHA: readSnapshotSHA(resp.Repository)}
+
 	var results []FileResult
 	for i, f := range files {
 		if i >= 10 {
@@ -129,15 +133,23 @@ func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 		alias := fmt.Sprintf("f%d", i)
 		fileData, ok := resp.Repository[alias]
 		if !ok || fileData == nil {
-			results = append(results, FileResult{Path: f, NotFound: true})
+			results = append(results, FileResult{Path: f, Snapshot: snapshot, NotFound: true})
 			continue
 		}
 
 		result := parseFileResponse(f, fileData, globOrigin[f], opts)
+		result.Snapshot = snapshot
 		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+func readSnapshotSHA(repository map[string]interface{}) string {
+	defaultBranchRef, _ := repository["defaultBranchRef"].(map[string]interface{})
+	target, _ := defaultBranchRef["target"].(map[string]interface{})
+	sha, _ := target["oid"].(string)
+	return sha
 }
 
 // parseFileResponse converts a raw GraphQL response for a single file/directory into a FileResult.

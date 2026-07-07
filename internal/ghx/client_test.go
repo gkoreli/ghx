@@ -107,3 +107,49 @@ func TestExploreUsesInjectedGraphQLClientOffline(t *testing.T) {
 		}
 	}
 }
+
+func TestReadCarriesResolvedSnapshotSHA(t *testing.T) {
+	const wantSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	fakeGQL := &fakeGraphQLClient{
+		t: t,
+		want: []string{
+			`repository(owner: "cli", name: "cli")`,
+			`defaultBranchRef { target { oid } }`,
+			`f0: object(expression: "HEAD:README.md")`,
+		},
+		payload: `{
+			"repository": {
+				"defaultBranchRef": {
+					"target": { "oid": "0123456789abcdef0123456789abcdef01234567" }
+				},
+				"f0": { "text": "# gh\nsnapshot readme", "byteSize": 20 }
+			}
+		}`,
+	}
+
+	oldClients := githubClients
+	githubClients = fakeGithubClientProvider{graphQL: fakeGQL}
+	t.Cleanup(func() { githubClients = oldClients })
+
+	got, err := Read(Repo{Owner: "cli", Name: "cli"}, []string{"README.md"}, nil)
+	if err != nil {
+		t.Fatalf("Read returned error: %v", err)
+	}
+
+	if fakeGQL.calls != 1 {
+		t.Fatalf("GraphQL calls = %d, want 1", fakeGQL.calls)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Read results = %d, want 1", len(got))
+	}
+	if got[0].Content != "# gh\nsnapshot readme" {
+		t.Fatalf("Content = %q, want snapshot readme", got[0].Content)
+	}
+	if got[0].Snapshot.Repo != (Repo{Owner: "cli", Name: "cli"}) {
+		t.Fatalf("Snapshot.Repo = %#v, want cli/cli", got[0].Snapshot.Repo)
+	}
+	if got[0].Snapshot.SHA != wantSHA {
+		t.Fatalf("Snapshot.SHA = %q, want %q", got[0].Snapshot.SHA, wantSHA)
+	}
+}

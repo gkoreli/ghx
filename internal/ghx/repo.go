@@ -13,6 +13,14 @@ type Repo struct {
 	Name string
 }
 
+// Snapshot identifies the repository commit observed by a read operation.
+type Snapshot struct {
+	// Repo is the GitHub repository whose default branch was resolved.
+	Repo Repo `json:"repo"`
+	// SHA is the commit oid reported by GitHub for the resolved branch target.
+	SHA string `json:"sha,omitempty"`
+}
+
 // ParseRepo parses and validates a GitHub owner/repo slug.
 func ParseRepo(s string) (Repo, error) {
 	parts := strings.Split(s, "/")
