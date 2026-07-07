@@ -242,11 +242,11 @@ func (w *BudgetWriter) Used() int {
 // Inspect searches, fetches, maps, ranks, and snippets concern-local evidence.
 func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, error) {
 	if !validRepo(repo) {
-		return nil, fmt.Errorf("invalid repo format, use owner/repo")
+		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx inspect gkoreli/ghx \"exit code\"", repo)
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("query must not be empty")
+		return nil, fmt.Errorf("query must not be empty, e.g. ghx inspect gkoreli/ghx \"exit code\"")
 	}
 	opts = normalizeInspectOptions(opts)
 

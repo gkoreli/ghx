@@ -56,7 +56,7 @@ matched no repos; broaden it.`,
 		limit, _ := cmd.Flags().GetInt("limit")
 		results, total, err := ghxlib.Repos(args[0], ghxlib.ReposOpts{Limit: limit})
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Printf("%d repos found\n", total)
 		if len(results) == 0 {
@@ -97,7 +97,7 @@ complete tree and README.`,
 		fullMode, _ := cmd.Flags().GetBool("full")
 		result, err := ghxlib.Explore(args[0], path)
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		if !fullMode {
 			printCompactExplore(args[0], path, result, budget)
@@ -178,7 +178,7 @@ map plus a narrowing hint rather than flooding output.`,
 		}
 		results, err := ghxlib.Read(args[0], args[1:], opts)
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 
 		// Show glob summary when matches were truncated
@@ -308,7 +308,7 @@ topic use ` + "`ghx repos`" + ` instead. Exit code 1 means no code matched.`,
 			Budget:   budget,
 		})
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 
 		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
@@ -363,7 +363,7 @@ pattern matched nothing in the repo.`,
 			Budget: budget,
 		})
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
 		if len(result.Matches) == 0 {
@@ -412,10 +412,10 @@ result. Exit code 1 means nothing ranked for the query.`,
 			Path:   path,
 		})
 		if err != nil {
-			if strings.Contains(err.Error(), "invalid repo format") || strings.Contains(err.Error(), "query must not be empty") {
+			if strings.Contains(err.Error(), "invalid repo") || strings.Contains(err.Error(), "query must not be empty") {
 				return WithExitCode(ExitBadInvocation, err)
 			}
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Print(ghxlib.FormatInspectText(result))
 		if len(result.Files) == 0 {
@@ -450,11 +450,11 @@ fully recursive); directories are shown with a trailing slash.`,
 		}
 		depth, _ := cmd.Flags().GetInt("depth")
 		if depth < 0 {
-			return fmt.Errorf("--depth must be a positive integer")
+			return WithExitCode(ExitBadInvocation, fmt.Errorf("--depth must be >= 0 (0 = full recursive), e.g. ghx tree gkoreli/ghx --depth 2"))
 		}
 		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		for _, entry := range results {
 			fmt.Println(entry)

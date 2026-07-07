@@ -54,7 +54,7 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid repo format, use owner/repo")
+		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx read gkoreli/ghx cmd/ghx/main.go --lines 1-40", repo)
 	}
 	owner := parts[0]
 	name := parts[1]
