@@ -175,6 +175,26 @@ func TestExecute_SyntaxError(t *testing.T) {
 	}
 }
 
+// TestExecute_TranspileErrorSinglePrefix pins that a transpile/parse failure
+// returns an error (so the caller can exit non-zero) carrying a single
+// "transpile:" prefix — not the doubled "transpile: transpile:" the dogfood run
+// hit (FRICTION.md 2026-07-07 "code-mode transpile error returns exit 0").
+func TestExecute_TranspileErrorSinglePrefix(t *testing.T) {
+	exec := NewExecutor()
+	// Top-level await is invalid for the ES2015 transpile target.
+	_, err := exec.Execute(context.Background(), `const r = await codemode.explore({repo:"x/y"}); return r;`, nil)
+	if err == nil {
+		t.Fatal("expected transpile error for top-level await, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "transpile:") {
+		t.Fatalf("error missing 'transpile:' context: %s", msg)
+	}
+	if strings.Contains(msg, "transpile: transpile:") {
+		t.Fatalf("doubled 'transpile:' prefix not de-duped: %s", msg)
+	}
+}
+
 // TestExecute_RuntimeError tests runtime error handling.
 func TestExecute_RuntimeError(t *testing.T) {
 	exec := NewExecutor()

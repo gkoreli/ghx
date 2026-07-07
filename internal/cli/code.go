@@ -55,7 +55,11 @@ with TypeScript type stubs; pass ` + "`-`" + ` to read the script from stdin.`,
 		executor := codemode.NewExecutor()
 		result, err := executor.Execute(context.Background(), code, tools)
 		if err != nil {
-			return err
+			// A snippet that fails to transpile, parse, or run is a bad
+			// invocation, not a success: exit 2 so a scripting agent checking
+			// $? never treats a non-executed script as OK (dogfood friction,
+			// FRICTION.md 2026-07-07 "code-mode transpile error returns exit 0").
+			return WithExitCode(ExitBadInvocation, err)
 		}
 
 		// Print console output to stderr

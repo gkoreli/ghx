@@ -411,6 +411,43 @@ func TestHandleReconDepthForwarding(t *testing.T) {
 	}
 }
 
+// TestAskDepthValidationRejectsBogus pins that `ghx sidecar ask --depth <bogus>`
+// is rejected with exit 2 naming the valid set, rather than silently running at
+// an unintended budget (dogfood friction, FRICTION.md 2026-07-07 "--depth bogus
+// is silently accepted"). Validation runs before any daemon call, so a bogus
+// value never reaches the network. This matches the MCP recon path, which
+// already rejects an out-of-set depth (serve.go / TestHandleReconDepthForwarding).
+func TestAskDepthValidationRejectsBogus(t *testing.T) {
+	t.Cleanup(func() { _ = sidecarAskCmd.Flags().Set("depth", "normal") })
+
+	if err := sidecarAskCmd.Flags().Set("depth", "bogus"); err != nil {
+		t.Fatal(err)
+	}
+	err := sidecarAskCmd.RunE(sidecarAskCmd, []string{"How is Get implemented?"})
+	if err == nil {
+		t.Fatal("bogus --depth returned nil error (silently accepted)")
+	}
+	if got := CodeForError(err); got != ExitBadInvocation {
+		t.Fatalf("exit code = %d, want %d (ExitBadInvocation)", got, ExitBadInvocation)
+	}
+	for _, want := range []string{"bogus", "cheap", "normal", "deep"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("invalid --depth error must name %q, got: %s", want, err.Error())
+		}
+	}
+}
+
+// TestAskDepthValidationAcceptsValid pins that the three valid depths pass
+// validation (they proceed past the depth check without a bad-invocation
+// error), preserving today's valid-value behavior.
+func TestAskDepthValidationAcceptsValid(t *testing.T) {
+	for _, depth := range []string{"cheap", "normal", "deep"} {
+		if _, ok := sidecar.ParseDepth(depth); !ok {
+			t.Fatalf("valid depth %q rejected by validator the ask command reuses", depth)
+		}
+	}
+}
+
 // TestAskEnvelopeJSONShape pins the `ghx sidecar ask --json` contract: the
 // report unchanged under "report", the artifacts pointer as a sibling under
 // "artifacts" with sessionDir/traceId keys — the report schema itself stays

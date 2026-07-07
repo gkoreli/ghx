@@ -73,6 +73,15 @@ and reports under ~/.ghx that back the report.`,
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		local, _ := cmd.Flags().GetBool("local")
 
+		// Reject an out-of-set --depth with exit 2 rather than silently running
+		// at an unintended budget (dogfood friction, FRICTION.md 2026-07-07
+		// "--depth bogus is silently accepted"). Reuses the same sidecar.Depth
+		// validator the MCP recon path already enforces (serve.go), so the CLI
+		// and MCP surfaces agree on the valid set.
+		if _, ok := sidecar.ParseDepth(depth); !ok {
+			return WithExitCode(ExitBadInvocation, fmt.Errorf("invalid --depth %q; use cheap|normal|deep", depth))
+		}
+
 		// Session routing (ADR-0030.1): --session and --repo keep the exact
 		// ADR-0019.1 D2 behavior (R1/R2 — the name is deterministic, printed
 		// up front as before). With neither, the daemon routes the question

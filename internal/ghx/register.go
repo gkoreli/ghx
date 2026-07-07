@@ -8,7 +8,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "explore",
 		Description: "Explore a GitHub repo — returns branch, file tree, and README",
 		Func:        wrapExplore,
-		Returns:     "{ description: string; branch: string; files: { name: string; type: string }[]; readme: string }",
+		Returns:     "{ description: string; branch: string; snapshot: { repo: { owner: string; name: string }; sha: string }; files: { name: string; type: string }[]; readme: string }",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -54,7 +54,7 @@ func RegisterTools(r *codemode.Registry) {
 		Name:        "read",
 		Description: "Read multiple files from a GitHub repo in one call",
 		Func:        wrapRead,
-		Returns:     "{ path: string; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number; mapEngine?: string; mapWarnings?: string[] }[]",
+		Returns:     "{ path: string; snapshot: { repo: { owner: string; name: string }; sha: string }; content: string; byteSize: number; notFound: boolean; dirEntries?: { name: string; type: string }[]; globPattern?: string; grepHits?: { lineNum: number; line: string; isMatch: boolean }[]; mapLines?: string[]; mapChars?: number; mapEngine?: string; mapWarnings?: string[] }[]",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

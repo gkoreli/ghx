@@ -8,9 +8,9 @@ import (
 // Repo identifies a GitHub repository by owner and repository name.
 type Repo struct {
 	// Owner is the GitHub account or organization segment of owner/repo.
-	Owner string
+	Owner string `json:"owner"`
 	// Name is the repository name segment of owner/repo.
-	Name string
+	Name string `json:"name"`
 }
 
 // Snapshot identifies the repository commit observed by a read operation.
