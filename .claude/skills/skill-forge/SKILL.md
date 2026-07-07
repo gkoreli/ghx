@@ -152,6 +152,10 @@ product-audit Process step 8, generalized):
   idea with evidence and cross-references — **eat the fish, throw the bones** (there are many). The
   distiller surfaces and ranks; it never stands unjudged. A dedicated clean agent reduces bias, but
   the final document — and the accept/veto call — is still yours.
+- **Consolidate the receipts.** The distilled artifact carries a **decision-grade evidence
+  ledger** — every load-bearing claim backed by a *specific* deep link / `file:line` / recompute
+  command + one line on *why it matters* — so the reader decides from it alone, not by spelunking
+  the fan-out.
 
 ---
 
@@ -168,6 +172,11 @@ product-audit Process step 8, generalized):
   agent that forgets the big picture optimizes a local artifact against the whole.
 - **Sourcing discipline is the top quality lever** — specific URLs + rationale + verification
   + disclosed degradations + labelled synthesis. Enforce it on every delegated agent.
+- **Conclusions aren't decision-ready without consolidated receipts.** Sourcing discipline
+  governs the *inputs*; the same rigor must reach the *output* — the synthesis / decision layer
+  consolidates its cross-references (specific deep links + `file:line` + recompute, never vague
+  URLs, each with a one-line "why it matters") so a decision-maker acts from the top. (The lesson
+  product-audit learned when a judgment shipped as evidence-free prose.)
 - **The context re-pricing pass is a standing Round-0 step, not an afterthought** — one agent
   that audits the canon ("does this wisdom hold in *our* context?") by reading the other
   artifacts, not running beside them. It was the highest-leverage step in the worked example
