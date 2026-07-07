@@ -31,6 +31,14 @@ Staged on `mainline`, not yet released.
   `ghx grep owner/repo PATTERN --path PATH`) instead of a bare error
   (workstream A4).
 
+### Fixed
+
+- **`ghx tree`/`explore`/`read` no longer panic or misreport a malformed repo
+  slug.** A slug missing `owner/repo` (e.g. `ghx tree noslash`) previously
+  panicked on an unchecked index; it now returns a clean bad-input error with
+  exit code 2, unified behind a single `ghx.Repo` validator
+  ([ADR-0035](docs/adr/0035-architecture-hardening-refactor-sequence.md) T1.1).
+
 ## [2.7.0] — 2026-07-07
 
 Ergonomics for the main-agent consumer plus architecture and eval-trust
