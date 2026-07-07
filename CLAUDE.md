@@ -140,6 +140,32 @@ Do not rely on Fable remembering CLI flags. When delegating to Codex CLI or Clau
 
 That skill is the canonical home for command syntax, bypass flags, wrapper prompts, and evidence report shape. Keep this file focused on routing judgment, not command tables.
 
+## Git Hygiene on a Shared Mainline (learned 2026-07-07)
+
+Parallel engineers — other Claude sessions or Goga — may be committing to
+`mainline` in the same working tree at the same time. Plain appended commits are
+safe: git serializes ref updates and history just interleaves. The danger is
+**history rewrites under concurrency**:
+
+- **Never `git commit --amend` on `mainline`.** Amend rewrites whatever `HEAD`
+  currently points at — and `HEAD` may have just moved to a parallel engineer's
+  commit, silently clobbering it (incident 2026-07-07: an amend meant to reword a
+  worker branch overwrote a product-audit commit's message).
+- **If you must reword/amend, target a SPECIFIC commit id — never "the recent
+  one" (blind `HEAD`).** Prefer rewording inside the worker's OWN worktree/branch
+  before merging (isolated). To fix a commit already on `mainline`, rebuild it
+  deterministically with `git commit-tree` (identical tree, corrected message)
+  and move the branch with an atomic CAS `git update-ref refs/heads/mainline
+  <new> <expected-old>` so a racing commit makes it fail safely — do NOT
+  `git rebase` a shared mainline whose working tree holds another engineer's
+  uncommitted files.
+- **Land worker branches by fast-forward only**: rebase the branch in ITS OWN
+  worktree, then `git merge --ff-only` from `mainline`. If a parallel commit
+  lands between the rebase and the ff-merge, the ff-merge fails LOUDLY — just
+  retry; it never corrupts.
+- Before any history-touching op on `mainline`, check `git status` is clean of
+  other engineers' changes and that no commit is actively racing.
+
 ## Remote Control (learned 2026-07-06)
 
 How to make a ghx session controllable from claude.ai/code or the Claude
