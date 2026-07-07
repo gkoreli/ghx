@@ -49,11 +49,42 @@ func promptText(params acp.PromptRequest) string {
 	return sb.String()
 }
 
+// richToolCall is one adapter-shaped scripted tool-call event: explicit
+// title, kind, rawInput command, locations, and output — what real ACP
+// adapters emit (live claude-agent-acp execute calls title "Terminal" and
+// put the command line in rawInput.command; file tools report locations).
+// Location and path entries starting with "WORKSPACE" have that prefix
+// replaced by the session cwd, so scripts written before the per-trial
+// workspace exists can still target it.
+type richToolCall struct {
+	ID        string   `json:"id,omitempty"`
+	Title     string   `json:"title"`
+	Kind      string   `json:"kind"`
+	Command   string   `json:"command,omitempty"`
+	Locations []string `json:"locations,omitempty"`
+	Output    string   `json:"output,omitempty"`
+}
+
+// fileWrite is one scripted client fs/write_text_file call (the ACP
+// client-side write path host-task episodes advertise; ADR-0032.1 S2/S3).
+// The path supports the WORKSPACE prefix like richToolCall locations.
+type fileWrite struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // reply is one scripted prompt response.
 type reply struct {
 	ToolCalls    []string `json:"toolCalls"`
 	ReplayOnLoad []string `json:"replayOnLoad"`
-	Text         string   `json:"text"`
+	// RichToolCalls emits adapter-shaped tool_call/tool_call_update pairs
+	// (explicit title/kind/rawInput/locations) after ToolCalls.
+	RichToolCalls []richToolCall `json:"richToolCalls,omitempty"`
+	// WriteFiles calls the client's fs/write_text_file for each entry after
+	// tool calls; failures are logged (WRITE_ERR) and do not fail the turn —
+	// a denied write is the client's contract, not an agent error.
+	WriteFiles []fileWrite `json:"writeFiles,omitempty"`
+	Text       string      `json:"text"`
 	// SubmitReport, when set, is written verbatim to the report-sink path the
 	// runtime registered on the session (ADR-0021 D1). It simulates the agent
 	// calling the submit_report MCP tool with an accepted report, exercising the
@@ -107,6 +138,18 @@ type mockAgent struct {
 	replies  []reply
 	state    string
 	sinkPath string
+	// cwd is the session working directory from NewSession/LoadSession; it
+	// substitutes the WORKSPACE placeholder in scripted paths.
+	cwd string
+}
+
+// expandWorkspace substitutes the WORKSPACE placeholder prefix with the
+// session cwd.
+func (m *mockAgent) expandWorkspace(p string) string {
+	if rest, ok := strings.CutPrefix(p, "WORKSPACE"); ok {
+		return m.cwd + rest
+	}
+	return p
 }
 
 // captureSink records the report-sink --out path from a session's registered
@@ -152,7 +195,12 @@ func (m *mockAgent) currentIndex() int {
 	return n
 }
 
-func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (m *mockAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
+	// INIT_CAPS lets tests assert which fs capabilities the client advertised
+	// (host episodes must advertise writeTextFile=true, recon episodes never
+	// do; ADR-0032.1 S2 risk 4).
+	logEvent("INIT_CAPS", fmt.Sprintf("readTextFile=%t writeTextFile=%t",
+		params.ClientCapabilities.Fs.ReadTextFile, params.ClientCapabilities.Fs.WriteTextFile))
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
@@ -162,6 +210,14 @@ func (m *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	m.captureSink(params.McpServers)
+	m.cwd = params.Cwd
+	// MCP_SERVER lines let tests assert the exact per-session MCP server
+	// registrations (report sink; ADR-0032.1 arm-B recon server).
+	for _, s := range params.McpServers {
+		if s.Stdio != nil {
+			logEvent("MCP_SERVER", fmt.Sprintf("%s %s %s", s.Stdio.Name, s.Stdio.Command, strings.Join(s.Stdio.Args, " ")))
+		}
+	}
 	logEvent("NEW_CWD", params.Cwd)
 	logMeta("NEW_META", params.Meta)
 	return acp.NewSessionResponse{SessionId: "mock-sess-1"}, nil
@@ -175,6 +231,7 @@ func (m *mockAgent) NewSession(_ context.Context, params acp.NewSessionRequest) 
 // prompt request is sent.
 func (m *mockAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	m.captureSink(params.McpServers)
+	m.cwd = params.Cwd
 	logEvent("LOAD", string(params.SessionId))
 	logEvent("LOAD_CWD", params.Cwd)
 	logMeta("LOAD_META", params.Meta)
@@ -240,6 +297,10 @@ func (m *mockAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.P
 	if err := m.emitToolCalls(ctx, params.SessionId, idx, "tc", r.ToolCalls); err != nil {
 		return acp.PromptResponse{}, err
 	}
+	if err := m.emitRichToolCalls(ctx, params.SessionId, idx, r.RichToolCalls); err != nil {
+		return acp.PromptResponse{}, err
+	}
+	m.performWriteFiles(ctx, params.SessionId, r.WriteFiles)
 
 	// Simulate an accepted submit_report tool call for this turn (ADR-0021 D1).
 	m.writeSubmitReport(r)
@@ -292,6 +353,79 @@ func (m *mockAgent) emitToolCalls(ctx context.Context, sessionID acp.SessionId, 
 		}
 	}
 	return nil
+}
+
+// emitRichToolCalls emits adapter-shaped tool_call/tool_call_update pairs:
+// explicit title and kind, the command line in rawInput.command (execute
+// calls titled "Terminal", matching the live claude-agent-acp shape), and
+// tool-call locations for file-shaped tools.
+func (m *mockAgent) emitRichToolCalls(ctx context.Context, sessionID acp.SessionId, idx int, calls []richToolCall) error {
+	for i, rc := range calls {
+		id := acp.ToolCallId(rc.ID)
+		if rc.ID == "" {
+			id = acp.ToolCallId(fmt.Sprintf("rich-%d-%d", idx, i))
+		}
+		var rawInput map[string]any
+		if rc.Command != "" {
+			rawInput = map[string]any{"command": rc.Command}
+		}
+		var locations []acp.ToolCallLocation
+		for _, p := range rc.Locations {
+			locations = append(locations, acp.ToolCallLocation{Path: m.expandWorkspace(p)})
+		}
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.SessionUpdate{
+				ToolCall: &acp.SessionUpdateToolCall{
+					ToolCallId: id,
+					Title:      rc.Title,
+					Kind:       acp.ToolKind(rc.Kind),
+					Status:     acp.ToolCallStatusPending,
+					RawInput:   rawInput,
+					Locations:  locations,
+				},
+			},
+		}); err != nil {
+			return err
+		}
+		status := acp.ToolCallStatusCompleted
+		output := rc.Output
+		if output == "" {
+			output = "mock output for " + rc.Title
+		}
+		if err := m.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: sessionID,
+			Update: acp.SessionUpdate{
+				ToolCallUpdate: &acp.SessionToolCallUpdate{
+					ToolCallId: id,
+					Status:     &status,
+					Content:    []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(output))},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// performWriteFiles drives the client's fs/write_text_file for each scripted
+// write, logging WRITE_OK/WRITE_ERR so tests can assert outcomes. A denied
+// write is the client's policy speaking — never a scripted-agent failure.
+func (m *mockAgent) performWriteFiles(ctx context.Context, sessionID acp.SessionId, writes []fileWrite) {
+	for _, w := range writes {
+		path := m.expandWorkspace(w.Path)
+		_, err := m.conn.WriteTextFile(ctx, acp.WriteTextFileRequest{
+			SessionId: sessionID,
+			Path:      path,
+			Content:   w.Content,
+		})
+		if err != nil {
+			logEvent("WRITE_ERR", fmt.Sprintf("%s: %v", path, err))
+			continue
+		}
+		logEvent("WRITE_OK", path)
+	}
 }
 
 func (m *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {

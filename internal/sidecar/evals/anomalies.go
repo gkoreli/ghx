@@ -212,6 +212,9 @@ func DetectAnomalies(ep *Episode) []Anomaly {
 			}
 		}
 	}
+	// Host-task rows (ADR-0032.1 S3): compliance + BLOCKED detection over the
+	// persisted HostTask record; recon episodes derive nothing there.
+	out = append(out, detectHostTaskAnomalies(ep)...)
 	return out
 }
 
@@ -233,6 +236,8 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalySidecarBlocked, SeverityBreaking},
 		{AnomalySidecarReportMissing, SeverityBreaking},
 		{AnomalyEpisodeHangTimeout, SeverityBreaking},
+		{AnomalyHostRateLimited, SeverityBreaking},
+		{AnomalyReconToolUnavailable, SeverityBreaking},
 		{AnomalySidecarReportUnparsed, SeveritySoft},
 		{AnomalySidecarReportRetried, SeveritySoft},
 		{AnomalySidecarReportCoerced, SeveritySoft},
@@ -241,6 +246,8 @@ func CountAnomalies(episodes []*Episode) []AnomalyCount {
 		{AnomalyParallelRateLimited, SeveritySoft},
 		{AnomalyAnswerDocContamination, SeveritySoft},
 		{AnomalyTraceCaptureGap, SeveritySoft},
+		{AnomalyHostExternalExploration, SeveritySoft},
+		{AnomalyHostExecuteOutsideWorkspace, SeveritySoft},
 	}
 	counts := map[string]int{}
 	episodesWith := map[string]int{}

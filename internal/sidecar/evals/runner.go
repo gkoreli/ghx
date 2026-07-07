@@ -337,7 +337,52 @@ func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
 // runDirectEpisode drives a plain or ghx profile: one live agent process for
 // the whole episode, one ACP session, one Prompt call per question. Follow-up
 // turns are Resumed by construction — the session never ends between turns.
+// The recon read-only contract is the spec's zero values: nil write policy
+// (deny all writes), fs.writeTextFile advertised false, no MCP servers.
 func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Profile, ep *Episode, rt episodeRuntime) error {
+	return runLiveAgentEpisode(ctx, cfg, ep, rt, liveAgentEpisodeSpec{
+		client:     &evalClient{},
+		mcpServers: []acp.McpServer{},
+		questions:  task.Turns,
+		prompt:     func(i int, q string) string { return directPrompt(profile, task.Repo, q, i) },
+		turnLabel:  "direct",
+	})
+}
+
+// liveAgentEpisodeSpec parameterizes one live-process ACP episode: which
+// client (and therefore write policy), which fs capabilities are advertised,
+// which MCP servers the session registers, and the per-turn prompts. It is
+// the single spawn machinery shared by the direct recon profiles
+// (runDirectEpisode) and the ADR-0032.1 host-task arms (RunHostTrial) —
+// parameterized once, never forked.
+type liveAgentEpisodeSpec struct {
+	// client captures turns and violations; callers set its write policy
+	// before the episode starts (nil = recon deny-all contract).
+	client *evalClient
+	// fsWriteTextFile is the fs.writeTextFile client capability advertised at
+	// initialize. Recon profiles advertise false (read-only contract, never
+	// flipped); host-task episodes advertise true so workspace-scoped client
+	// fs writes reach the write policy (ADR-0032.1 S2 risk 4).
+	fsWriteTextFile bool
+	// mcpServers is registered on the session: empty for recon profiles and
+	// the host control arm, the recon server for host arm B.
+	mcpServers []acp.McpServer
+	// questions are the per-turn questions recorded on the episode.
+	questions []string
+	// prompt renders the full prompt text sent for one turn.
+	prompt func(turn int, question string) string
+	// turnLabel names the episode flavor in turn-failure errors ("direct",
+	// "host").
+	turnLabel string
+}
+
+// runLiveAgentEpisode spawns the configured ACP agent, initializes with the
+// spec's client capabilities, opens one session (with the spec's MCP
+// servers), then sends one prompt per question, capturing turns, traces, and
+// violations onto ep. All sessions enable only the raw-SDK audit channel
+// (ADR-0016.10 D2): audit notifications for the trace-capture comparator
+// without steering the subject agent, so baseline conditions are unchanged.
+func runLiveAgentEpisode(ctx context.Context, cfg RunConfig, ep *Episode, rt episodeRuntime, spec liveAgentEpisodeSpec) error {
 	agentBin, agentArgs := sidecar.SplitAgentCmd(cfg.AgentCmd)
 	cmd := exec.CommandContext(ctx, agentBin, agentArgs...)
 	cmd.Stderr = os.Stderr
@@ -356,13 +401,13 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 	}
 	defer sidecar.ShutdownAgent(cmd, stdin)
 
-	client := &evalClient{}
+	client := spec.client
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
-			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: false},
+			Fs: acp.FileSystemCapabilities{ReadTextFile: false, WriteTextFile: spec.fsWriteTextFile},
 		},
 	})
 	if err != nil {
@@ -374,20 +419,16 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 		ep.Identity.AdapterSubjectModel = modelFromMeta(initResp.AgentInfo.Meta)
 	}
 
-	// Direct-profile sessions enable only the raw-SDK audit channel
-	// (ADR-0016.10 D2): it adds audit notifications for the trace-capture
-	// comparator without steering the subject agent, so baseline conditions
-	// are unchanged.
 	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        rt.Cwd,
-		McpServers: []acp.McpServer{},
+		McpServers: spec.mcpServers,
 		Meta:       map[string]any{"claudeCode": map[string]any{"emitRawSDKMessages": true}},
 	})
 	if err != nil {
 		return fmt.Errorf("acp new session: %w", err)
 	}
 
-	for i, q := range task.Turns {
+	for i, q := range spec.questions {
 		record := TurnRecord{Turn: i, Question: q, Resumed: i > 0}
 		client.current = &record
 		client.promptSent = false
@@ -395,7 +436,7 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 		client.promptSent = true
 		_, err := conn.Prompt(ctx, acp.PromptRequest{
 			SessionId: sess.SessionId,
-			Prompt:    []acp.ContentBlock{acp.TextBlock(directPrompt(profile, task.Repo, q, i))},
+			Prompt:    []acp.ContentBlock{acp.TextBlock(spec.prompt(i, q))},
 		})
 		record.DurationMs = time.Since(start).Milliseconds()
 		client.current = nil
@@ -405,7 +446,7 @@ func runDirectEpisode(ctx context.Context, cfg RunConfig, task Task, profile Pro
 			ep.Turns = append(ep.Turns, record)
 			appendTraceProjections(ep, record)
 			ep.Violations = append(ep.Violations, client.violations...)
-			return fmt.Errorf("direct turn %d: %w", i, err)
+			return fmt.Errorf("%s turn %d: %w", spec.turnLabel, i, err)
 		}
 		ep.Turns = append(ep.Turns, record)
 		appendTraceProjections(ep, record)

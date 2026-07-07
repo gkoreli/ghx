@@ -156,14 +156,11 @@ Example: var r = codemode.explore({ repo: "vercel/next.js" }); return r.files;`,
 	return transport.Serve(s)
 }
 
+// registerReconTool serves the single recon tool. Its definition lives in
+// sidecar.ReconMCPTool so the served schema and the host-task eval identity
+// hash (ADR-0032.1 S3) can never drift apart.
 func registerReconTool(s *server.MCPServer) {
-	reconTool := mcp.NewTool("recon",
-		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration. Follow-up questions are routed to the right investigation session automatically (the route is reported with each answer)."),
-		mcp.WithString("question", mcp.Required(), mcp.Description("English question about the repo")),
-		mcp.WithString("repo", mcp.Description("owner/repo (optional scope; omit for cross-GitHub discovery questions like \"which repos do X\")")),
-		mcp.WithString("session", mcp.Description("advanced: pin a specific session; normally omit — ghx routes for you (ADR-0030.1)")),
-	)
-	s.AddTool(reconTool, handleRecon)
+	s.AddTool(sidecar.ReconMCPTool(), handleRecon)
 }
 
 var askSidecar = func(ctx context.Context, cfg sidecar.Config, req sidecar.AskRequest) (*sidecar.Report, *sidecar.TurnResult, error) {

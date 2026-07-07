@@ -93,8 +93,14 @@ type RunManifest struct {
 	// written at run start for every eligible run so any completed run can later
 	// serve as a baseline-reuse source.
 	IdentityHashes []BaselineReuseHashRecord `json:"identityHashes,omitempty"`
-	CreatedAt      time.Time                 `json:"createdAt"`
-	BaselineReuse  *BaselineReuse            `json:"baselineReuse,omitempty"`
+	// HostTaskIdentityHashes is the ADR-0032.1 S3 frozen-identity extension
+	// for host-task runs: the host prompt contract hash, the arm-B recon
+	// skill/prompt-contract hash, and the recon MCP tool schema hash.
+	// Additive — recon manifests never carry it and baseline-reuse
+	// comparisons never read it, so existing manifests are unaffected.
+	HostTaskIdentityHashes []BaselineReuseHashRecord `json:"hostTaskIdentityHashes,omitempty"`
+	CreatedAt              time.Time                 `json:"createdAt"`
+	BaselineReuse          *BaselineReuse            `json:"baselineReuse,omitempty"`
 	// BaselineFallback records an explicit fresh-baseline fallback after a
 	// requested baseline-reuse source was refused.
 	BaselineFallback *BaselineFallback `json:"baselineFallback,omitempty"`
@@ -182,6 +188,21 @@ func RecordManifestIdentityHashes(runDir string, hashes []BaselineReuseHashRecor
 		m = &RunManifest{RunDir: runDir}
 	}
 	m.IdentityHashes = hashes
+	return m, SaveRunManifest(runDir, *m)
+}
+
+// RecordManifestHostTaskIdentityHashes writes the ADR-0032.1 S3 host-task
+// frozen-identity inventory (host prompt hash, arm-B prompt-contract hash,
+// recon MCP tool schema hash) to the run manifest, creating it if needed.
+func RecordManifestHostTaskIdentityHashes(runDir string, hashes []BaselineReuseHashRecord) (*RunManifest, error) {
+	m, err := LoadRunManifest(runDir)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		m = &RunManifest{RunDir: runDir}
+	}
+	m.HostTaskIdentityHashes = hashes
 	return m, SaveRunManifest(runDir, *m)
 }
 

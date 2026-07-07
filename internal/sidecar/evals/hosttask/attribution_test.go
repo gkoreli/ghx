@@ -60,6 +60,16 @@ func TestClassifierRules(t *testing.T) {
 		{"mixed scopes", sidecar.ToolCallTrace{Kind: "edit", Locations: []string{inside, outside}}, ClassUnclassified},
 		{"no locations", sidecar.ToolCallTrace{Kind: "edit"}, ClassUnclassified},
 		{"unresolvable relative location", sidecar.ToolCallTrace{Kind: "read", Locations: []string{"relative.go"}}, ClassUnclassified},
+		// Execute command source: rawInput.command is authoritative — live
+		// claude-agent-acp execute calls title "Terminal", not the command
+		// (sighted 2026-07-06, ADR-0032.1 S3); the title is fallback only.
+		{"adapter-shaped gh call", sidecar.ToolCallTrace{Kind: "execute", Title: "Terminal", RawInput: map[string]any{"command": "gh pr list"}}, ClassExploration},
+		{"adapter-shaped local build", sidecar.ToolCallTrace{Kind: "execute", Title: "Terminal", RawInput: map[string]any{"command": "go build ./..."}}, ClassEngineering},
+		{"adapter-shaped compound", sidecar.ToolCallTrace{Kind: "execute", Title: "Terminal", RawInput: map[string]any{"command": "cd /tmp && gh api x"}}, ClassUnclassified},
+		{"rawInput command beats command-line title", sidecar.ToolCallTrace{Kind: "execute", Title: "go test ./...", RawInput: map[string]any{"command": "gh api repos/x"}}, ClassExploration},
+		{"non-map rawInput falls back to title", sidecar.ToolCallTrace{Kind: "execute", Title: "gh api repos/x", RawInput: "opaque"}, ClassExploration},
+		{"blank rawInput command falls back to title", sidecar.ToolCallTrace{Kind: "execute", Title: "go vet ./...", RawInput: map[string]any{"command": "  "}}, ClassEngineering},
+		{"terminal title with no command is unknowable", sidecar.ToolCallTrace{Kind: "execute", Title: "Terminal"}, ClassUnclassified},
 		// R7: planning its own work is engineering.
 		{"think", sidecar.ToolCallTrace{Kind: "think", Title: "Update todos"}, ClassEngineering},
 		// R8: unknown identities stay visible as unclassified.

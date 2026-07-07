@@ -289,4 +289,8 @@ type Episode struct {
 	// contended and must be excluded from latency claims; the same marker is
 	// mirrored onto duration metrics as ghx.eval.parallel=true.
 	Parallel bool `json:"parallel,omitempty"`
+	// HostTask carries the ADR-0032.1 host-task trial record (arm, workspace,
+	// attribution table, outcome grade) for host episodes only; recon
+	// episodes leave it nil. The host-task anomaly detectors read it.
+	HostTask *HostTaskRecord `json:"hostTask,omitempty"`
 }
