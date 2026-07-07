@@ -10,7 +10,13 @@ prose here.
 
 ## [Unreleased]
 
-Staged on `mainline`, not yet released.
+Nothing released yet in this cycle.
+
+## [2.8.0] — 2026-07-07
+
+Architecture hardening (ADR-0035 cleanup + ADR-0036 target architecture, incl.
+the config-selectable Runner port) plus main-agent ergonomics — the invisible
+half is a large behavior-preserving refactor that makes ghx faster to evolve.
 
 ### Added
 
@@ -23,6 +29,11 @@ Staged on `mainline`, not yet released.
 - **`ghx read --line-range` alias for `--lines`** — agents that type
   `--line-range` (a real mined failure in production traces) now get identical
   behavior; hidden and conflict-checked (workstream A2).
+- **`read`/`explore` now surface the resolved commit SHA** — results carry a
+  `Snapshot{Repo,SHA}` recording which commit the reconnaissance actually read,
+  so evidence is reproducible and two reads in one investigation can be checked
+  against a moving `HEAD`
+  ([ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md) B2).
 
 ### Changed
 
@@ -36,6 +47,15 @@ Staged on `mainline`, not yet released.
   daemon drains active turns gracefully on shutdown
   ([ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md)
   A1; implements ADR-0030 D6).
+- **Internal architecture hardening** (behavior-preserving; no CLI/report/eval
+  change): a `ghx.Repo` value object and a GitHub-client seam make core recon
+  offline-testable; the sidecar turn engine is consolidated behind a
+  config-selectable **Runner port** (`runner.kind` — the "below-ACP" seam so the
+  runner is replaceable) with typed failure classes; `Depth`/`Tier`/`Backend`
+  are value types; the sidecar tool set has a single registry. Guided by
+  [ADR-0035](docs/adr/0035-architecture-hardening-refactor-sequence.md) and
+  [ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md),
+  synthesized from the `docs/audits/` architecture audits.
 
 ### Fixed
 
