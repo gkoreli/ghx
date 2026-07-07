@@ -342,6 +342,75 @@ func TestHandleReconSessionDefaults(t *testing.T) {
 	}
 }
 
+// TestHandleReconDepthForwarding pins the depth dial (NORTH_STAR capability
+// 3): the recon tool forwards the caller's depth through AskRequest.Depth —
+// the same field `ask --depth` uses — omitting it keeps the "normal" smart
+// default, and an invalid value is rejected with the valid set named rather
+// than silently coerced.
+func TestHandleReconDepthForwarding(t *testing.T) {
+	orig := askSidecar
+	defer func() { askSidecar = orig }()
+	var got sidecar.AskRequest
+	askSidecar = func(_ context.Context, _ sidecar.Config, req sidecar.AskRequest) (*sidecar.Report, *sidecar.TurnResult, error) {
+		got = req
+		return &sidecar.Report{Answer: "ok"}, nil, nil
+	}
+
+	// Each valid depth travels verbatim into AskRequest.Depth.
+	for _, depth := range []string{"cheap", "normal", "deep"} {
+		got = sidecar.AskRequest{}
+		req := mcp.CallToolRequest{}
+		req.Params.Arguments = map[string]any{"question": "q", "depth": depth}
+		res, err := handleRecon(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.IsError {
+			t.Fatalf("valid depth %q must not error: %+v", depth, res)
+		}
+		if got.Depth != depth {
+			t.Fatalf("depth %q not forwarded, got %q", depth, got.Depth)
+		}
+	}
+
+	// Omitting depth keeps today's smart default ("normal") — behavior is
+	// unchanged for callers that never set the dial.
+	got = sidecar.AskRequest{}
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"question": "q"}
+	if _, err := handleRecon(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if got.Depth != "normal" {
+		t.Fatalf("omitted depth must default to normal, got %q", got.Depth)
+	}
+
+	// An invalid value is rejected (not coerced): the tool returns an error
+	// naming the valid options and never reaches the sidecar.
+	got = sidecar.AskRequest{Depth: "sentinel"}
+	req = mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"question": "q", "depth": "turbo"}
+	res, err := handleRecon(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("invalid depth must return a tool error, got %+v", res)
+	}
+	if got.Depth != "sentinel" {
+		t.Fatalf("invalid depth must not reach the sidecar; askSidecar was called with %q", got.Depth)
+	}
+	errText, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("error content[0] is %T, want TextContent", res.Content[0])
+	}
+	for _, want := range []string{"turbo", "cheap", "normal", "deep"} {
+		if !strings.Contains(errText.Text, want) {
+			t.Fatalf("invalid-depth error must name %q, got: %s", want, errText.Text)
+		}
+	}
+}
+
 // TestAskEnvelopeJSONShape pins the `ghx sidecar ask --json` contract: the
 // report unchanged under "report", the artifacts pointer as a sibling under
 // "artifacts" with sessionDir/traceId keys — the report schema itself stays
