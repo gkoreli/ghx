@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/gkoreli/ghx/v2/internal/sidecar/tier2"
 )
 
 // RemoteBackendID is the canonical backend ID for remote ghx evidence.
-const RemoteBackendID = "remote"
+const RemoteBackendID = string(BackendRemote)
 
 // ToolSpec describes one sidecar-owned tool surface. It is the single source
 // of truth for sidecar-facing tool identity: command name, persona menu text,
@@ -48,8 +46,14 @@ func (r *ToolRegistry) Register(t ToolSpec) {
 	if t.Name == "" {
 		panic("sidecar: tool name is required")
 	}
+	if _, ok := ParseTier(t.Tier); !ok {
+		panic(fmt.Sprintf("sidecar: canonical tier ID is required for tool %q", t.Name))
+	}
 	if t.BackendID == "" {
 		panic(fmt.Sprintf("sidecar: backend ID is required for tool %q", t.Name))
+	}
+	if _, ok := ParseBackend(t.BackendID); !ok {
+		panic(fmt.Sprintf("sidecar: canonical backend ID is required for tool %q", t.Name))
 	}
 	if _, exists := r.byName[t.Name]; exists {
 		panic(fmt.Sprintf("sidecar: tool %q already registered", t.Name))
@@ -121,7 +125,8 @@ func (r *ToolRegistry) QuotedBackendIDs(includeRemote bool) string {
 // LocalBackend reports whether backend is one of the registered local
 // structural backends.
 func (r *ToolRegistry) LocalBackend(backend string) bool {
-	return r.GetByBackend(strings.TrimSpace(backend)) != nil
+	b, ok := ParseBackend(backend)
+	return ok && b.IsLocal() && r.GetByBackend(b.String()) != nil
 }
 
 // DefaultToolRegistry returns the registered sidecar tool set.
@@ -129,20 +134,20 @@ func DefaultToolRegistry() *ToolRegistry {
 	r := NewToolRegistry()
 	r.Register(ToolSpec{
 		Name:            "codemap",
-		Tier:            tier2.TierLocal,
-		BackendID:       tier2.BackendCodemap,
+		Tier:            Tier2.String(),
+		BackendID:       BackendCodemap.String(),
 		PersonaMenuLine: "     ghx tier2 codemap owner/repo --importers src/file.ts    (backend local:codemap)",
 	})
 	r.Register(ToolSpec{
 		Name:            "astgrep",
-		Tier:            tier2.TierLocal,
-		BackendID:       tier2.BackendAstGrep,
+		Tier:            Tier2.String(),
+		BackendID:       BackendAstGrep.String(),
 		PersonaMenuLine: "     ghx tier2 astgrep owner/repo --pattern 'compose($$$ARGS)' --lang ts    (backend local:ast-grep)",
 	})
 	r.Register(ToolSpec{
 		Name:            "repomap",
-		Tier:            tier2.TierLocal,
-		BackendID:       tier2.BackendRepomap,
+		Tier:            Tier2.String(),
+		BackendID:       BackendRepomap.String(),
 		PersonaMenuLine: "     ghx tier2 repomap owner/repo --query concern    (backend local:repomap)",
 	})
 	return r

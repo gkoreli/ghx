@@ -189,7 +189,8 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	// set named, rather than silently coerced — the tool must not quietly do
 	// something other than what the agent asked.
 	depth := request.GetString("depth", "normal")
-	if !isValidReconDepth(depth) {
+	parsedDepth, ok := sidecar.ParseDepth(depth)
+	if !ok {
 		return mcp.NewToolResultError(fmt.Sprintf(
 			"invalid depth %q: valid values are cheap, normal, deep", depth)), nil
 	}
@@ -199,7 +200,7 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		Session:  session,
 		Repo:     repo,
 		Question: question,
-		Depth:    depth,
+		Depth:    parsedDepth.String(),
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -225,12 +226,8 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 // anything else instead of letting the daemon silently coerce it to normal,
 // so the MCP consumer gets a clear error naming the valid options.
 func isValidReconDepth(depth string) bool {
-	switch depth {
-	case "cheap", "normal", "deep":
-		return true
-	default:
-		return false
-	}
+	_, ok := sidecar.ParseDepth(depth)
+	return ok
 }
 
 func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {

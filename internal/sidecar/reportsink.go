@@ -207,10 +207,6 @@ func citesScratchSource(value string) bool {
 		strings.Contains(lower, " /var/folders/")
 }
 
-// reportTiers are the canonical tierUsed values (ADR-0024.1 "Visibility
-// Contract"): the highest escalation tier that produced the answer.
-var reportTiers = map[string]bool{"tier0": true, "tier1": true, "tier2": true, "tier3": true}
-
 // ValidateReport enforces the semantic minimum shared by the strict submission
 // path and the lenient fallback path: a report must carry a non-empty answer,
 // and tierUsed — when present — must be a canonical tier ID (ADR-0024.1).
@@ -223,7 +219,7 @@ func ValidateReport(r *Report) error {
 	if r.Answer == "" {
 		return ErrEmptyAnswer
 	}
-	if r.TierUsed != "" && !reportTiers[r.TierUsed] {
+	if _, ok := ParseTier(r.TierUsed); r.TierUsed != "" && !ok {
 		return fmt.Errorf(`report failed validation: tierUsed: %q is not a canonical tier ("tier0" | "tier1" | "tier2" | "tier3")`, r.TierUsed)
 	}
 	return nil

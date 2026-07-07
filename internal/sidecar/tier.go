@@ -91,7 +91,7 @@ func buildTierDecisionRecord(req AskRequest, turn int, result *TurnResult, repor
 		Repo:                   req.Repo,
 		Turn:                   turn,
 		Decision:               tier2.DefaultPolicy().Evaluate(obs),
-		RuntimeDerivedTierUsed: deriveTierUsed(commands),
+		RuntimeDerivedTierUsed: deriveTierUsedValue(commands).String(),
 		EscalationUsed:         escalationUsed,
 	}
 
@@ -139,16 +139,20 @@ func anyTier2Command(commands []string) bool {
 // deriveTierUsed maps observed commands to the highest tier used
 // (ADR-0024.2 D4): tier2 when a `ghx tier2` command ran, tier1 when any other
 // ghx command ran, tier0 when the turn answered from session memory alone.
-func deriveTierUsed(commands []string) string {
+func deriveTierUsedValue(commands []string) Tier {
 	if anyTier2Command(commands) {
-		return "tier2"
+		return Tier2
 	}
 	for _, cmd := range commands {
 		if isGhxCommand(cmd) {
-			return "tier1"
+			return Tier1
 		}
 	}
-	return "tier0"
+	return Tier0
+}
+
+func deriveTierUsed(commands []string) string {
+	return deriveTierUsedValue(commands).String()
 }
 
 // countSearchesWithoutAcceptedRead implements the pre-registered v1
@@ -184,7 +188,8 @@ func lowConfidenceRemoteOnly(report *Report, escalationUsed bool) bool {
 		return false
 	}
 	for _, b := range report.BackendsUsed {
-		if isRegisteredLocalBackend(b) {
+		backend, ok := ParseBackend(b)
+		if ok && backend.IsLocal() && isRegisteredLocalBackend(backend.String()) {
 			return false
 		}
 	}

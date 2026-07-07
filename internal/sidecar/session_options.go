@@ -156,13 +156,13 @@ func intPtr(n int) *int { return &n }
 // before the report — observed live 2026-07-05 (spot-2026-07-05-d2-adr21:
 // flask-routing and openai-node-streaming died at maxTurns=8; ADR-0020.1
 // implementation notes). Rule of thumb: ~3× the persona command budget.
-var depthBudgets = map[string]depthBudget{
+var depthBudgets = map[Depth]depthBudget{
 	// cheap: persona budget 4 commands → 12-turn safety net
-	"cheap": {maxTurns: intPtr(12), thinking: intPtr(0), effort: "low"},
+	DepthCheap: {maxTurns: intPtr(12), thinking: intPtr(0), effort: "low"},
 	// normal: persona budget 8 commands → 24-turn safety net (default)
-	"normal": {maxTurns: intPtr(24), thinking: intPtr(2048), effort: "medium"},
+	DepthNormal: {maxTurns: intPtr(24), thinking: intPtr(2048), effort: "medium"},
 	// deep: extended investigation → 48-turn safety net
-	"deep": {maxTurns: intPtr(48), thinking: intPtr(4096), effort: "high"},
+	DepthDeep: {maxTurns: intPtr(48), thinking: intPtr(4096), effort: "high"},
 }
 
 // sidecarToolsAllowlist is the conservative tool allowlist for the sidecar
@@ -192,10 +192,11 @@ var sidecarToolsAllowlist = []string{"Bash", "Read"}
 //     ["user"] because the native binary resolves Bedrock model aliases from
 //     ~/.claude/settings.json and hangs in streaming mode without it.
 func BuildSessionMeta(persona, depth, model string, emitRaw bool, settingSources []string) map[string]any {
-	budget, ok := depthBudgets[depth]
+	parsedDepth, ok := ParseDepth(depth)
 	if !ok {
-		budget = depthBudgets["normal"]
+		parsedDepth = DepthNormal
 	}
+	budget := depthBudgets[parsedDepth]
 
 	if settingSources == nil {
 		settingSources = []string{} // explicitly [] — disables host settings inheritance
