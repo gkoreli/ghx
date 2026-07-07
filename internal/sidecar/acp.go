@@ -769,7 +769,7 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	// Tee the adapter's stderr to the per-session log (ADR-0033 D2) so a failed
 	// turn's diagnostics survive as a committed artifact, not only in whatever
 	// stderr the daemon happens to own.
-	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath)
+	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath, opts.Env)
 	defer stderrCloser.Close()
 	cmd.Stderr = stderrW
 

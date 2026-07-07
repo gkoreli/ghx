@@ -278,9 +278,10 @@ func CheckLiveTurn(ctx context.Context, cfg Config) PreflightCheck {
 	remediation := "The agent completes ACP initialize but a real prompt turn fails. This is usually an\n" +
 		"auth/endpoint problem that resolves only at prompt time (missing or wrong ANTHROPIC_*,\n" +
 		"CLAUDE_CODE_USE_BEDROCK/_USE_VERTEX, or AWS/Vertex credentials), a proxy/CA issue, or an\n" +
-		"adapter/Node version mismatch. Read the stderr tail above and the failing stage; if ghx runs\n" +
-		"under the daemon, note the daemon inherited the FIRST caller's environment (ghx sidecar\n" +
-		"daemon --stop, then re-run from a shell with the right env)."
+		"adapter/Node version mismatch. Read the stderr tail above and the failing stage. Export the\n" +
+		"auth env vars in the shell where you run ghx — every ask forwards them to the agent\n" +
+		"automatically (ADR-0033.1), no daemon restart needed; the agent-auth-env doctor line\n" +
+		"shows exactly which names this shell forwards."
 
 	dir, err := os.MkdirTemp("", "ghx-doctor-live-")
 	if err != nil {

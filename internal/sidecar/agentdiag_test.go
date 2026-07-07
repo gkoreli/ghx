@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -262,5 +263,42 @@ func TestAgentStderrTailFiltersBenignNoise(t *testing.T) {
 	}
 	if got := AgentStderrTail(path); got != "" {
 		t.Fatalf("all-benign log must surface empty, got %q", got)
+	}
+}
+
+// Codex audit HIGH (2026-07-06): a wrapper/adapter that dumps its environment
+// to stderr must not leak credential values into agent-stderr.log or the
+// error tails built from it. Redaction is exact-value against the spawn env.
+func TestAgentStderrRedactsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent-stderr.log")
+	spawnEnv := []string{
+		"AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCY",
+		"AWS_REGION=us-west-2",      // not a credential: stays readable
+		"CLAUDE_CODE_USE_BEDROCK=1", // short non-secret
+		"ANTHROPIC_API_KEY=sk-ant-api03-secret-value-xyz",
+	}
+	w, closer := openAgentStderr(path, spawnEnv)
+	fmt.Fprintf(w, "debug: AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCY region=us-west-2\n")
+	// A secret split across two Write calls within one line is still caught.
+	_, _ = w.Write([]byte("split: sk-ant-api03-"))
+	_, _ = w.Write([]byte("secret-value-xyz end\n"))
+	// Unterminated tail flushes redacted on close.
+	_, _ = w.Write([]byte("tail sk-ant-api03-secret-value-xyz"))
+	_ = closer.Close()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	if strings.Contains(log, "wJalrXUtnFEMIK7MDENG") || strings.Contains(log, "secret-value-xyz") {
+		t.Fatalf("secret value leaked into agent stderr log:\n%s", log)
+	}
+	if !strings.Contains(log, "[redacted]") || !strings.Contains(log, "us-west-2") {
+		t.Fatalf("redaction wrong shape (placeholder missing or non-secret destroyed):\n%s", log)
+	}
+	if !strings.Contains(log, "tail [redacted]") {
+		t.Fatalf("unterminated tail was not flushed redacted:\n%s", log)
 	}
 }

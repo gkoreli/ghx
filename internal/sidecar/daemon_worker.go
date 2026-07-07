@@ -198,7 +198,7 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 	// (ADR-0033 D2). The warm worker owns one long-lived adapter process per
 	// session, so the log path is stable for the worker's life and bound once
 	// here; the closer is released in shutdownLocked.
-	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath)
+	stderrW, stderrCloser := openAgentStderr(opts.AgentStderrPath, spawnEnv)
 	w.stderrCloser = stderrCloser
 	cmd.Stderr = stderrW
 	stdin, err := cmd.StdinPipe()

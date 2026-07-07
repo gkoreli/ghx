@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -298,22 +299,138 @@ func matchAgentHints(texts ...string) []string {
 	return hints
 }
 
+// agentSecretEnvNames are the spawn-env variables whose VALUES must never
+// reach a log or an error message. Independent cross-family audit finding
+// (codex, 2026-07-06, HIGH): the raw stderr tee could persist a wrapper's
+// debug dump of AWS/Anthropic credentials into agent-stderr.log and echo it
+// in CLI error tails — a direct hole in ADR-0033.1 D4's "values never touch
+// disk". Region/endpoint-style vars (AWS_REGION, ANTHROPIC_BASE_URL) are
+// deliberately not here: redacting them would destroy diagnostic value and
+// they are not credentials.
+var agentSecretEnvNames = []string{
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"ANTHROPIC_CUSTOM_HEADERS",
+	"CLAUDE_CODE_OAUTH_TOKEN",
+	"AWS_ACCESS_KEY_ID",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_SESSION_TOKEN",
+	"AWS_BEARER_TOKEN_BEDROCK",
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+}
+
+// secretEnvValues extracts the redaction set from a spawn environment: the
+// non-trivial values of agentSecretEnvNames. environ nil means the current
+// process environment. Values shorter than 8 bytes are skipped — redacting
+// "1" would shred unrelated log text, and no real credential is that short.
+func secretEnvValues(environ []string) [][]byte {
+	if environ == nil {
+		environ = os.Environ()
+	}
+	names := make(map[string]struct{}, len(agentSecretEnvNames))
+	for _, n := range agentSecretEnvNames {
+		names[n] = struct{}{}
+	}
+	var secrets [][]byte
+	for _, kv := range environ {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		if _, ok := names[kv[:i]]; !ok {
+			continue
+		}
+		if v := kv[i+1:]; len(v) >= 8 {
+			secrets = append(secrets, []byte(v))
+		}
+	}
+	return secrets
+}
+
+// redactingWriter replaces known secret byte-sequences with a placeholder
+// before forwarding. It line-buffers so a secret split across Write calls is
+// still caught within a line; Flush drains any unterminated tail.
+type redactingWriter struct {
+	w       io.Writer
+	secrets [][]byte
+	buf     []byte
+}
+
+const redactedPlaceholder = "[redacted]"
+
+func (r *redactingWriter) Write(p []byte) (int, error) {
+	r.buf = append(r.buf, p...)
+	for {
+		i := bytes.IndexByte(r.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := r.buf[:i+1]
+		r.buf = r.buf[i+1:]
+		if _, err := r.w.Write(r.redact(line)); err != nil {
+			return len(p), err
+		}
+	}
+	return len(p), nil
+}
+
+func (r *redactingWriter) redact(line []byte) []byte {
+	for _, s := range r.secrets {
+		line = bytes.ReplaceAll(line, s, []byte(redactedPlaceholder))
+	}
+	return line
+}
+
+// Flush writes any buffered unterminated line (redacted).
+func (r *redactingWriter) Flush() error {
+	if len(r.buf) == 0 {
+		return nil
+	}
+	line := r.redact(r.buf)
+	r.buf = nil
+	_, err := r.w.Write(line)
+	return err
+}
+
+// flushCloser flushes a redactingWriter before closing the underlying file.
+type flushCloser struct {
+	r *redactingWriter
+	c io.Closer
+}
+
+func (fc flushCloser) Close() error {
+	_ = fc.r.Flush()
+	if fc.c != nil {
+		return fc.c.Close()
+	}
+	return nil
+}
+
 // openAgentStderr returns the writer a spawned adapter's stderr is teed to: the
 // per-session agent-stderr.log (truncated fresh for this process) plus the
 // parent process stderr, so foreground `ghx sidecar daemon` still streams live
 // logs while a durable per-session diagnostic artifact always exists
 // (ADR-0033 D2). An empty path (or an unopenable file) yields os.Stderr and a
-// no-op closer — capture degrades, it never breaks the turn.
-func openAgentStderr(path string) (io.Writer, io.Closer) {
+// no-op closer — capture degrades, it never breaks the turn. Everything the
+// tee carries is redacted against the spawn environment's secret values
+// (spawnEnv nil means this process's env), so a wrapper/adapter that dumps
+// its environment cannot leak credentials into the log, the console, or the
+// error tails built from the log.
+func openAgentStderr(path string, spawnEnv []string) (io.Writer, io.Closer) {
+	secrets := secretEnvValues(spawnEnv)
 	if path == "" {
-		return os.Stderr, io.NopCloser(nil)
+		r := &redactingWriter{w: os.Stderr, secrets: secrets}
+		return r, flushCloser{r: r}
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot open agent stderr log %s: %v\n", path, err)
-		return os.Stderr, io.NopCloser(nil)
+		r := &redactingWriter{w: os.Stderr, secrets: secrets}
+		return r, flushCloser{r: r}
 	}
-	return io.MultiWriter(os.Stderr, f), f
+	r := &redactingWriter{w: io.MultiWriter(os.Stderr, f), secrets: secrets}
+	return r, flushCloser{r: r, c: f}
 }
 
 // agentStderrTailBytes bounds how much of the adapter stderr log is read back
