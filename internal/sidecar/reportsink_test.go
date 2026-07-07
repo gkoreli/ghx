@@ -291,6 +291,10 @@ func TestReportInputSchema_DerivedFromType(t *testing.T) {
 			t.Fatalf("schema missing property %q", want)
 		}
 	}
+	backends, _ := props["backendsUsed"].(map[string]any)
+	if got, want := backends["description"], `Evidence backends used — canonical IDs: "remote", "local:codemap", "local:ast-grep", "local:repomap".`; got != want {
+		t.Fatalf("backendsUsed description = %q, want %q", got, want)
+	}
 	// verified must be an array of objects with summary/evidence.
 	verified, _ := props["verified"].(map[string]any)
 	if verified["type"] != "array" {

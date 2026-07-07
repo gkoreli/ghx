@@ -259,7 +259,7 @@ var reportFieldDescriptions = map[string]string{
 	"relevantFiles": "1-5 most relevant files: [{path, reason}].",
 	"evidence":      "Evidence entries: [{source, summary}] — source is the ghx command.",
 	"tierUsed":      "Highest escalation tier used: \"tier0\" | \"tier1\" | \"tier2\" | \"tier3\". Omit when tier tracking is unavailable.",
-	"backendsUsed":  "Evidence backends used — canonical IDs: \"remote\", \"local:codemap\", \"local:ast-grep\", \"local:repomap\".",
+	"backendsUsed":  "Evidence backends used — canonical IDs: " + reportBackendIDsDescription() + ".",
 	"commandsRun":   "ghx commands you ran.",
 	"uncertainty":   "What remains uncertain.",
 	"nextReads":     "Files the NEXT turn will most likely need read: concrete repo-relative paths (\"path/to/file.go\" or \"owner/repo:path/to/file.go\"), one path per entry, no prose or line ranges. Empty when nothing is anticipated.",

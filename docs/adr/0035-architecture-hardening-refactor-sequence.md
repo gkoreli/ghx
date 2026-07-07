@@ -108,6 +108,16 @@ unless it explicitly says otherwise; pin with existing tests and goldens.
    output **byte-for-byte** (golden test), keeping it a measurement-identity-
    neutral change, separate from any new-tool persona revision.
 
+   Implementation note (2026-07-07): `internal/sidecar/tool_registry.go` now
+   owns `ToolSpec` registration for the current Tier-2 tools and renders the
+   persona menu, backend-ID schema description, runtime local-backend check,
+   and CLI backend stderr identity from that registry. The concrete Tier-2
+   subprocess substrate remains in `internal/sidecar/tier2` because that
+   subpackage cannot import the parent `sidecar` package without an import
+   cycle; typed `RunCodemap`/`RunAstGrep`/`RunRepomap` methods remain where
+   their request models live. Measurement identity stayed unchanged:
+   `TestRepoScopedPersonaByteStable` passed without modifying its golden hash.
+
 5. **`Harness` interface + harness-neutral `SteeringSpec` (AUD4 V2; folds V4,
    V5).** The claude-agent-acp *adapter* (not ACP itself) leaks through the
    steering layer: the `claudeCode` wire key (`session_options.go:222`), the

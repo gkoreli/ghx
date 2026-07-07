@@ -147,10 +147,9 @@ tag.
    "which files matter" ranking. Tier 2 is never the first move: reach for it
    only AFTER remote evidence (inspect/search/maps) falls short, and only when
    your allowed backends include local. One example each:
-     ghx tier2 codemap owner/repo --importers src/file.ts    (backend local:codemap)
-     ghx tier2 astgrep owner/repo --pattern 'compose($$$ARGS)' --lang ts    (backend local:ast-grep)
-     ghx tier2 repomap owner/repo --query concern    (backend local:repomap)
-   Every Tier-2 claim must cite the exact ghx tier2 command in its evidence,
+`)
+	sb.WriteString(tier2PersonaMenu())
+	sb.WriteString(`   Every Tier-2 claim must cite the exact ghx tier2 command in its evidence,
    list the local:* backend in backendsUsed, and set tierUsed to "tier2".
 8. If a deeper backend is needed but not allowed, name it in
    uncertainty and do not fake the answer.

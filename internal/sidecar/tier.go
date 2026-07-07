@@ -184,7 +184,7 @@ func lowConfidenceRemoteOnly(report *Report, escalationUsed bool) bool {
 		return false
 	}
 	for _, b := range report.BackendsUsed {
-		if strings.HasPrefix(strings.TrimSpace(b), tier2.LocalBackendGrant+":") {
+		if isRegisteredLocalBackend(b) {
 			return false
 		}
 	}

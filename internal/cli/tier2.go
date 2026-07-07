@@ -27,6 +27,12 @@ and runs absorbed structural tools over it. Provenance is printed to stderr
 before any tool runs; tool output goes to stdout.`,
 }
 
+var (
+	tier2CodemapSpec = sidecar.DefaultToolSpec("codemap")
+	tier2AstGrepSpec = sidecar.DefaultToolSpec("astgrep")
+	tier2RepomapSpec = sidecar.DefaultToolSpec("repomap")
+)
+
 // tier2Snapshot materializes the snapshot for a tier2 subcommand and emits
 // the visibility-contract stderr lines: eviction events (runtime log, not a
 // report claim), then provenance — always before any structural tool output.
@@ -113,7 +119,7 @@ codemap is not installed (install hint included); no clone happens in that case.
 		if err != nil {
 			return err
 		}
-		tier2BackendLine(tier2.BackendCodemap, req.ArtifactKey())
+		tier2BackendLine(tier2CodemapSpec.BackendID, req.ArtifactKey())
 
 		run, err := svc.RunCodemap(cmd.Context(), snap, req)
 		if err != nil {
@@ -164,7 +170,7 @@ exit 3 when ast-grep is not installed. Patterns pass through to ast-grep verbati
 		if err != nil {
 			return err
 		}
-		tier2BackendLine(tier2.BackendAstGrep, req.ArtifactKey())
+		tier2BackendLine(tier2AstGrepSpec.BackendID, req.ArtifactKey())
 
 		run, err := svc.RunAstGrep(cmd.Context(), snap, req)
 		if err != nil {
@@ -211,7 +217,7 @@ external binary required.`,
 		if err != nil {
 			return err
 		}
-		tier2BackendLine(tier2.BackendRepomap, req.ArtifactKey())
+		tier2BackendLine(tier2RepomapSpec.BackendID, req.ArtifactKey())
 
 		result, err := svc.RunRepomap(cmd.Context(), snap, req)
 		if err != nil {
