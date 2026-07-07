@@ -30,7 +30,7 @@ func TestExecute_HappyPath(t *testing.T) {
 	exec := NewExecutor()
 	result, err := exec.Execute(context.Background(), `
 		console.log("adding");
-		return callTool("add", {a: 1, b: 2});
+		return codemode.add({a: 1, b: 2});
 	`, tools)
 
 	if err != nil {
@@ -65,16 +65,14 @@ func TestExecute_Timeout(t *testing.T) {
 	}
 }
 
-// TestExecute_UnregisteredTool tests ACL rejection for unregistered tools.
+// TestExecute_UnregisteredTool verifies only registered tools are reachable:
+// an unregistered name is not exposed on the codemode object, so invoking it fails.
 func TestExecute_UnregisteredTool(t *testing.T) {
 	exec := NewExecutor()
-	_, err := exec.Execute(context.Background(), `callTool("nope", {})`, nil)
+	_, err := exec.Execute(context.Background(), `codemode.nope({})`, nil)
 
 	if err == nil {
-		t.Fatal("expected error for unregistered tool, got nil")
-	}
-	if !strings.Contains(err.Error(), "not registered") {
-		t.Errorf("expected 'not registered' in error, got: %v", err)
+		t.Fatal("expected error invoking an unregistered tool, got nil")
 	}
 }
 
@@ -86,7 +84,7 @@ func TestExecute_MaxToolCalls(t *testing.T) {
 	}}
 	exec := NewExecutor(WithMaxToolCalls(3))
 	_, err := exec.Execute(context.Background(), `
-		for (var i = 0; i < 10; i++) { callTool("noop", {}); }
+		for (var i = 0; i < 10; i++) { codemode.noop({}); }
 	`, tools)
 
 	if err == nil {
@@ -214,8 +212,8 @@ func TestExecute_ToolCallRecords(t *testing.T) {
 	}}
 	exec := NewExecutor()
 	result, err := exec.Execute(context.Background(), `
-		callTool("slow", {});
-		callTool("slow", {});
+		codemode.slow({});
+		codemode.slow({});
 		return "ok";
 	`, tools)
 
@@ -269,43 +267,5 @@ func TestExecute_CodemodeObject(t *testing.T) {
 	}
 	if result.Calls[0].Tool != "multiply" {
 		t.Errorf("expected tool name 'multiply', got %s", result.Calls[0].Tool)
-	}
-}
-
-// TestExecute_CodemodeAndCallToolBackwardCompat tests both codemode and callTool work together.
-func TestExecute_CodemodeAndCallToolBackwardCompat(t *testing.T) {
-	tools := []Tool{{
-		Name: "add",
-		Func: func(args map[string]any) (any, error) {
-			toFloat := func(v any) float64 {
-				switch x := v.(type) {
-				case float64:
-					return x
-				case int64:
-					return float64(x)
-				default:
-					return 0
-				}
-			}
-			a := toFloat(args["a"])
-			b := toFloat(args["b"])
-			return a + b, nil
-		},
-	}}
-	exec := NewExecutor()
-	result, err := exec.Execute(context.Background(), `
-		const r1 = callTool("add", {a: 1, b: 2});
-		const r2 = codemode.add({a: 3, b: 4});
-		return r1 + r2;
-	`, tools)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Value != "10" {
-		t.Errorf("expected value 10 (3 + 7), got %s", result.Value)
-	}
-	if len(result.Calls) != 2 {
-		t.Errorf("expected 2 tool calls, got %d", len(result.Calls))
 	}
 }

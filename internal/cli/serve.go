@@ -345,7 +345,7 @@ func handleSearchTools(ctx context.Context, request mcp.CallToolRequest) (*mcp.C
 	result := map[string]interface{}{
 		"tools":     tools,
 		"typeStubs": stubs,
-		"usage":     "Pass code to code tool. Use callTool(name, args) to invoke tools.",
+		"usage":     "Pass code to the code tool. Invoke tools as codemode.<tool>(args).",
 	}
 	data, _ := json.Marshal(result)
 	return mcp.NewToolResultText(string(data)), nil

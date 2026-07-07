@@ -177,24 +177,6 @@ func (e *Executor) Execute(ctx context.Context, code string, tools []Tool) (*Exe
 		return vm.ToValue(normalized)
 	}
 
-	// Inject callTool binding (backward compatibility)
-	vm.Set("callTool", func(call goja.FunctionCall) goja.Value {
-		defer func() {
-			if r := recover(); r != nil {
-				panic(r)
-			}
-		}()
-
-		// Extract tool name and args
-		if len(call.Arguments) < 2 {
-			panic(vm.NewGoError(fmt.Errorf("callTool requires 2 arguments: name and args")))
-		}
-
-		toolName := call.Argument(0).String()
-		argsVal := call.Argument(1).Export()
-		return executeToolCall(toolName, argsVal)
-	})
-
 	// Inject codemode object with per-tool methods
 	codemodeObj := vm.NewObject()
 	for _, t := range tools {
