@@ -12,6 +12,43 @@ prose here.
 
 _Nothing released yet. Work in progress lands here before it ships._
 
+## [2.6.0] — 2026-07-06
+
+Visibility and trust hardening on top of the always-on sidecar. You can now
+watch a turn think in real time, credentials never leak into the stderr tee, a
+stale daemon can no longer answer for a newer binary, and the host-task eval arm
+that measures the sidecar against an unaided agent is wired end to end.
+
+> Note: the `2.3.0`–`2.5.0` entries are being backfilled from their release
+> commits; this section records the changes shipped in `2.6.0`.
+
+### Added
+
+- **`ghx sidecar tail [session]` — watch a turn think.** A human-readable live
+  view of a turn's `live.jsonl`: text, thoughts, and tool calls stream as they
+  happen, with `--follow` to tail an in-flight turn. The end-of-turn
+  `traces.jsonl` OTLP record is unchanged; this is the low-latency companion for
+  watching, not auditing ([ADR-0022.1](docs/adr/0022.1-shared-visibility.md)).
+- **Host-task eval arm-B (ADR-0032.1 S3).** The host-task harness now runs a live
+  agent episode against a sidecar-as-MCP recon server (`serve --recon`), with
+  host-only filesystem writes, compliance detectors
+  (`host_external_exploration`, `host_rate_limited`, `recon_tool_unavailable`,
+  `host_execute_outside_workspace`), and a frozen host-identity manifest kept
+  outside `identityHashes` so baseline reuse is unaffected
+  ([ADR-0032.1](docs/adr/0032.1-host-task-eval.md)).
+
+### Fixed
+
+- **Credentials no longer leak into the agent stderr tee** (security, codex audit
+  HIGH). The per-session `agent-stderr.log` now redacts the exact values of
+  allowlisted secret env vars while keeping non-secret context (region, etc.)
+  readable.
+- **Daemon executable-identity handshake.** The daemon health check now compares
+  executable paths (symlink-normalized), so a stale daemon from an older or
+  different binary is detected and restarted instead of silently answering. The
+  daemon also refuses to spawn from a `.test` binary, preventing lingering
+  duplicate daemons during test runs.
+
 ## [2.2.0] — 2026-07-06
 
 The release that turns the sidecar from a working prototype into something you
