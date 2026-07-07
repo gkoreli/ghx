@@ -236,7 +236,7 @@ Apply each with its agentic-first verdict (directive 2). Pick 3–5 total.
 | Industry / Market | How big, how mature the value chain, *why now* — is the tool layer commoditizing as base models improve? | TAM/SAM/SOM (Aulet); Wardley evolution |
 | Positioning & Differentiation | Would an informed prospect find it "obviously" right? (for the agent, "messaging" = tool name/description/when-to-use) | Dunford; category design |
 | North-Star / Strategy Alignment | Does every roadmap item trace to the stated strategy? | Perri Vision→Challenge→Target; Amazon PR-FAQ; Cutler |
-| Gap Analysis | Where does it under- or over-serve a *real named job*? | Christensen JTBD; Ulwick ODI opportunity score; journey → trace mining |
+| Gap Analysis | Where does it under- or over-serve a *real named job* — and what latent demand shows up as **desire paths** (near-miss commands agents keep typing that don't exist yet, via `frictionax`), not just failures? | Christensen JTBD; Ulwick ODI opportunity score; journey → trace mining |
 | Adjacent Opportunity / Expansion | Next *defensible* expansion, and is it premature? | Ansoff matrix; Dixon "come for the tool, stay for the network" |
 | Business Model / Monetization | Can the business capture & sustain value? (internally: cost-to-serve/episode) | Cagan four big risks; Jacks COSS/open-core |
 | Moat / Defensibility | What survives a competitor copying every visible feature? | Helmer 7-Powers (Benefit+Barrier); NFX; Thompson aggregation |
@@ -256,11 +256,11 @@ Apply each with its agentic-first verdict (directive 2). Pick 3–5 total.
 |---|---|---|
 | **Agent Experience (AX)** | Can the agent discover, invoke, recover-from, not-be-misled-by, and compose it? | Biilmann AX; Anthropic ACI |
 | **Token economics / signals-per-token** | Context tax per unit of returned signal — **at all three SPT levels** (main-agent, sidecar-internal ~400-line persona-doctrine tax, whole-workflow vs. native delegation) | Anthropic context-engineering; NORTH_STAR ADR-0016.6 |
-| **Evals-as-user-research** | Does an eval suite serve as user research, and is it *trustworthy* (calibrated judge, guardrails, committed negatives)? | Hamel evals; **code-localization/retrieval benchmarks (LocAgent, RepoBench, CodeSearchNet — ghx's actual job)**, plus SWE-bench / τ²-bench for downstream task success & pass^k consistency |
+| **Evals-as-user-research** | Does an eval suite serve as user research, and is it *trustworthy* (calibrated judge, guardrails, committed negatives)? Decompose "task success" into sub-metrics — tool-correctness, argument-correctness, task-completion, MCP-task-completion (via `deepeval`). | Hamel evals; **code-localization/retrieval benchmarks (LocAgent, RepoBench, CodeSearchNet — ghx's actual job)**, plus SWE-bench / τ²-bench for downstream task success & pass^k consistency |
 | **Tool / affordance & error-as-affordance** | Do names/schemas make the right call obvious, invalid states unrepresentable, and does every error name the correct next invocation? | Anthropic writing-tools; OpenAI function-calling (<20 active) |
 | **Context-budget / progressive disclosure** | How much doctrine must load into the *main* agent before first success? Ideal: zero. | Anthropic Agent Skills; NORTH_STAR |
 | **Trust & verifiability of output** | Can a downstream actor audit the claim? Is a confidently-wrong output distinguishable from a right one — **and does surfaced code carry copyleft/attribution lineage that flows into the agent's output invisibly?** | "evidence not vibes"; confidently-wrong = severity-4; license-provenance (Doe v. GitHub-class risk) |
-| **Agent-safety / adversarial tool-use** | Prompt-injection surface, the lethal trifecta, reversibility when output feeds an autonomous loop | Willison lethal trifecta; red-team stack |
+| **Agent-safety / adversarial tool-use** | *Enumerate* the attack surface, don't just name it: indirect prompt-injection via surfaced repo content → the report → the main agent's next action; cross-session / artifact leakage from `~/.ghx/sessions/`; excessive-agency & goal-misalignment when output feeds an autonomous loop; reversibility / dry-run | Willison lethal trifecta; red-team stack; the **promptfoo red-team plugin catalog** (`github.com/promptfoo/promptfoo` — enumerated agentic attacks) |
 | **Distribution in agent ecosystems** | Reachable and *default* in MCP/skill ecosystems; does the agent *select* it over the alternative? | MCP spec; tool-selection accuracy in evals |
 
 ---
@@ -280,11 +280,17 @@ metrics) · manual validation (structured self-use, not a scripted demo).
 1 inspection (heuristic eval, cognitive walkthrough) → 2 discovery-risk ledger (value/
 usability/feasibility/viability **+ trust**) → 3 metrics/funnel → 4 fit → 5 dogfooding.
 **Phase 6 (agent-facing, load-bearing for ghx):** run a real coding-agent session end-to-end
-with the tool enabled; capture the full tool-call transcript; record per task — binary
-success, tool-calls-made vs. minimum-necessary, whether errors let the agent self-correct,
-whether the final report's claims are checkable against real output or fabricated, and
-whether the agent needed prose docs beyond `--help`. **A confidently-wrong final report is
-severity-4 even if the task technically completed.**
+with the tool enabled — and **drive it with the *weakest* model that should plausibly
+succeed; a strong harness papers over the AX defects you want to surface**. Capture the full
+tool-call transcript; record per task — binary success and **`goal_reached`** (distinct from
+merely "terminated"), **human-intervention count (HIC)** as a headline number, tool-calls-made
+vs. minimum-necessary, **`false_errors`** (a non-zero exit that was *not* a real failure — a
+common, currently-unnamed ghx mode), whether errors let the agent self-correct, whether the
+report's claims are checkable against real output or fabricated, and whether the agent needed
+prose docs beyond `--help`. Tag each friction point by class — *missing_guidance / confusion /
+extra_steps / awkward-but-worked / unclear_interface*. **A confidently-wrong final report is
+severity-4 even if the task technically completed.** (Rubric + weak-driver method stolen, with
+attribution, from `github.com/segmentstream/axprobe`.)
 
 ---
 
@@ -358,6 +364,7 @@ per R4, **the audit trusting its own unchecked judge** (directive 5).
 
 Research corpus (`research/*.md`, each with a full Source Ledger — the citation of record):
 `01-pm-excellence` · `02-pm-personalities` · `03-audit-methodologies` · `04-strategic-scopes`
-· `05-adversarial-redteam` · `06-agentic-first-lens`. Round-2 critiques: `reviews/R1–R4`.
+· `05-adversarial-redteam` · `06-agentic-first-lens` · `07-oss-pm-agent-landscape` (built-tooling
+recon — AX/eval rubrics stolen, prior-art negative). Round-2 critiques: `reviews/R1–R4`.
 Inherited repo rules: `AGENTS.md` (Evidence Contract, Visibility/Truthfulness, Tool Economy),
 `docs/NORTH_STAR.md` (the north-star filter), `CLAUDE.md` (orchestration & delegation).
