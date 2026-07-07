@@ -162,25 +162,6 @@ func recordAgentProvenance(sessionsDir string, meta *SessionMeta, workspace, age
 	}
 }
 
-// runTurnWithStaleSessionFallback runs the first turn for Ask. If a persisted
-// ACP session ID is stale (LoadSession Resource not found), it creates exactly
-// one fresh ACP session and continues the same prompt; the durable ledger
-// context already rides in the prompt, so ACP resume is only an optimization.
-func runTurnWithStaleSessionFallback(ctx context.Context, runner TurnRunner, opts RunTurnOptions) (TurnResult, string, error) {
-	result, newSessionID, err := runner(ctx, opts)
-	if opts.ACPSessionID == "" || err == nil || !IsLoadSessionResourceNotFound(err) {
-		return result, newSessionID, err
-	}
-	freshOpts := opts
-	freshOpts.ACPSessionID = ""
-	freshResult, freshSessionID, freshErr := runner(ctx, freshOpts)
-	freshResult.SessionRecreated = true
-	if freshErr != nil {
-		return freshResult, freshSessionID, freshErr
-	}
-	return freshResult, freshSessionID, nil
-}
-
 // resolveTurnReport determines the turn's report, preferring a strictly-validated
 // submit_report sink over the lenient <ghx-report> text block (ADR-0021 D2). It
 // returns the report (nil if none), whether coercion was applied on the text
@@ -270,44 +251,72 @@ func AskWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner T
 	return askWithTurnRunner(ctx, cfg, req, runner, false, route)
 }
 
-func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, runner TurnRunner, preflight bool, route *RouteDecision) (report *Report, result *TurnResult, err error) {
+func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, turnRunner TurnRunner, preflight bool, route *RouteDecision) (*Report, *TurnResult, error) {
+	if turnRunner == nil {
+		turnRunner = runTurnWithOptions
+	}
+	// The claude-acp Runner (ADR-0036 D1) is the seam: Preflight is the ACP
+	// handshake, Open/Turn wrap the injected TurnRunner (RunTurnWithOptions
+	// one-shot, or a warm worker on the daemon path). All ACP knowledge stays
+	// behind it; the runtime switches on the typed Outcome.
+	portRunner := &claudeACPRunner{cfg: cfg, turnRun: turnRunner}
 	if preflight {
-		if err := checkACPHandshake(ctx, cfg.AgentCmd, cfg.Cwd, cfg.Env, defaultHandshakeTimeout); err != nil {
+		if err := portRunner.Preflight(ctx); err != nil {
 			return nil, nil, err
 		}
-	}
-	if runner == nil {
-		runner = runTurnWithOptions
 	}
 	state, err := prepareSession(cfg, req, route)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer state.cleanupSink()
+	portRunner.workspace = state.workspace
+	portRunner.spawnEnv = state.spawnEnv
+	portRunner.stderrLog = state.stderrLog
+	portRunner.livePath = state.livePath
 
+	// The runtime owns the streamed side effects (ADR-0036 D1): one Ask-scoped
+	// EventSink over the session's live.jsonl, threaded into every turn (primary,
+	// wrap-up, retries), so the adapter never touches stdout/live directly.
+	contentLive := NewLiveLog(state.livePath)
+	defer contentLive.Close()
+	sink := &streamEventSink{live: contentLive}
+
+	// completedErr is the RAW turn error the live turn-log records — NOT the
+	// DiagnoseTurnError-enriched string returned to the caller. It is a distinct
+	// local (not a named return), which restores the pre-T1.3 byte-identical
+	// live-log failure field (M1; docs/audits/refactor-review-2026-07-07.md).
+	var completedErr error
 	liveLog := NewLiveLog(state.livePath)
 	defer func() {
 		errMsg := ""
-		if err != nil {
-			errMsg = err.Error()
+		if completedErr != nil {
+			errMsg = completedErr.Error()
 		}
-		liveLog.TurnCompleted(err == nil, errMsg, len(state.turnResult.ToolCalls), len(state.turnResult.FullText))
+		liveLog.TurnCompleted(completedErr == nil, errMsg, len(state.turnResult.ToolCalls), len(state.turnResult.FullText))
 		liveLog.Close()
 	}()
 
 	liveLog.TurnStarted(state.req.Session, state.req.Repo, state.req.Question)
-	err = runPrimaryTurn(ctx, runner, state)
-	blockedReport, maxTurnsHandled := recoverMaxTurns(ctx, runner, state, err)
+	session, outcome := runPrimaryTurn(ctx, portRunner, state, sink)
+	blockedReport, maxTurnsHandled := recoverMaxTurns(ctx, session, state, outcome, sink)
+	turnErr := outcome.Err
 	if maxTurnsHandled {
-		err = nil
+		turnErr = nil
 	}
 
-	if err != nil {
-		emitFailedTurnArtifacts(ctx, state, err)
-		return nil, &state.turnResult, DiagnoseTurnError(fmt.Errorf("run turn: %w", err), state.stderrLog)
+	if turnErr != nil {
+		// Live-log records the RAW turn error (M1); artifacts + the caller error
+		// carry the runtime-owned canonical FailureClass marker (ADR-0036 D4).
+		// For claude-acp the adapter already surfaced the marker, so failErr is
+		// byte-identical to the raw error.
+		completedErr = outcome.Err
+		failErr := canonicalTurnError(outcome)
+		emitFailedTurnArtifacts(ctx, state, failErr)
+		return nil, &state.turnResult, DiagnoseTurnError(fmt.Errorf("run turn: %w", failErr), state.stderrLog)
 	}
 
-	report = resolveReportWithRetry(ctx, runner, state, blockedReport)
+	report := resolveReportWithRetry(ctx, session, state, blockedReport, sink)
 	tierDecision := persistTurn(state, report)
 	emitArtifacts(ctx, state, report, tierDecision)
 
@@ -327,12 +336,31 @@ type askTurnState struct {
 	spawnEnv     []string
 	prompt       string
 	acpSessionID string
-	sessionMeta  map[string]any
+	// spec/budget are the neutral steering + budget the Runner port carries
+	// (ADR-0036 D1); the claude-acp adapter encodes spec into the _meta bag.
+	spec         SteeringSpec
+	budget       TurnBudget
 	sinkPath     string
 	cleanupSink  func()
 	startedAt    time.Time
 	turnResult   TurnResult
 	newSessionID string
+}
+
+// resumeID is the ACP session id to resume for a follow-up turn: the id the last
+// turn established (newSessionID), falling back to the persisted id — the exact
+// fallback the claude-acp Session's auto-managed resume mirrors.
+func (state *askTurnState) resumeID() string {
+	if state.newSessionID != "" {
+		return state.newSessionID
+	}
+	return state.acpSessionID
+}
+
+// turnRequest builds the neutral TurnRequest for a prompt on this Ask: the same
+// steering + budget for every turn (primary, wrap-up, retries).
+func (state *askTurnState) turnRequest(prompt string) TurnRequest {
+	return TurnRequest{Prompt: prompt, Steering: state.spec, Budget: state.budget}
 }
 
 func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnState, error) {
@@ -389,6 +417,7 @@ func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnS
 		acpSessionID = meta.ACPSessionID
 	}
 	sinkPath, cleanupSink := newReportSinkPath()
+	spec, budget := buildSteeringSpec(cfg, req, sinkPath)
 	return &askTurnState{
 		cfg:          cfg,
 		req:          req,
@@ -402,66 +431,93 @@ func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnS
 		spawnEnv:     spawnEnv,
 		prompt:       prompt,
 		acpSessionID: acpSessionID,
-		sessionMeta:  buildTurnSessionMeta(cfg, req),
+		spec:         spec,
+		budget:       budget,
 		sinkPath:     sinkPath,
 		cleanupSink:  cleanupSink,
 		startedAt:    time.Now().UTC(),
 	}, nil
 }
 
-func buildTurnSessionMeta(cfg Config, req AskRequest) map[string]any {
-	depth := req.Depth
-	if depth == "" {
-		depth = "normal"
-	}
+// buildSteeringSpec maps the Ask config/request into the neutral steering
+// surface + turn budget the Runner port carries (ADR-0036 D1). Persona selection
+// (repo-scoped vs discovery) and the depth->budget resolution stay in the
+// runtime; the claude-acp adapter (steeringToSessionMeta) re-encodes it into the
+// _meta.claudeCode.options bag. The resolved Effort/Thinking/MaxTurns come from
+// the SAME depthBudgets table BuildSessionMeta uses, so the encoded bag is
+// byte-identical to the former buildTurnSessionMeta output.
+func buildSteeringSpec(cfg Config, req AskRequest, sinkPath string) (SteeringSpec, TurnBudget) {
 	persona := BuildPersonaSystemPrompt()
 	if req.Repo == "" {
 		persona = BuildDiscoveryPersonaSystemPrompt()
 	}
-	return BuildSessionMeta(persona, depth, cfg.Model, cfg.EvalMode, cfg.AgentSettingSources)
-}
-
-func buildTurnOptions(state *askTurnState, acpSessionID, prompt string) RunTurnOptions {
-	return RunTurnOptions{
-		AgentCmd:        state.cfg.AgentCmd,
-		ACPSessionID:    acpSessionID,
-		Prompt:          prompt,
-		Cwd:             state.workspace,
-		Env:             state.spawnEnv,
-		SessionMeta:     state.sessionMeta,
-		ReportSinkPath:  state.sinkPath,
-		AgentStderrPath: state.stderrLog,
-		LiveLogPath:     state.livePath,
+	depth := req.Depth
+	if depth == "" {
+		depth = "normal"
 	}
+	parsedDepth, ok := ParseDepth(depth)
+	if !ok {
+		parsedDepth = DepthNormal
+	}
+	b := depthBudgets[parsedDepth]
+	spec := SteeringSpec{
+		SystemPrompt:   persona,
+		Isolation:      Isolation{SettingSources: cfg.AgentSettingSources},
+		ToolPolicy:     reconToolPolicy,
+		Model:          cfg.Model,
+		Effort:         b.effort,
+		Thinking:       thinkingBudgetFromPtr(b.thinking),
+		ReportSink:     ReportSink{Path: sinkPath, ToolID: SubmitReportToolID},
+		AuditRawStream: cfg.EvalMode,
+	}
+	// The Ask path leaves Liveness at 0 (resolve from env/default), exactly as
+	// the former buildTurnOptions left RunTurnOptions.LivenessTimeout unset.
+	return spec, TurnBudget{MaxTurns: b.maxTurns}
 }
 
-func runPrimaryTurn(ctx context.Context, runner TurnRunner, state *askTurnState) error {
-	var err error
-	state.turnResult, state.newSessionID, err = runTurnWithStaleSessionFallback(ctx, runner, buildTurnOptions(state, state.acpSessionID, state.prompt))
-	return err
+// runPrimaryTurn runs the first turn behind the port, applying the stale-session
+// fallback (ADR-0027): if a persisted resume is stale, open exactly one fresh
+// session and continue the same prompt — the durable ledger already rides in the
+// prompt, so ACP resume is only an optimization. It returns the (possibly
+// re-opened) Session and the typed Outcome for the runtime to switch on.
+func runPrimaryTurn(ctx context.Context, portRunner *claudeACPRunner, state *askTurnState, sink EventSink) (Session, Outcome) {
+	session, _ := portRunner.Open(ctx, SessionID(state.req.Session), ResumeToken(state.acpSessionID))
+	req := state.turnRequest(state.prompt)
+	result, resume, outcome := session.Turn(ctx, req, sink)
+	state.turnResult = result
+	state.newSessionID = string(resume)
+	if state.acpSessionID != "" && outcome.Class == StaleSession {
+		session, _ = portRunner.Open(ctx, SessionID(state.req.Session), "")
+		result, resume, outcome = session.Turn(ctx, req, sink)
+		result.SessionRecreated = true
+		state.turnResult = result
+		state.newSessionID = string(resume)
+	}
+	return session, outcome
 }
 
-func recoverMaxTurns(ctx context.Context, runner TurnRunner, state *askTurnState, err error) (*Report, bool) {
-	if err == nil || !IsMaxTurnsError(err) {
+// recoverMaxTurns implements the ADR-0027 D1 turn-cap recovery, now switching on
+// the typed Outcome instead of string-matching. When the runtime's max-turns net
+// fired it issues exactly one wrap-up prompt on the same session; on success the
+// exploration ships (WrapUpRecovered), otherwise a BLOCKED report records both
+// failures. Any other class returns (nil, false) and the caller handles it.
+func recoverMaxTurns(ctx context.Context, session Session, state *askTurnState, outcome Outcome, sink EventSink) (*Report, bool) {
+	if outcome.Class != TurnCapReached {
 		return nil, false
 	}
-	turnCapErr := err
-	resumeID := state.newSessionID
-	if resumeID == "" {
-		resumeID = state.acpSessionID
-	}
+	turnCapErr := outcome.Err
 	var wrapUpErr error
-	if resumeID == "" {
+	if state.resumeID() == "" {
 		wrapUpErr = fmt.Errorf("no ACP session id available to resume")
 	} else {
-		wrapResult, wrapSessionID, werr := runner(ctx, buildTurnOptions(state, resumeID, turnCapWrapUpPrompt))
+		wrapResult, wrapResume, wrapOutcome := session.Turn(ctx, state.turnRequest(turnCapWrapUpPrompt), sink)
 		mergeWrapUpTurn(&state.turnResult, wrapResult)
-		if werr != nil {
-			wrapUpErr = werr
+		if wrapOutcome.Err != nil {
+			wrapUpErr = wrapOutcome.Err
 		} else {
 			state.turnResult.WrapUpRecovered = true
-			if wrapSessionID != "" {
-				state.newSessionID = wrapSessionID
+			if string(wrapResume) != "" {
+				state.newSessionID = string(wrapResume)
 			}
 			return nil, true
 		}
@@ -475,28 +531,24 @@ func recoverMaxTurns(ctx context.Context, runner TurnRunner, state *askTurnState
 	}, true
 }
 
-func resolveReportWithRetry(ctx context.Context, runner TurnRunner, state *askTurnState, blockedReport *Report) *Report {
+func resolveReportWithRetry(ctx context.Context, session Session, state *askTurnState, blockedReport *Report, sink EventSink) *Report {
 	latestText := state.turnResult.FullText
 	report, coerced, reason := resolveTurnReport(state.sinkPath, latestText)
 	if report == nil && blockedReport != nil {
 		report = blockedReport
 	}
 	for retries := 0; report == nil && retries < maxReportRetries; retries++ {
-		retrySessionID := state.newSessionID
-		if retrySessionID == "" {
-			retrySessionID = state.acpSessionID
-		}
-		if retrySessionID == "" {
+		if state.resumeID() == "" {
 			break
 		}
-		retryResult, retryNewID, retryErr := runner(ctx, buildTurnOptions(state, retrySessionID, reportRetryPromptWithError(reason)))
-		if retryErr != nil {
+		retryResult, retryResume, retryOutcome := session.Turn(ctx, state.turnRequest(reportRetryPromptWithError(reason)), sink)
+		if retryOutcome.Err != nil {
 			break
 		}
 		mergeRetryTurn(&state.turnResult, retryResult)
 		latestText = retryResult.FullText
-		if retryNewID != "" {
-			state.newSessionID = retryNewID
+		if string(retryResume) != "" {
+			state.newSessionID = string(retryResume)
 		}
 		report, coerced, reason = resolveTurnReport(state.sinkPath, latestText)
 	}

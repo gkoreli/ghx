@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -13,9 +12,17 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
-// denyClient implements acp.Client with read-only permission semantics.
-// Text deltas are streamed to stdout; tool call events are written to stderr.
-// Write-shaped operations are rejected so the sidecar cannot mutate state.
+// denyClient implements acp.Client with read-only permission semantics. It
+// decodes ACP session updates into the neutral TurnResult and streams each live
+// event to the EventSink; write-shaped operations are rejected so the sidecar
+// cannot mutate state.
+//
+// Streaming side effects (stdout, the session's live.jsonl, the stderr
+// tool-progress line) are inverted onto the neutral EventSink (ADR-0036 D1):
+// denyClient decodes and classifies, the sink owns the side effects. This is the
+// seam a second runner adapter reuses. denyClient still accumulates into
+// TurnResult directly, so a bare denyClient with no sink (preflight, unit tests)
+// records the result without any side effect.
 //
 // mu guards result/promptSent/closed: session updates arrive from the SDK's
 // notification goroutine, and the D2 cancellable wait can abandon a turn while
@@ -27,12 +34,44 @@ type denyClient struct {
 	promptSent bool
 	closed     bool
 	// onActivity, when set, is invoked on every session update. It feeds the
-	// D2 liveness watchdog; it must not block.
+	// D2 liveness watchdog; it must not block. In C1 the watchdog stays
+	// adapter-internal (fed here), so this remains distinct from the neutral
+	// EventSink.Activity heartbeat a future runtime-owned watchdog would use.
 	onActivity func()
-	// live, when set, streams each new (non-replayed) session update to the
-	// session's live.jsonl as it happens (ADR-0022.1). LiveLog methods are
-	// nil-safe and best-effort, so this never fails or slows a turn.
-	live *LiveLog
+	// sink, when set, receives each new (non-replayed) streamed event
+	// (ADR-0036 D1): text/thought deltas and tool starts/updates. The claude-acp
+	// stream sink (streamEventSink) owns stdout, the live.jsonl append, and the
+	// tool-progress line. Nil-safe via the emit* helpers so a bare denyClient
+	// accumulates into result without side effects.
+	sink EventSink
+}
+
+// emitText forwards an assistant-message delta to the sink (nil-safe).
+func (c *denyClient) emitText(delta string) {
+	if c.sink != nil {
+		c.sink.Text(delta)
+	}
+}
+
+// emitThinking forwards a reasoning delta to the sink (nil-safe).
+func (c *denyClient) emitThinking(delta string) {
+	if c.sink != nil {
+		c.sink.Thinking(delta)
+	}
+}
+
+// emitToolStarted forwards a tool-call start to the sink (nil-safe).
+func (c *denyClient) emitToolStarted(call ToolCall) {
+	if c.sink != nil {
+		c.sink.ToolStarted(call)
+	}
+}
+
+// emitToolUpdated forwards a tool-call update to the sink (nil-safe).
+func (c *denyClient) emitToolUpdated(call ToolCall) {
+	if c.sink != nil {
+		c.sink.ToolUpdated(call)
+	}
 }
 
 // markPromptSent flips replay accounting to live-turn accounting.
@@ -207,9 +246,8 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 				c.result.ReplayedText += text
 				return nil
 			}
-			os.Stdout.WriteString(text)
 			c.result.FullText += text
-			c.live.Text(len(text), text)
+			c.emitText(text)
 		}
 	case u.AgentThoughtChunk != nil:
 		if u.AgentThoughtChunk.Content.Text != nil {
@@ -219,7 +257,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 				return nil
 			}
 			c.result.Thinking += text
-			c.live.Thought(len(text), text)
+			c.emitThinking(text)
 		}
 	case u.ToolCall != nil:
 		tc := u.ToolCall
@@ -237,9 +275,13 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if !replayed {
 			c.result.ToolOutputChars += size
 			c.refreshToolSummaries()
-			c.live.ToolCall(string(tc.ToolCallId), tc.Title, string(tc.Kind), string(tc.Status))
-			entry := toolSummary(*tr)
-			fmt.Fprintf(os.Stderr, "  ▶ %s\n", entry)
+			c.emitToolStarted(ToolCall{
+				ID:      string(tc.ToolCallId),
+				Title:   tc.Title,
+				Kind:    string(tc.Kind),
+				Status:  string(tc.Status),
+				Summary: toolSummary(*tr),
+			})
 		}
 	case u.ToolCallUpdate != nil:
 		tcu := u.ToolCallUpdate
@@ -267,7 +309,11 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 			if tcu.Status != nil {
 				status = string(*tcu.Status)
 			}
-			c.live.ToolUpdate(string(tcu.ToolCallId), status, size)
+			c.emitToolUpdated(ToolCall{
+				ID:        string(tcu.ToolCallId),
+				Status:    status,
+				SizeDelta: size,
+			})
 		}
 	}
 	return nil

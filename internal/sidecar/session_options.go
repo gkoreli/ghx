@@ -196,8 +196,16 @@ func BuildSessionMeta(persona, depth, model string, emitRaw bool, settingSources
 	if !ok {
 		parsedDepth = DepthNormal
 	}
-	budget := depthBudgets[parsedDepth]
+	return buildSessionMetaFromBudget(persona, depthBudgets[parsedDepth], model, emitRaw, settingSources)
+}
 
+// buildSessionMetaFromBudget assembles the _meta.claudeCode.options bag from an
+// already-resolved depth budget. It is the shared core of BuildSessionMeta (the
+// depth-driven production/eval path) and the Runner-port claude-acp adapter (the
+// steering-driven path, acprunner.go), so the two encodings cannot drift: both
+// emit a byte-identical bag. Splitting depth resolution from bag assembly is a
+// pure decomposition — BuildSessionMeta's output is unchanged.
+func buildSessionMetaFromBudget(persona string, budget depthBudget, model string, emitRaw bool, settingSources []string) map[string]any {
 	if settingSources == nil {
 		settingSources = []string{} // explicitly [] — disables host settings inheritance
 	}

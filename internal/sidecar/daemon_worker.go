@@ -144,11 +144,16 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 		w.shutdownLocked()
 	}
 
-	// Live turn log (ADR-0022.1), opened per turn: the path is per-session and
-	// append-only, so reopening on every prompt is safe and keeps the file
-	// handle's lifetime bound to the turn rather than the warm worker.
-	live := NewLiveLog(opts.LiveLogPath)
-	defer live.Close()
+	// EventSink for this turn's stream (ADR-0036 D1). The runtime injects its
+	// Ask-scoped sink; when absent (defensive), a default sink over
+	// opts.LiveLogPath reproduces the former per-turn live log — append-only, so
+	// it is safe alongside the runtime's turn-boundary writer.
+	sink := opts.sink
+	if sink == nil {
+		live := NewLiveLog(opts.LiveLogPath)
+		defer live.Close()
+		sink = &streamEventSink{live: live}
+	}
 
 	if err := w.ensureStarted(ctx, opts); err != nil {
 		w.shutdownLocked()
@@ -156,7 +161,7 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 	}
 	cancelBridgeDone := w.cancelTurnOnRequestDoneLocked(ctx)
 	defer close(cancelBridgeDone)
-	result, sessionID, err := w.configureSession(ctx, opts, live)
+	result, sessionID, err := w.configureSession(ctx, opts, sink)
 	if err != nil {
 		if IsPeerClosedError(err) || ctx.Err() != nil {
 			w.shutdownLocked()
@@ -262,9 +267,9 @@ func (w *AgentWorker) cancelTurnOnRequestDoneLocked(ctx context.Context) chan st
 	return done
 }
 
-func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions, live *LiveLog) (TurnResult, string, error) {
+func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions, sink EventSink) (TurnResult, string, error) {
 	var result TurnResult
-	w.resetClient(&result, live)
+	w.resetClient(&result, sink)
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = w.cfg.Cwd
@@ -287,14 +292,15 @@ func (w *AgentWorker) prompt(ctx context.Context, opts RunTurnOptions, sessionID
 }
 
 // resetClient rebinds the warm client to a fresh turn: a new result, replay
-// accounting reset, and this turn's live log (nil-safe; closed by RunTurn when
-// the prompt returns).
-func (w *AgentWorker) resetClient(result *TurnResult, live *LiveLog) {
+// accounting reset, and this turn's event sink (ADR-0036 D1). The sink's
+// LiveLog is closed by RunTurn when the prompt returns (default sink) or owned
+// by the runtime (injected sink).
+func (w *AgentWorker) resetClient(result *TurnResult, sink EventSink) {
 	w.client.mu.Lock()
 	w.client.result = result
 	w.client.promptSent = false
 	w.client.closed = false
-	w.client.live = live
+	w.client.sink = sink
 	w.client.mu.Unlock()
 }
 

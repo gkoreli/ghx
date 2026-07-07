@@ -194,6 +194,13 @@ type RunTurnOptions struct {
 	// artifacts at Ask exit. Best-effort: an unopenable path degrades to a
 	// no-op. Empty means no live log.
 	LiveLogPath string
+	// sink, when set, is the runtime-owned EventSink the denyClient streams this
+	// turn's activity to (ADR-0036 D1): stdout, live.jsonl, the tool-progress
+	// line. Unexported so it is adapter-internal — the runtime injects it through
+	// the claude-acp Session; a bare caller (RunTurn, preflight probes, unit
+	// tests) leaves it nil and RunTurnWithOptions builds a default sink over
+	// LiveLogPath, byte-identical to the former inline live-log wiring.
+	sink EventSink
 }
 
 // RunTurn spawns the agent binary, establishes an ACP session (new or resumed),
@@ -253,13 +260,20 @@ func RunTurnWithOptions(ctx context.Context, opts RunTurnOptions) (result TurnRe
 	lastActivity.Store(time.Now().UnixNano())
 	touch := func() { lastActivity.Store(time.Now().UnixNano()) }
 
-	// Live turn log (ADR-0022.1): stream this turn's session updates to the
-	// session's live.jsonl as they happen. Append mode makes the concurrent
-	// runtime-owned writer for the same path safe.
-	live := NewLiveLog(opts.LiveLogPath)
-	defer live.Close()
+	// EventSink for this turn's stream (ADR-0036 D1): stdout, the session's
+	// live.jsonl, and the tool-progress line. The runtime injects its Ask-scoped
+	// sink; a bare caller (RunTurn helper, preflight probes, unit tests) gets a
+	// default sink over opts.LiveLogPath — byte-identical to the former inline
+	// live-log + stdout/stderr wiring. Append mode makes a per-turn LiveLog on
+	// the same path safe alongside the runtime's turn-boundary writer.
+	sink := opts.sink
+	if sink == nil {
+		live := NewLiveLog(opts.LiveLogPath)
+		defer live.Close()
+		sink = &streamEventSink{live: live}
+	}
 
-	client := &denyClient{result: &result, onActivity: touch, live: live}
+	client := &denyClient{result: &result, onActivity: touch, sink: sink}
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 
 	if liveness > 0 {
