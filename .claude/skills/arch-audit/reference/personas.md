@@ -1,10 +1,13 @@
 # arch-audit persona catalog
 
 Pick 4–6 per scope. **Always include ≥1 adversarial** and the **metrics** worker.
-Personas must genuinely disagree — convergence across *independent* personas is the
-signal the distillation ranks on; a lone suggestion is low signal. Each persona is
-a background worker: read-only, one artifact, `file:line` on every claim, holds the
-big picture (goal, NORTH_STAR, AGENTS.md tenets) before starting, text-only research.
+Personas must genuinely disagree. The distillation ranks on **independent recompute ×
+impact × tractability**, NOT head-count: agreement among same-family (all-opus) personas
+is *shared prior* — a flag to audit, not corroboration (self-preference, NeurIPS 2024).
+The lone correct voice can outrank a converged wrong one. Each persona is a background
+worker: read-only, one artifact, `file:line` on every claim, its frontmatter carrying
+`model`+`family` (so the distiller can tell independent voices apart), holds the big
+picture (goal, NORTH_STAR, AGENTS.md tenets) before starting, text-only research.
 
 Model routing (per CLAUDE.md, this setup): design-taste personas → **opus**; the
 mechanical metrics pass → **Codex/gpt-5.5** (independent family, and it's a great
@@ -48,6 +51,18 @@ systematic counter to the Claude personas). Never Haiku.
   panic recovery, dropped contexts, error-string-based control flow, per-adapter
   re-implementation.
 
+- **Concurrency & goroutine-lifecycle** *(mandatory for any runtime-touching scope —
+  ghx's daemon (B6), session routing (B7), and watchdog/recovery (ADR-0027) all live
+  on this axis, where velocity and risk actually concentrate).* Goroutine-lifetime
+  ownership ("never start a goroutine without knowing how it will stop" — Cheney), data
+  races, channel/`select` shutdown, context cancellation & propagation, shared mutable
+  state across the daemon pool, and **cross-process** serialization (an in-process mutex
+  gives *zero* serialization when the daemon and a daemonless `ask` hit the same `~/.ghx`
+  files — the `telemetry/jsonl_writer.go` package-global mutex map is the smoking gun).
+  Hunts: unstopped goroutines, unguarded shared maps, dropped contexts, races no test
+  catches. Its standing output is **`go test -race` in CI** (fitness function, run-spine
+  step 6) — the one check that catches what review cannot.
+
 - **Coupling / cohesion / testability.** Hidden ambient deps (`os.Getenv`,
   `time.Now`, `exec.Command`, filesystem, network) that block isolation testing;
   feature envy; low cohesion; tests welded to internals so a safe refactor breaks
@@ -56,10 +71,14 @@ systematic counter to the Claude personas). Never Haiku.
 ## Mechanical persona (Codex/gpt-5.5)
 
 - **Complexity & tech-debt metrics.** Quantified, tool-driven, adversarial: file
-  sizes (`find … | xargs wc -l | sort -rn`), cyclomatic complexity (`gocyclo -top N`),
-  duplication, `fmt.Errorf`/error-handling sprawl, boolean-flag/long-parameter
-  control-coupling. Ranks hotspots by impact × tractability. Independent model family
-  is a feature — it counters the Claude personas' shared priors.
+  sizes (`find … | xargs wc -l | sort -rn`), cyclomatic + cognitive complexity
+  (`gocyclo -top N`, `gocognit`), duplication (`dup`), dead code (`deadcode`),
+  `fmt.Errorf`/error-handling sprawl, boolean-flag/long-parameter control-coupling —
+  and the highest-signal one, **complexity × git-churn hotspots** (`git log` churn ×
+  size/complexity → the ~1–2% of files where a refactor buys the most velocity, not just
+  the biggest files; Tornhill/CodeScene). Ranks by impact × tractability. Independent
+  model family is a feature — it counters the Claude personas' shared priors, so it must
+  also weigh in on ≥1 top design finding, not only the metrics.
 
 ## Adversarial personas (opus) — at least one, always
 
