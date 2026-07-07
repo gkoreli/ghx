@@ -97,7 +97,7 @@ complete tree and README.`,
 		fullMode, _ := cmd.Flags().GetBool("full")
 		result, err := ghxlib.Explore(args[0], path)
 		if err != nil {
-			return upstreamError(err)
+			return ghxCoreError(err)
 		}
 		if !fullMode {
 			printCompactExplore(args[0], path, result, budget)
@@ -182,7 +182,7 @@ map plus a narrowing hint rather than flooding output.`,
 		}
 		results, err := ghxlib.Read(args[0], args[1:], opts)
 		if err != nil {
-			return upstreamError(err)
+			return ghxCoreError(err)
 		}
 
 		// Show glob summary when matches were truncated
@@ -460,7 +460,7 @@ fully recursive); directories are shown with a trailing slash.`,
 		}
 		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
-			return upstreamError(err)
+			return ghxCoreError(err)
 		}
 		for _, entry := range results {
 			fmt.Println(entry)
@@ -750,6 +750,13 @@ func buildSearchQuery(args []string, lang string, glob string) string {
 	}
 	query := fmt.Sprintf("%s repo:%s", quoteCodeSearchTerm(args[1]), args[0])
 	return appendSearchQualifiers(query, lang, glob)
+}
+
+func ghxCoreError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "invalid repo") {
+		return WithExitCode(ExitBadInvocation, err)
+	}
+	return upstreamError(err)
 }
 
 func buildGrepQuery(repo string, pattern string, glob string, path string) string {

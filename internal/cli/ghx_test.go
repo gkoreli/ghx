@@ -94,6 +94,13 @@ func TestTeachingFlagErrorGolden(t *testing.T) {
 	}
 }
 
+func TestGhxCoreErrorInvalidRepoIsBadInvocation(t *testing.T) {
+	err := ghxCoreError(errors.New(`invalid repo "noslash": expected owner/repo, e.g. ghx explore gkoreli/ghx`))
+	if got := CodeForError(err); got != ExitBadInvocation {
+		t.Fatalf("exit code = %d, want %d", got, ExitBadInvocation)
+	}
+}
+
 func TestTeachingFlagErrorPathSuggestions(t *testing.T) {
 	tests := []struct {
 		name string

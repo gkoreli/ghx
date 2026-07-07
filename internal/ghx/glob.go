@@ -15,10 +15,7 @@ type treeEntry struct {
 }
 
 // fetchTree returns the full recursive tree for a repo via the Git Trees API (one REST call).
-func fetchTree(repo string) ([]treeEntry, error) {
-	owner := strings.Split(repo, "/")[0]
-	name := strings.Split(repo, "/")[1]
-
+func fetchTree(repo Repo) ([]treeEntry, error) {
 	gql, err := api.DefaultGraphQLClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
@@ -28,7 +25,7 @@ func fetchTree(repo string) ([]treeEntry, error) {
 		repository(owner: %q, name: %q) {
 			defaultBranchRef { name }
 		}
-	}`, owner, name)
+	}`, repo.Owner, repo.Name)
 
 	var branchResp struct {
 		Repository struct {
@@ -52,7 +49,7 @@ func fetchTree(repo string) ([]treeEntry, error) {
 		return nil, fmt.Errorf("failed to create REST client: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("repos/%s/%s/git/trees/%s?recursive=1", owner, name, branch)
+	endpoint := fmt.Sprintf("repos/%s/%s/git/trees/%s?recursive=1", repo.Owner, repo.Name, branch)
 	var resp struct {
 		Tree []treeEntry `json:"tree"`
 	}

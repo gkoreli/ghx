@@ -52,12 +52,12 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 		opts = &ReadOpts{}
 	}
 
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx read gkoreli/ghx cmd/ghx/main.go --lines 1-40", repo)
+	parsedRepo, err := ParseRepo(repo)
+	if err != nil {
+		return nil, err
 	}
-	owner := parts[0]
-	name := parts[1]
+	owner := parsedRepo.Owner
+	name := parsedRepo.Name
 
 	// Expand globs: detect glob patterns, fetch tree, resolve to exact paths
 	hasGlobs := false
@@ -72,7 +72,7 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 	globOrigin := make(map[string]string)
 
 	if hasGlobs {
-		tree, err := fetchTree(repo)
+		tree, err := fetchTree(parsedRepo)
 		if err != nil {
 			return nil, fmt.Errorf("glob expansion failed: %w", err)
 		}

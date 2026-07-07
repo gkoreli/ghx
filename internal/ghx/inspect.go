@@ -241,8 +241,8 @@ func (w *BudgetWriter) Used() int {
 
 // Inspect searches, fetches, maps, ranks, and snippets concern-local evidence.
 func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, error) {
-	if !validRepo(repo) {
-		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx inspect gkoreli/ghx \"exit code\"", repo)
+	if _, err := ParseRepo(repo); err != nil {
+		return nil, err
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -389,11 +389,6 @@ func normalizeInspectOptions(opts InspectOptions) InspectOptions {
 	opts.Glob = strings.TrimSpace(opts.Glob)
 	opts.Path = strings.Trim(strings.TrimSpace(opts.Path), "/")
 	return opts
-}
-
-func validRepo(repo string) bool {
-	parts := strings.Split(repo, "/")
-	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
 }
 
 func buildInspectSearchQuery(repo string, query string, opts InspectOptions) string {

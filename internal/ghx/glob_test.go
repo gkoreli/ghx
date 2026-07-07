@@ -1,6 +1,7 @@
 package ghx
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,21 @@ func TestExpandGlobs_PreservesOrder(t *testing.T) {
 	// c.go should come first (exact path), then a.go, b.go from glob
 	if len(files) != 3 || files[0] != "c.go" {
 		t.Errorf("got %v, want [c.go a.go b.go]", files)
+	}
+}
+
+func TestTreeBadSlugReturnsErrorWithoutPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Tree panicked for invalid repo: %v", r)
+		}
+	}()
+
+	_, err := Tree("noslash", "", TreeOpts{})
+	if err == nil {
+		t.Fatal("Tree error = nil, want invalid repo error")
+	}
+	if !strings.Contains(err.Error(), "invalid repo") {
+		t.Fatalf("Tree error = %q, want invalid repo", err)
 	}
 }

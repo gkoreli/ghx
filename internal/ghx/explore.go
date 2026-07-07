@@ -2,7 +2,6 @@ package ghx
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/cli/go-gh/v2/pkg/api"
 )
@@ -22,12 +21,12 @@ type ExploreResult struct {
 // Explore returns branch, tree, and README for a repo (or subdirectory listing).
 // If path is empty, returns root tree + README. If path is set, returns subdirectory entries only.
 func Explore(repo string, path string) (*ExploreResult, error) {
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx explore gkoreli/ghx", repo)
+	parsedRepo, err := ParseRepo(repo)
+	if err != nil {
+		return nil, err
 	}
-	owner := parts[0]
-	name := parts[1]
+	owner := parsedRepo.Owner
+	name := parsedRepo.Name
 
 	gql, err := api.DefaultGraphQLClient()
 	if err != nil {

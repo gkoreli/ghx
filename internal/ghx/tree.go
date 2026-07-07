@@ -12,7 +12,11 @@ type TreeOpts struct {
 // Without Depth: returns blobs only (backward compatible).
 // With Depth: returns both blobs and directories (dirs suffixed with "/"), filtered to N levels.
 func Tree(repo string, path string, opts TreeOpts) ([]string, error) {
-	entries, err := fetchTree(repo)
+	parsedRepo, err := ParseRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := fetchTree(parsedRepo)
 	if err != nil {
 		return nil, err
 	}
