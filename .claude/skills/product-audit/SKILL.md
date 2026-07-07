@@ -13,294 +13,129 @@ description: >-
 
 # Product Audit — the Product-Manager Lens
 
-This skill runs a **product audit** of `ghx`: not "is the code right?" but "are we
-building the *right thing*, for the right consumer, in a way that is aligned to the
-north star and can't be trivially copied?" It audits from many **adversarial PM
-personalities** at once, across many **scopes** (PMF, competition, market, positioning,
-gaps, adjacency, moat, monetization, and the agent-native scopes below), over many
-**surfaces** (code, docs, features, evals/traces, live manual runs, and the strategy
-documents themselves).
+Audit `ghx` as a product manager would: not "is the code right?" but "are we building
+the *right thing*, for the right consumer, aligned to the north star, in a way that can't
+be trivially copied?" The audit runs from several **adversarial PM personalities**, across
+selected **scopes** (PMF, competition, market, positioning, gaps, adjacency, moat,
+monetization, and the agent-native scopes), over selected **surfaces** (code, docs,
+features, evals/traces, live manual runs, and the strategy documents themselves).
 
-The orchestrator (Fable) is the **authoritative final judge**. Breadth is delegated to
-background persona-agents; judgment is not. Every delegated finding is cross-validated
-against evidence and the north star, deduped, ranked, and either accepted or rejected.
-Do not incorporate a finding because an agent asserted it — incorporate it because it
-survives scrutiny. Reject cargo-culted advice (§ Anti-patterns) without apology.
-
-The full sourced research behind this skill — every framework, with specific deep-link
-citations and per-claim rationale — lives in `research/*.md` next to this file. This
-SKILL.md is the operational layer; reach for the artifacts when a lens or scope needs its
-primary sources (their Source Ledgers are the citation of record).
-
----
+Fable is the **authoritative judge**: breadth is delegated to background persona-agents;
+the accept/reject call is not. Incorporate a finding because it survives scrutiny, never
+because an agent asserted it. The full sourced research — every framework with specific
+citations and per-claim rationale — is in `research/*.md` beside this file (their Source
+Ledgers are the citation of record); Round-2 critiques are in `reviews/*.md`.
 
 ## When to use / when not
 
-**Use it** when Goga (or Fable, self-directed) asks to: audit the product / find product
-gaps / pressure-test the north star or an ADR as *product strategy* / assess PMF, market,
-competition, positioning, or defensibility / propose adjacent product ideas / check
-agent-experience (AX) of the CLI, MCP tool, sidecar report, or docs / sanity-check whether
-the roadmap is traceable to strategy.
+**Use** when asked to: audit the product / find product gaps / pressure-test the north star
+or an ADR *as product strategy* / assess PMF, market, competition, positioning, or
+defensibility / propose adjacent product ideas / check agent-experience (AX) of the CLI,
+MCP tool, sidecar report, or docs / check roadmap-to-strategy traceability.
 
-**Do not use it** for: code correctness, architecture/coupling/complexity, or security —
-those have their own homes (see § In scope / out of scope). This skill may *read* code as
-evidence for a product finding, but its findings are always framed in product terms.
+**Do not use** for code correctness, architecture/complexity, or security — those have
+their own homes (see § In scope / out of scope). This skill may *read* code as evidence
+for a product finding, but its findings are always framed in product terms.
 
 ---
 
 ## Prime directives (read before auditing)
 
-1. **The north star is the yardstick.** Load `docs/NORTH_STAR.md` first. Every finding
-   states its relationship to it and passes (or fails) the **north-star filter**: does the
-   thing remove tokens/knowledge from the main agent's context, make reconnaissance
-   cheaper or more proficient, make evidence more auditable, or produce better training
-   trajectories? A finding that ignores the north star is out of scope; a *product move*
-   that fails the filter is itself a finding.
+1. **The north star is the yardstick.** Read `docs/NORTH_STAR.md` first. Every finding
+   states its relationship to the **north-star filter**: does the thing remove
+   tokens/knowledge from the main agent's context, make reconnaissance cheaper or more
+   proficient, make evidence more auditable, or produce better training trajectories? A
+   finding that ignores the north star is out of scope; a *product move* that fails the
+   filter is itself a finding.
 
 2. **Agentic-first — re-price classic PM advice before applying it.** ghx's primary
-   consumer is an **AI agent**, not a human. Most PM canon assumes a human with eyes,
-   memory, felt emotion, and an attention budget. Before applying any classic framework,
-   tag it (see `research/06-agentic-first-lens.md` for the full audit):
-   - **HOLDS** — transfers unchanged: outcomes-over-output, JTBD (as a lens), 7-Powers,
-     the whole red-team stack, Cagan's four risks, PM craft and the personas themselves.
-   - **ADAPT** — principle holds, instrument changes: Nielsen heuristics, journey mapping,
-     positioning, information-scent/docs — the "screen a human perceives" becomes the
-     "schema a model parses."
-   - **OUTDATED-OR-INVERTED** — wrong or backwards for an agent: human onboarding/first-run
-     (invert toward *zero* doctrine), HEART Happiness (no affect) and **Engagement/Retention
-     as a goal (INVERTED — for a context-subtracting product, more tool-calls/time-per-task
-     is a vanity metric pointing the wrong way; the win is a high-signal answer and leaving
-     fast)**, the Sean-Ellis "how would you feel" survey (→ ablation evals), "delight"
-     (→ delight theater), the 5-user sampling rule (→ many episodes, measure consistency).
+   consumer is an **AI agent**, not a human; most PM canon assumes a human with eyes,
+   memory, felt emotion, and an attention budget. Tag each framework before use (full
+   audit: `research/06-agentic-first-lens.md §3`):
+   - **HOLDS** — outcomes-over-output, JTBD (as a lens), 7-Powers, the red-team stack,
+     Cagan's four risks, PM craft and the personas themselves.
+   - **ADAPT** — Nielsen heuristics, journey mapping, positioning, information-scent/docs:
+     the "screen a human perceives" becomes the "schema a model parses."
+   - **OUTDATED-OR-INVERTED** — human onboarding/first-run (→ *zero* doctrine), HEART
+     Happiness (no affect), the Sean-Ellis survey (→ ablation evals), "delight" (→ delight
+     theater), the 5-user rule (→ many episodes, measure consistency). **Engagement/retention
+     splits:** per-task engagement (tool-calls, time-in-tool) is a **vanity metric to drive
+     DOWN** for a context-subtracting product — but **cross-session tool-selection / routing
+     retention is the real agent-PMF signal** (does the agent keep choosing ghx across
+     sessions). Never collapse the two.
 
-3. **Two consumers, never conflated.** The **agent** is the primary consumer; the **human
-   operator / buyer / market** is a real secondary consumer. Agent-native scopes (Tier B)
-   serve the first; strategic/market scopes (Tier A) serve the second. Never let a
-   founder's aesthetic preference or a human-facing vanity metric masquerade as *agent*
-   value — and never dismiss the human operator's needs as irrelevant.
+3. **Two consumers, never conflated.** The **agent** is primary; the **human operator /
+   buyer / market** is a real secondary consumer. Agent-native scopes (Tier B) serve the
+   first; strategic/market scopes (Tier A) serve the second. Never let a founder's
+   aesthetic or a human vanity metric masquerade as *agent* value — nor dismiss the
+   operator's needs.
 
-4. **Adversarial, but honest.** Attack the product hard — but a red-team that cries wolf is
-   useless. Every audit report carries a **"What is actually fine"** section with the same
-   evidence rigor as the findings, so the real findings carry weight. Commit negative and
-   null results. "We tried to break this and couldn't" is a citable finding, not a
-   non-event. (`AGENTS.md` Visibility/Truthfulness; the repo's existing audits do this.)
+4. **Adversarial, but honest.** Attack hard, but a red-team that cries wolf is useless.
+   Every report carries a **"What is actually fine"** section with equal rigor, and commits
+   negative/null results. "We tried to break this and couldn't" is a citable finding.
 
-5. **Evidence, not vibes; and the orchestrator is the judge.** Every finding cites
-   files/commands/outputs/traces and is recomputable by a human — same Evidence Contract
-   the rest of the repo lives by. Delegate breadth wide; keep synthesis, ranking, and the
-   accept/reject call in Fable.
-
----
-
-## The audit model: Personalities × Scopes × Surfaces
-
-An audit is a deliberate selection across three axes. Pick a set on each, sized to the
-audit's goal — do not run everything every time.
-
-| Axis | What it is | How to pick |
-|---|---|---|
-| **Personalities** | *Who* is auditing — an adversarial PM lens with its own worldview, reflexive flags, and blind spots. | 3–5 per round that span different underlying axes (below). Full roster only for a rare, milestone-grade audit. |
-| **Scopes** | *What* we audit for — the strategic/market question or the agent-native question. | The scopes that match the audit's goal; agent-native (Tier B) scopes are near-always relevant for ghx. |
-| **Surfaces** | *Where* we look — code, CLI, docs, features, evals/traces, live manual runs, strategy docs. | The surfaces where the chosen scopes' evidence actually lives. Audit is **not** only code. |
-
----
-
-## Personalities (the audit lenses)
-
-Sixteen role-playable lenses. Full self-contained blocks (worldview / reflexively flags /
-signature questions / blind spots / what "good" looks like / sourced grounding / applied-to-ghx)
-are in `research/02-pm-personalities.md` (classic 1–15) and `research/06-agentic-first-lens.md §4`
-(the AX lens). Role-play each honestly — including its blind spots — and let it flag what it flags.
-
-★ = near-mandatory for ghx (a dev-tool/CLI consumed by an AI agent inside an eval-harness framework).
-
-| # | Persona | Reflexively flags / optimizes for | One signature question |
-|---|---|---|---|
-| 1 | Feature-Factory Skeptic | Output masquerading as outcome; "we shipped X" as an accomplishment | "What outcome did this move, and how would we know if it didn't?" |
-| 2 | User-Empath | Roadmaps from opinion, not observed use | "When did anyone last watch a real user (or read a raw agent trace) use this?" |
-| 3 | Monetization Hawk | Unowned "who pays, for what" question; value/cost mismatch | "If cost-to-serve (tokens) doubled tomorrow, does this model survive?" |
-| 4 ★ | Platform/Scale Realist | Contracts changed without notice to consumers-on-top | "Who builds on this, and is our surface a contract they can rely on?" |
-| 5 | Technical-Debt Realist | 100% capacity to net-new; debt never translated to velocity/risk | "What % of capacity is sustainability work, and is it declining?" |
-| 6 | North-Star Zealot | Vanity/gameable metric; metric movable by doing the wrong thing | "Could this metric rise 20% while the product got *worse*?" |
-| 7 | Competitive-Paranoid | Strategy assuming today's landscape is static | "What would let a competitor make this irrelevant in 12 months?" |
-| 8 | Simplicity/Anti-Bloat Minimalist | Flag/subcommand sprawl; config added to dodge a hard call | "What does this feature cost every user who never touches it?" |
-| 9 ★ | Experimentation Rigorist | Single-metric wins; small N; uncalibrated judge | "What's the sample size, guardrail metrics, and could a confound explain it?" |
-| 10 | GTM/Positioning Strategist | "Who is this for" that resolves to "everyone" | "What's the *true* alternative — including 'the agent greps files itself'?" |
-| 11 | Growth Systems Thinker | Isolated tactics; unmapped adoption funnel | "Where does the adoption funnel actually leak?" |
-| 12 | Craft Purist | Process/decks over product; excuses over ownership | "Could you use this yourself for a real task right now and be satisfied?" |
-| 13 | Zero-to-One Explorer | 0→1 bets run with feature-team rigor; never entertains killing it | "What's the riskiest assumption, and did we test *that* one first?" |
-| 14 | Developer-Experience Advocate | Failure modes assuming a slow human reader; unmeasured usage | "What does a failure look like from the caller's side — legible or a stack trace?" |
-| 15 ★ | AI PM Pragmatist | "AI-powered" as a feature with no eval; thin model-wrapper | "What's the traced, calibrated eval behind this capability claim, and who scored it?" |
-| 16 ★ | **Agent Experience (AX) lens** | Tool undiscoverable/unselectable; output that won't compose; doctrine tax | "If a fresh agent had only this tool's name, description, and one error message, could it do the job and *know* it succeeded?" |
-
-**Composing a persona set** (from `research/02 §5` + `06 §4`):
-- **Span the axes, don't stack near-duplicates.** Underlying axes: Mehta's Execution /
-  Customer-Insight / Strategy / Influencing; Doshi–Cagan Craftsperson/Operator/Visionary;
-  Reforge Feature/Growth/Scaling/PMF-expansion. Three Operator/Execution personas together
-  find lots of engineering reality and nothing about whether the product should exist.
-- **Known redundant pairs — pick one:** Feature-Factory Skeptic ↔ Craft Purist; Growth
-  Systems Thinker ↔ Monetization Hawk; Experimentation Rigorist ↔ North-Star Zealot.
-- **General-purpose starter set (5):** Feature-Factory Skeptic + User-Empath +
-  Technical-Debt Realist + Platform/Scale Realist + Competitive-Paranoid, plus one
-  measurement anchor (Experimentation Rigorist *or* North-Star Zealot).
-- **For ghx specifically:** treat the ★ lenses (AX, AI PM Pragmatist, Platform/Scale
-  Realist, Experimentation Rigorist) as near-mandatory — they are grounded in ghx's actual
-  domain. The AX lens **subsumes and outranks** the DevEx Advocate for agent surfaces.
-- **Size:** 3–5 per round is the default; escalate to the full sixteen only for a rare,
-  high-stakes, milestone-grade audit — not routine practice.
-
----
-
-## Scopes (what we audit for)
-
-Full frameworks + failure modes + per-claim sources: `research/04-strategic-scopes.md`
-(Tier A) and `research/06-agentic-first-lens.md §3–4` (Tier B and the verdict on each
-Tier-A framework). Apply each with its agentic-first verdict from Prime Directive 2.
-
-### Tier A — Strategic / market / business (the human & operator layer)
-
-| Scope | Core question | Primary framework(s) |
-|---|---|---|
-| Product-Market Fit | Is there a real population seriously hurt if this vanished — or still searching? | Rachleff/Andreessen; Ellis 40% test → **for the agent, ablation evals**, not a survey |
-| Competitive Analysis | What structural forces decide who captures value, vs. the *true* alternatives? | Porter Five Forces; Dunford competitive-alternatives (incl. "the agent does it itself") |
-| Industry / Market | How big, how mature the value chain, and *why now*? | TAM/SAM/SOM (Aulet); Wardley evolution — **is the tool layer commoditizing as base models improve?** |
-| Positioning & Differentiation | Would an informed prospect find this "obviously" right? | Dunford; category design — for the agent, "messaging" = tool name/description/when-to-use |
-| North-Star / Strategy Alignment | Does every roadmap item trace to the stated strategy? | Perri Vision→Challenge→Target-Condition; Amazon PR-FAQ; Cutler |
-| Gap Analysis | Where does it under- or over-serve a *real named job*? | Christensen JTBD; Ulwick ODI opportunity score; NN/g journey mapping (→ trace mining) |
-| Adjacent Opportunity / Expansion | What's the next *defensible* expansion, and is it premature? | Ansoff matrix; Dixon "come for the tool, stay for the network" |
-| Business Model / Monetization | Can the business capture & sustain the value? (viability risk) | Cagan four big risks; Jacks COSS/open-core — internally reframes as cost-to-serve/episode |
-| Moat / Defensibility | What survives a competitor copying every visible feature? | Helmer 7-Powers (Benefit+Barrier); NFX network effects; Thompson aggregation |
-
-### Tier B — Agent-native (the agent-consumer layer; ghx's home turf)
-
-| Scope | Core question | Grounding |
-|---|---|---|
-| **Agent Experience (AX)** | Can the agent discover, invoke, recover-from, not-be-misled-by, and compose the product? | Biilmann AX (Access/Context/Tools/Orchestration); Anthropic ACI |
-| **Token economics / signals-per-token** | What context tax does it levy per unit of returned signal? | Anthropic context-engineering ("finite resource"); compression ratio, tokens-in/signal-out, tool-call count |
-| **Evals-as-user-research** | Does an eval suite function as the product's user research, and is it *trustworthy* (calibrated judge, guardrails, committed negatives)? | Hamel evals; SWE-bench; τ²-bench (pass^k consistency) |
-| **Tool / affordance & error-as-affordance** | Do names/schemas make the right call obvious and invalid states unrepresentable? Does every error name the correct next invocation? | Anthropic writing-tools; OpenAI function-calling (<20 active) |
-| **Context-budget / progressive disclosure** | How much doctrine must load into the *main* agent before first success? Ideal: zero. | Anthropic Agent Skills (discovery→activation→execution); NORTH_STAR |
-| **Trust & verifiability of output** | Can a downstream actor audit the claim? Is a confidently-wrong output structurally distinguishable from a right one? | "evidence not vibes"; confidently-wrong = severity-4 |
-| **Agent-safety / adversarial tool-use** | Prompt-injection surface, the lethal trifecta, reversibility when the output feeds an autonomous loop | Willison lethal trifecta; red-team stack |
-| **Distribution in agent ecosystems** | Reachable and *default* in MCP/skill ecosystems; does the agent *select* it over the alternative? | MCP spec; tool-selection accuracy in evals |
-
----
-
-## Surfaces (where we look — the audit is not only code)
-
-- **Live product / features** — run the real CLI, the MCP tool, a real sidecar `ask`.
-- **The CLI/tool contract** — flags, subcommands, schemas, output shape, error messages.
-- **Docs** — README, `ghx skill` / `--mcp` embedded skills, ADRs, `docs/*`.
-- **Evals & traces** — `~/.ghx/sessions/`, eval reports under `docs/evals/`, OTel traces.
-- **Strategy documents themselves** — `docs/NORTH_STAR.md`, ADRs, milestone tables: audit
-  them as *product strategy* (wishful thinking, untraceable roadmap, gameable metrics).
-- **Manual validation** — structured self-use, not a scripted demo.
-
-**Manual-validation playbook** (full version, `research/03-audit-methodologies.md`): Phase 0
-scope → Phase 1 inspection (heuristic eval, cognitive walkthrough) → Phase 2 discovery-risk
-ledger (value/usability/feasibility/viability **+ trust**) → Phase 3 metrics/funnel → Phase 4
-fit → Phase 5 dogfooding. **Phase 6 (agent-facing, the load-bearing one for ghx):** run a
-real coding-agent session end-to-end with the tool enabled; capture the full tool-call
-transcript; record per task — binary task success, tool-calls-made vs. minimum-necessary,
-whether errors let the agent self-correct, whether the final report's claims are checkable
-against real output or fabricated, and whether the agent needed prose docs beyond
-`--help`/reference. **A confidently-wrong final report is a severity-4 finding even if the
-task technically completed.**
-
----
-
-## Adversarial discipline
-
-Run findings through the honest-critique machinery (full version `research/05-adversarial-redteam.md`):
-
-- **Sequence per surface/area:** frame in plain language → **key-assumptions check** (list
-  load-bearing assumptions, rank by confidence) → **pre-mortem** ("it failed spectacularly —
-  why?") → **inversion** ("what would we do to guarantee failure?") → **kill-the-product**
-  (a well-funded rival, or a frontier model that ships recon natively) → **devil's advocacy**
-  on the single most load-bearing claim.
-- **Bar for a finding (Graham's hierarchy):** must reach DH5/DH6 — *quote the specific claim,
-  name the specific flaw*. "This feels overconfident" with no quoted passage is DH2 and is
-  dropped. Aim critique at the doc/metric/plan, never the person.
-- **Severity = Likelihood × Impact** (3×3):
-
-  | | Impact: Low | Impact: Medium | Impact: High (invalidates the thesis) |
-  |---|---|---|---|
-  | **Likelihood: Low** | Log | Track, revisit next audit | Escalate — verify before dismissing |
-  | **Likelihood: Medium** | Track | Scoped fix, owned + dated | Escalate now |
-  | **Likelihood: High** | Scoped fix | Escalate now | Stop & resolve before proceeding |
-
-- **Disposition, every finding:** *Confirmed sound* (attacked, held — document it) /
-  *Needs targeted work* (scoped, owned, dated) / *Invalidates the plan* (escalate, don't bury).
-- **Honesty guard:** keep a **"What is actually fine"** section; commit negatives.
-
----
-
-## In scope / out of scope (hard boundary)
-
-**In scope** — product-framed findings: north-star (mis)alignment, PMF/market/competitive/
-positioning/moat/monetization questions, capability & JTBD gaps, adjacent-idea proposals,
-agent-experience (AX) and token-economics problems, eval-trustworthiness *as a product
-concern*, strategy-to-roadmap traceability, and product-strategy critique of the north
-star/ADRs. Reading code, docs, or traces **as evidence** for these is in scope.
-
-**Out of scope** — defer to the existing homes; cross-reference, don't duplicate:
-- Code correctness, coupling/cohesion, complexity, architecture/boundary integrity →
-  `docs/audits/architecture-*.md`, `coupling-cohesion-*.md`, `complexity-hotspots-*.md`,
-  `design-patterns-*.md`, and the repo's code-review/simplify skills. (The
-  `adversarial-velocity` audit is the *velocity/tech-debt* red-team; this skill is the
-  *product/PM* red-team — companion, not overlap.)
-- Security review → the `security-review` skill.
-- Implementation, refactors, ADR authoring → normal engineering flow (`AGENTS.md`).
-- Eval *mechanics* (scorer code, gate math) → the eval framework's own trust ledger
-  (`docs/evals/TRUST.md`). This skill audits whether the evals answer the *product*
-  question, not whether the Go is correct.
-
-If a finding is really a code/security/eval-mechanics finding, name it and route it — do
-not smuggle it into the product report.
-
----
-
-## Anti-patterns to WARN against (agentic-first cargo-culting)
-
-From `research/06 §5`. Flag these *in the product itself* and *in the audit's own reasoning*:
-
-- **Human-pretty output the agent doesn't read** — ASCII tables, color, banners in output an
-  agent parses = pure context tax.
-- **Delight theater** — optimizing a "wow moment" for an entity with no affect.
-- **Vanity human funnels as success** — stars, installs, DAU, and especially
-  **session-length / tool-calls-per-task**; for a context-subtracting product these are
-  metrics to drive *down*.
-- **First-run polish for the main agent** — the target is *zero* onboarding; effort here is
-  effort against the north star.
-- **Surveying the agent** — any "how would the agent feel" instrument is a category error; use
-  ablation and task-success deltas.
-- **Tool-count / feature-count as progress** — "we added N tools" is the agent-era feature
-  factory; more tools can *reduce* task success via context bloat and selection errors.
-- **Conflating operator needs with agent value**; **assuming today's model capability is
-  permanent** (the tool layer may commoditize — a CLI-based moat is a current advantage, not
-  a Power); **trusting evals you can't audit** (an uncalibrated judge is the new leading-the-witness).
+5. **Evidence, not vibes — and the judge is itself checked.** Every finding cites
+   files/commands/outputs/traces, recomputable by a human; a claim that cannot cite is a
+   hypothesis. **A Claude orchestrator adjudicating Claude workers is a self-preference
+   regime** (arXiv:2404.13076 — LLM evaluators favor their own generations), so "trust
+   nothing on assertion" is not enough by itself. Apply the repo's own visibility
+   discipline to *this audit's* judge (see Process step 5). Treat agreement among Claude
+   personas as possible shared-prior, **not** independent corroboration.
 
 ---
 
 ## Process (how the orchestrator runs an audit)
 
-1. **Ground.** Read `docs/NORTH_STAR.md` (+ the relevant ADR/milestone). State the audit's
-   goal in one sentence and what decision it will inform.
-2. **Scope the audit.** Choose the persona set (3–5, span the axes, ★ near-mandatory), the
-   scope set (Tier A + Tier B as relevant), and the surfaces where their evidence lives.
-3. **Delegate breadth.** Spawn background persona-agents (one worktree each is unnecessary —
-   these are read-only), each role-playing one persona over the chosen scopes/surfaces, each
-   writing a findings artifact with the output contract below. Give each: the north star, its
-   persona block, the scopes/surfaces, the agentic-first verdicts, and the sourcing discipline
-   (specific citations + rationale; no vague URLs). Pin them to text-only tools.
-4. **Cross-validate (the judge step).** For each returned finding: does the evidence hold? Is
-   it DH5/DH6? Does it respect the agentic-first re-pricing (not cargo-culted)? Is it in scope?
-   Reject, merge duplicates, re-severity. Trust nothing on assertion.
-5. **Rank & synthesize.** One report: executive summary → ranked findings → **What is actually
-   fine** → adjacent-idea proposals. Rank by severity, then north-star leverage.
-6. **Honest close.** Commit negatives. State what was *not* audited. Name residual uncertainty.
-7. **Iterate if warranted.** For a high-stakes audit, run a second round with a different
-   persona set or a review pass that red-teams the audit's *own* findings.
+**Right-size first.** Most product questions need a single sharp lens, not a fleet — a
+quick targeted pass is the default (mirrors the repo's eval cadence: spot-check first,
+big runs are rare and event-driven). Spin up the full multi-persona delegation only for a
+milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by reflex.
+
+1. **Ground.** Read `docs/NORTH_STAR.md` (+ the relevant ADR/milestone). Write the audit's
+   goal in one sentence and the decision it informs.
+2. **Scope the audit — cap all three axes.** Choose **3–5 personas** (span the axes; ★
+   near-mandatory), **3–5 scopes** (Tier A and/or Tier B — Tier B is *selective*, not
+   automatic), and **only the surfaces where those scopes' evidence lives**. Personas,
+   scopes, *and* surfaces are all capped; running everything drowns signal.
+3. **Delegate breadth.** Spawn read-only background persona-agents (text-only tools; no
+   worktrees needed), one per persona, using the template below.
+4. **Each persona-agent** returns a findings artifact *and* a "what I checked and found
+   sound" (nulls) section — persona-level honesty, not just report-level.
+5. **Judge (the load-bearing step).** For each returned finding: does the evidence hold on
+   *your own* re-derivation? Is it DH5/DH6? Does it respect the agentic-first re-pricing
+   (not cargo-culted)? Is it in scope? Reject, merge duplicates, re-severity. **For every
+   High / thesis-invalidating finding, the "orchestrator is judge" claim only holds with a
+   mechanism, not a vibe:** re-derive it from raw evidence yourself, get an **independent
+   cross-family check** (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or Goga)
+   before it is citable, and record *who judged it and how a reader checks the judge* —
+   the same calibration the product demands of its own eval judge (`AGENTS.md`
+   Visibility/Truthfulness). Do not run a milestone decision on an unchecked judge.
+6. **Rank & synthesize** into one report (contract below): summary → ranked findings →
+   *What is actually fine* → adjacent-idea proposals. Rank by severity, then north-star
+   leverage.
+7. **Honest close.** Commit negatives; state what was *not* audited; name residual
+   uncertainty. For a high-stakes audit, run a second round with a different persona set,
+   or red-team the audit's own findings.
+
+**Copyable persona-agent delegation prompt:**
+
+```text
+Repo: ghx (/Users/goga/Documents/goga/ghx). READ-ONLY product audit — no code changes.
+Read first: docs/NORTH_STAR.md. Every finding states its north-star-filter relationship.
+Your persona: <name> — worldview / reflexive flags / signature questions / blind spots from
+  .claude/skills/product-audit/research/02-pm-personalities.md (persona #N)  [AX: 06 §4].
+  Role-play it honestly, INCLUDING its blind spots.
+Scopes to apply: <chosen 3–5>  (frameworks + agentic-first HOLDS/ADAPT/INVERTED verdict in
+  research/04-strategic-scopes.md and research/06-agentic-first-lens.md §3 — re-price before applying).
+Surfaces: <only where evidence lives> — CLI/MCP/sidecar output · docs · evals+traces
+  (~/.ghx/sessions/, docs/evals/) · a live manual run · the strategy docs themselves.
+Tools: text-only (WebSearch/WebFetch/curl/gh). No browser automation, no screenshots.
+Deliver a findings artifact. Each finding: persona·scope·surface | evidence (file:line /
+  command+output / trace path / doc quote) | severity (Likelihood×Impact) | north-star
+  relationship | a SPECIFIC cross-ref URL + one line on why it matters. DH5/DH6 bar: quote
+  the target, name the flaw. Add a "what I checked and found SOUND" (nulls) section.
+Return: artifact path, top findings, source count, least-confident call.
+```
 
 Delegation mechanics: `.claude/skills/fable-delegation/SKILL.md`.
 
@@ -308,43 +143,221 @@ Delegation mechanics: `.claude/skills/fable-delegation/SKILL.md`.
 
 ## Output / evidence contract
 
-Write the report to `docs/audits/product-<focus>-<date>.md`, matching the repo's audit house
-style. Frontmatter: `title`, `date`, `status: "audit"`, `author`, `scope` (one line naming
-surfaces + personas + "read-only, no code changes"). Then:
+Write to `docs/audits/product-<focus>-<date>.md`, matching the repo's audit house style.
+Frontmatter: `title`, `date`, `status: "audit"`, `author`, `scope` (one line: surfaces +
+personas + "read-only, no code changes"). Then:
 
-- **Executive summary** — the single highest-leverage finding stated first, in north-star terms.
-- **Ranked findings**, each carrying:
+- **Executive summary** — the single highest-leverage finding first, in north-star terms.
+- **Ranked findings**, each with:
   - **Persona · Scope · Surface** it came from.
-  - **Evidence** — `file:line`, a command + output, a trace/session path, or a doc quote.
-    Recomputable by a human; a claim that cannot cite is a hypothesis, not a finding.
-  - **Severity** (Likelihood × Impact) and **Disposition** (sound / needs-work / invalidates).
-  - **North-star relationship** — filter pass/fail, or which tenet/milestone it bears on.
-  - **Cross-reference** (where the finding leans on an external framework or a competitor):
-    a **specific** deep URL + one line on **why it matters** — same discipline as `research/*`.
-    Do not invent or vague-link; if unverified, say so.
-- **"What is actually fine"** — supposed problems checked and found sound, with equal rigor.
-- **Adjacent-idea proposals** — clearly labelled as proposals, each filtered against the
-  north star and named on the Ansoff grid (penetration / development / diversification).
-- **What was not audited** — scopes/surfaces/personas deliberately omitted this round.
+  - **Evidence** — `file:line`, command+output, a trace/session path, or a doc quote;
+    recomputable by a human.
+  - **Severity** (Likelihood × Impact) and **Disposition** — *sound* / *needs work* /
+    *invalidates*. A "needs work" finding **routes to a workstream (A/B/C) or proposes an
+    ADR**, not a bare "owner + date".
+  - **North-star relationship** — filter pass/fail, or the tenet/milestone it bears on.
+  - **Who judged it & how to check** — for High findings, name the independent/cross-family
+    check and how a reader re-derives it (self-preference guard, directive 5).
+  - **Cross-reference** — for any external framework or competitor claim: a **specific**
+    deep URL + one line on **why it matters**. No vague or invented links; if unverified,
+    say so.
+- **"What is actually fine"** — supposed problems checked and found sound, equal rigor.
+- **Adjacent-idea proposals** — labelled as proposals, each filtered against the north star
+  and named on the Ansoff grid (penetration / development / diversification).
+- **What was not audited** — axes deliberately omitted this round.
+
+---
+
+## The audit model: Personalities × Scopes × Surfaces
+
+Select a capped set on each axis (§ Process step 2), sized to the goal. Never run
+everything every time.
+
+| Axis | What it is | Cap |
+|---|---|---|
+| **Personalities** | *Who* audits — an adversarial PM lens with its own worldview, flags, and blind spots. | 3–5 (span the axes); full roster only milestone-grade. |
+| **Scopes** | *What* we audit for — a strategic/market or agent-native question. | 3–5; Tier B is selective, not automatic. |
+| **Surfaces** | *Where* the evidence lives — code, CLI, docs, evals/traces, live runs, strategy docs. | Only those the chosen scopes need. |
+
+---
+
+## Personalities (the audit lenses)
+
+Full self-contained blocks are in `research/02-pm-personalities.md` (1–15) and
+`research/06-agentic-first-lens.md §4` (the AX lens, #16). ★ = near-mandatory for ghx.
+
+| # | Persona | Reflexively flags / optimizes for | One signature question |
+|---|---|---|---|
+| 1 | Feature-Factory Skeptic | Output masquerading as outcome | "What outcome did this move, and how would we know if it didn't?" |
+| 2 | User-Empath | Roadmaps from opinion, not observed use | "When did anyone last read a raw agent trace of this being used?" |
+| 3 | Monetization Hawk | Unowned "who pays"; value/cost mismatch | "If cost-to-serve (tokens) doubled tomorrow, does this survive?" |
+| 4 ★ | Platform/Scale Realist | Contracts changed without notice to consumers-on-top | "Is our surface a contract other agents can rely on?" |
+| 5 | Technical-Debt Realist | 100% capacity to net-new; debt untranslated to velocity | "What % of capacity is sustainability work, and is it declining?" |
+| 6 | North-Star Zealot | Vanity/gameable metric | "Could this metric rise 20% while the product got *worse*?" |
+| 7 | Competitive-Paranoid | Strategy assuming today's landscape is static | "What would let a competitor make this irrelevant in 12 months?" |
+| 8 | Simplicity/Anti-Bloat Minimalist | Flag/subcommand sprawl | "What does this feature cost every user who never touches it?" |
+| 9 ★ | Experimentation Rigorist | Single-metric wins; small N; uncalibrated judge | "Sample size, guardrails, could a confound explain it?" |
+| 10 | GTM/Positioning Strategist | "Who is this for" that resolves to "everyone" | "What's the *true* alternative the agent would use instead?" |
+| 11 | Growth Systems Thinker | Isolated tactics; unmapped adoption funnel | "Where does the adoption funnel actually leak?" |
+| 12 | Craft Purist | Process/decks over product; excuses over ownership | "Could you use this for a real task right now and be satisfied?" |
+| 13 | Zero-to-One Explorer | 0→1 bets run with feature-team rigor; never killed | "What's the riskiest assumption, and did we test *that* first?" |
+| 14 | DevEx Advocate *(human-operator layer)* | Operator's install/config/first-run friction | "Could the human operator set this up with zero prior context?" |
+| 15 ★ | AI PM Pragmatist | "AI-powered" as a feature with no eval; thin wrapper | "What traced, calibrated eval backs this claim, and who scored it?" |
+| 16 ★ | **Agent Experience (AX) lens** | Tool undiscoverable/unselectable; output that won't compose; doctrine tax | "If a fresh agent had only this tool's name, description, and one error, could it do the job and *know* it succeeded?" |
+
+Note: the **AX lens (#16) is the agent-consumer umbrella** and subsumes the *agent* side of
+DevEx; #14 is kept only for the **human operator**. AX's four pillars (Access / Context /
+Tools / Orchestration) are the concrete facets audited by the Tier-B scopes below.
+
+**Composing a set** (`research/02 §5`, `06 §4`): span the axes (Mehta Execution/Insight/
+Strategy/Influence; Doshi–Cagan Craftsperson/Operator/Visionary; Reforge Feature/Growth/
+Scaling/PMF-expansion) — three Operator/Execution personas together find engineering
+reality and nothing about whether the product should exist. **Redundant pairs, pick one:**
+Feature-Factory Skeptic ↔ Craft Purist; Growth Systems Thinker ↔ Monetization Hawk;
+Experimentation Rigorist ↔ North-Star Zealot. **Starter set (5):** Feature-Factory Skeptic
++ User-Empath + Technical-Debt Realist + Platform/Scale Realist + Competitive-Paranoid,
+plus one measurement anchor. **For ghx:** the ★ lenses (AX, AI PM Pragmatist, Platform/
+Scale Realist, Experimentation Rigorist) are near-mandatory — grounded in ghx's real domain.
+
+---
+
+## Scopes (what we audit for)
+
+Full frameworks + failure modes + sources: `research/04-strategic-scopes.md` (Tier A) and
+`research/06-agentic-first-lens.md §3–4` (Tier B + the verdict on each Tier-A framework).
+Apply each with its agentic-first verdict (directive 2). Pick 3–5 total.
+
+### Tier A — Strategic / market / business (the human & operator layer)
+
+| Scope | Core question | Primary framework(s) |
+|---|---|---|
+| Product-Market Fit | Real population seriously hurt if it vanished — or still searching? | Rachleff/Andreessen; Ellis 40% test → **for the agent, ablation evals**, not a survey |
+| Competitive Analysis | What structural forces decide who captures value, vs. the *true* alternative? | Porter Five Forces; Dunford competitive-alternatives |
+| Industry / Market | How big, how mature the value chain, *why now* — is the tool layer commoditizing as base models improve? | TAM/SAM/SOM (Aulet); Wardley evolution |
+| Positioning & Differentiation | Would an informed prospect find it "obviously" right? (for the agent, "messaging" = tool name/description/when-to-use) | Dunford; category design |
+| North-Star / Strategy Alignment | Does every roadmap item trace to the stated strategy? | Perri Vision→Challenge→Target; Amazon PR-FAQ; Cutler |
+| Gap Analysis | Where does it under- or over-serve a *real named job*? | Christensen JTBD; Ulwick ODI opportunity score; journey → trace mining |
+| Adjacent Opportunity / Expansion | Next *defensible* expansion, and is it premature? | Ansoff matrix; Dixon "come for the tool, stay for the network" |
+| Business Model / Monetization | Can the business capture & sustain value? (internally: cost-to-serve/episode) | Cagan four big risks; Jacks COSS/open-core |
+| Moat / Defensibility | What survives a competitor copying every visible feature? | Helmer 7-Powers (Benefit+Barrier); NFX; Thompson aggregation |
+
+> **The "true alternative" is not "the agent greps files itself."** It is the host's
+> **native, context-subtracting recon subagent** — e.g. Claude Code's read-only **`Explore`**
+> agent (cheaper model, keeps exploration out of the main context): ghx's own thesis shipped
+> natively inside ghx's primary host. Naming it *sharpens* the moat rather than kills it —
+> Explore has no evidence contract, no persisted session artifacts, and no GitHub-wide
+> discovery — but the competitive/positioning/moat scopes only work if this is the named
+> comparison, and ablation baselines (PMF scope) should include native-Explore, not only
+> plain/ghx/ghx-sidecar. (Verify current behavior: `code.claude.com/docs` sub-agents.)
+
+### Tier B — Agent-native (the AX umbrella; ghx's home turf) — selective, pick what the goal needs
+
+| Scope | Core question | Grounding |
+|---|---|---|
+| **Agent Experience (AX)** | Can the agent discover, invoke, recover-from, not-be-misled-by, and compose it? | Biilmann AX; Anthropic ACI |
+| **Token economics / signals-per-token** | Context tax per unit of returned signal — **at all three SPT levels** (main-agent, sidecar-internal ~400-line persona-doctrine tax, whole-workflow vs. native delegation) | Anthropic context-engineering; NORTH_STAR ADR-0016.6 |
+| **Evals-as-user-research** | Does an eval suite serve as user research, and is it *trustworthy* (calibrated judge, guardrails, committed negatives)? | Hamel evals; **code-localization/retrieval benchmarks (LocAgent, RepoBench, CodeSearchNet — ghx's actual job)**, plus SWE-bench / τ²-bench for downstream task success & pass^k consistency |
+| **Tool / affordance & error-as-affordance** | Do names/schemas make the right call obvious, invalid states unrepresentable, and does every error name the correct next invocation? | Anthropic writing-tools; OpenAI function-calling (<20 active) |
+| **Context-budget / progressive disclosure** | How much doctrine must load into the *main* agent before first success? Ideal: zero. | Anthropic Agent Skills; NORTH_STAR |
+| **Trust & verifiability of output** | Can a downstream actor audit the claim? Is a confidently-wrong output distinguishable from a right one — **and does surfaced code carry copyleft/attribution lineage that flows into the agent's output invisibly?** | "evidence not vibes"; confidently-wrong = severity-4; license-provenance (Doe v. GitHub-class risk) |
+| **Agent-safety / adversarial tool-use** | Prompt-injection surface, the lethal trifecta, reversibility when output feeds an autonomous loop | Willison lethal trifecta; red-team stack |
+| **Distribution in agent ecosystems** | Reachable and *default* in MCP/skill ecosystems; does the agent *select* it over the alternative? | MCP spec; tool-selection accuracy in evals |
+
+---
+
+## Surfaces (the audit is not only code)
+
+Live product/features (real CLI, MCP tool, a real sidecar `ask`, the **discovery tier** —
+repo-optional GitHub-wide recon) · the CLI/tool contract (flags, schemas, output, error
+messages) · docs (README, `ghx skill`/`--mcp`, ADRs, `docs/*`) · **evals & traces**
+(`~/.ghx/sessions/` **as an agent-facing API surface** — NORTH_STAR names the main agent a
+first-class consumer of these artifacts, not only human debug; eval reports under
+`docs/evals/`) · **the strategy documents themselves** (`NORTH_STAR.md`, ADRs, milestone
+tables — audited *as product strategy*: wishful thinking, untraceable roadmap, gameable
+metrics) · manual validation (structured self-use, not a scripted demo).
+
+**Manual-validation playbook** (`research/03-audit-methodologies.md`): Phase 0 scope →
+1 inspection (heuristic eval, cognitive walkthrough) → 2 discovery-risk ledger (value/
+usability/feasibility/viability **+ trust**) → 3 metrics/funnel → 4 fit → 5 dogfooding.
+**Phase 6 (agent-facing, load-bearing for ghx):** run a real coding-agent session end-to-end
+with the tool enabled; capture the full tool-call transcript; record per task — binary
+success, tool-calls-made vs. minimum-necessary, whether errors let the agent self-correct,
+whether the final report's claims are checkable against real output or fabricated, and
+whether the agent needed prose docs beyond `--help`. **A confidently-wrong final report is
+severity-4 even if the task technically completed.**
+
+---
+
+## Adversarial discipline
+
+Run findings through the honest-critique machinery (`research/05-adversarial-redteam.md`):
+frame in plain language → **key-assumptions check** → **pre-mortem** → **inversion** →
+**kill-the-product** (a well-funded rival, or a frontier model that ships recon natively) →
+**devil's advocacy** on the single most load-bearing claim.
+
+- **Finding bar (Graham):** DH5/DH6 — quote the specific claim, name the specific flaw.
+  Aim at the doc/metric/plan, never the person. Findings that only reach DH0–DH3 are dropped.
+- **Severity = Likelihood × Impact (3×3):**
+
+  | | Impact: Low | Impact: Medium | Impact: High (invalidates the thesis) |
+  |---|---|---|---|
+  | **Likelihood: Low** | Log | Track, revisit next audit | Escalate — verify before dismissing |
+  | **Likelihood: Medium** | Track | Scoped fix → workstream/ADR | Escalate now |
+  | **Likelihood: High** | Scoped fix | Escalate now | Stop & resolve before proceeding |
+
+- **Disposition:** *Confirmed sound* / *Needs work* (→ workstream A/B/C or an ADR) /
+  *Invalidates* (escalate, don't bury). Keep the **"What is actually fine"** section; commit
+  negatives. Don't cite a milestone whose gate *failed* as evidence it works (e.g.,
+  anticipation/M8 — a passing gate must exist first; the AI-PM-Pragmatist lens catches this).
+
+---
+
+## In scope / out of scope (hard boundary)
+
+**In scope** — product-framed findings: north-star (mis)alignment; PMF/market/competitive/
+positioning/moat/monetization; capability & JTBD gaps; adjacent-idea proposals; agent-
+experience and token-economics; eval-*trustworthiness as a product concern*; strategy-to-
+roadmap traceability; product-strategy critique of the north star/ADRs; **product-sequencing
+YAGNI** (are we building ahead of validated need). Reading code/docs/traces **as evidence**
+is in scope.
+
+**Out of scope** — defer to the existing homes; cross-reference, don't duplicate:
+- Code correctness, coupling/cohesion, complexity, architecture/boundary integrity,
+  **structural YAGNI** → the code audits in `docs/audits/*.md` (architecture, complexity-
+  hotspots, coupling-cohesion-testability, design-patterns, failure-class-inventory,
+  adversarial-velocity) and `docs/audits/architecture-vision/*.md` (adversarial-yagni,
+  domain-model, go-architecture-boundaries, resilience, runner-port), plus the code-review/
+  simplify skills. (`adversarial-velocity` is the *velocity/tech-debt* red-team; this skill
+  is the *product/PM* red-team — companion, not overlap.)
+- Security review → the `security-review` skill.
+- Implementation, refactors, ADR authoring → normal engineering flow (`AGENTS.md`).
+- Eval *mechanics* (scorer code, gate math) → `docs/evals/TRUST.md`. This skill audits
+  whether the evals answer the *product* question, not whether the Go is correct.
+
+If a finding is really a code/security/eval-mechanics finding, name it and route it — don't
+smuggle it into the product report.
+
+---
+
+## Anti-patterns to WARN against (agentic-first cargo-culting)
+
+Flag these in the product *and* in the audit's own reasoning (details `research/06 §5`;
+the point is directive 2 applied): **human-pretty output the agent doesn't read** (context
+tax); **delight theater** (optimizing affect for an entity with none); **vanity human
+funnels** (stars/installs/DAU, and especially **session-length / tool-calls-per-task**, which
+for a context-subtracting product should go *down*); **first-run polish for the main agent**
+(target is *zero* onboarding); **surveying the agent** (use ablation, not "how would it
+feel"); **tool-count as progress** (more tools can *reduce* task success); **conflating
+operator needs with agent value**; **assuming today's model capability is permanent** (a
+CLI-based moat is a current advantage, not a Power); **trusting evals you can't audit** — and,
+per R4, **the audit trusting its own unchecked judge** (directive 5).
 
 ---
 
 ## Provenance / references
 
-The research corpus (committed alongside this skill; each carries a full Source Ledger with
-specific deep-link citations + per-claim rationale — the citation of record):
-
-- `research/01-pm-excellence.md` — PM competencies, product sense, outcomes-over-output, the
-  frameworks a great PM reasons with; 22 artifact-answerable audit questions.
-- `research/02-pm-personalities.md` — the 15 classic persona blocks + composition rules.
-- `research/03-audit-methodologies.md` — heuristic eval, teardown, discovery risk, metrics/
-  funnel, PMF mechanics, docs/dogfood; the manual-validation playbook.
-- `research/04-strategic-scopes.md` — the 9 Tier-A scopes with frameworks & failure modes.
-- `research/05-adversarial-redteam.md` — pre-mortem, red-team, inversion, kill-the-company,
-  bias checks; the runnable protocol + severity scheme.
-- `research/06-agentic-first-lens.md` — the agent-as-consumer mental model; the HOLDS/ADAPT/
-  INVERTED audit of the classic advice; the Tier-B scopes and the AX persona.
-
-Repo rules this skill inherits: `AGENTS.md` (Evidence Contract, Visibility/Truthfulness,
-Tool Economy), `docs/NORTH_STAR.md` (the north-star filter), `CLAUDE.md` (orchestration &
-delegation posture).
+Research corpus (`research/*.md`, each with a full Source Ledger — the citation of record):
+`01-pm-excellence` · `02-pm-personalities` · `03-audit-methodologies` · `04-strategic-scopes`
+· `05-adversarial-redteam` · `06-agentic-first-lens`. Round-2 critiques: `reviews/R1–R4`.
+Inherited repo rules: `AGENTS.md` (Evidence Contract, Visibility/Truthfulness, Tool Economy),
+`docs/NORTH_STAR.md` (the north-star filter), `CLAUDE.md` (orchestration & delegation).
