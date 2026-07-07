@@ -46,10 +46,16 @@ worktrees, ff-only landing); this skill owns the *architecture-audit loop*.
 
 ## The run-spine (front-load this — how to run, what to deliver)
 
-1. **Pick a SCOPE and write a one-paragraph charter.** The scope is the whole
-   lever of the run (see "Choosing a scope"). The charter names: what's in/out,
-   which tenets/ADRs/north-star phases it serves, and the question the run must
-   answer. Commit the charter as the thread header `AA-000N-<scope-slug>.md`.
+1. **Pick a SCOPE, rank the quality attributes, write a one-paragraph charter.**
+   The scope is the whole lever of the run (see "Choosing a scope"). Before fanning
+   out, name the **2–3 quality attributes that matter most for this scope** — a
+   lightweight ATAM-style *utility tree* (e.g. a reusable-core scope prioritizes
+   replaceability > testability > cohesion; a hot module prioritizes
+   maintainability > correctness) — so the personas target what matters instead of
+   auditing everything equally. The charter names: what's in/out, the ranked
+   quality attributes, which tenets/ADRs/north-star phases it serves, and the
+   question the run must answer. Commit it as the thread header
+   `AA-000N-<scope-slug>.md`.
 2. **Fan out the personas (breadth, background, isolated worktrees).** Pick 4–6
    persona×lens pairs for the scope from the catalog (`reference/personas.md`) —
    **at least one adversarial** (YAGNI skeptic and/or velocity red-team) as the
@@ -70,10 +76,18 @@ worktrees, ff-only landing); this skill owns the *architecture-audit loop*.
 5. **Govern with an ADR + execute.** Turn the distilled sequence into a governing
    ADR (the ADR-0035/0036 precedent), then execute the refactors as verified
    worker tasks — each behavior-preserving, ADR-gated, landed ff-only.
+6. **Graduate the wins into standing fitness functions (anti-shelfware).** The
+   structural invariants the audit relied on — import-direction greps, a god-file
+   size ceiling, "no `acp`/transport import outside the adapter", the persona-byte
+   golden — should become **committed, executable checks** (a test or CI step)
+   that fail if a boundary drifts back. An audit that only writes a report decays;
+   one that leaves behind executable guards compounds, so the *next* run doesn't
+   re-discover the same debt (Ford/Parsons/Kua evolutionary-architecture fitness
+   functions; the 2026-07-07 run's checks were one-shot greps — graduate them).
 
 **Deliverables:** the thread charter, N persona artifacts, one distillation
-artifact, and a governing ADR — all under `docs/audits/` + `docs/adr/`, each
-recomputable from committed evidence.
+artifact, a governing ADR, and any new fitness-function checks — all under
+`docs/audits/` + `docs/adr/` + tests, each recomputable from committed evidence.
 
 ## Choosing a scope (the run's biggest lever)
 
@@ -83,8 +97,11 @@ recomputable from committed evidence.
 - **A capability / reusable core** — the highest-value scope for ghx's vision:
   is the **Agent Sidecar Framework** a reusable infrastructure boundary or welded
   to ghx? What is the **shared core between the evals machinery and the main ghx
-  product**, and is it actually shared or duplicated? What should become a
-  reusable module vs. stay product-specific?
+  product** — a DDD **Shared Kernel** (small, deliberately coordinated, expensive
+  on purpose), or accidental duplication drifting apart? What should become a
+  reusable module vs. stay product-specific? (Guard both ways: a genuine shared
+  kernel is worth the coordination cost; a premature one is the "wrong abstraction"
+  that's costlier than duplication — the YAGNI persona argues the inline side.)
 - **A mindset / cross-cutting lens** — decoupling & replaceability (the runner
   port), resilience, testability, dependency direction, domain modeling.
 
@@ -99,10 +116,14 @@ roster: **Go architecture & boundaries** (idiomatic Go, core/shared/domain,
 (value objects/entities that flow, ubiquitous language); **reusable-core
 extraction** (framework-vs-product boundary, evals↔ghx shared core); **ports &
 adapters / replaceability**; **resilience & runtime robustness**;
-**complexity/tech-debt metrics** (gocyclo/size/duplication/error-sprawl → Codex);
-and the adversaries — **YAGNI skeptic** (argue against over-engineering) and
-**velocity red-team** (roadmap-blocking debt). Personas must genuinely *disagree*;
-convergence across independent personas is the signal you rank on.
+**complexity/tech-debt metrics** (gocyclo/gocognit/size/duplication/error-sprawl
+**+ complexity×git-churn hotspots** — the ~1–2% of files where refactoring buys
+the most velocity, not just the biggest files — routed to **Codex/GPT** for an
+independent model family); and the adversaries — **YAGNI skeptic** (argue against
+over-engineering) and **velocity red-team** (roadmap-blocking debt), run as a real
+discipline (premortem / Team-A-vs-Team-B) and held to the **DH5/DH6 bar** (quote
+the exact passage, name the exact flaw — no vague doom). Personas must genuinely
+*disagree*; convergence across independent personas is the signal you rank on.
 
 ## Artifact contract (template in `reference/artifact-template.md`)
 
@@ -122,7 +143,8 @@ optional `.6-adjudication`, `.9-distilled` — matching the `product-audit`
 ## The final judgment (the load-bearing step)
 
 You (the orchestrator) are the authoritative judge, and judging your own
-delegated fan-out is a self-preference regime. So: **re-derive load-bearing
+delegated fan-out is a self-preference regime (Panickssery et al., NeurIPS 2024 —
+self-*recognition* causally drives self-*preference*). So: **re-derive load-bearing
 claims yourself** (open the cited `file:line`, run the recompute) before
 accepting; **eat the fish, throw the bones** — support or veto each distilled
 idea with evidence; **discount shared-prior convergence** (agents agreeing
@@ -163,8 +185,20 @@ outcomes — adding a refactor has real cost.
 
 ## Provenance
 
-The 2026-07-07 architecture run is this skill's worked example and evidence:
+**Worked example** (the loop made concrete): the 2026-07-07 architecture run —
 `docs/audits/architecture-2026-07-07.md`, `docs/audits/architecture-vision/*.md`,
 `docs/audits/refactor-review-2026-07-07.md`, distilled into `docs/adr/0035-*` and
-`docs/adr/0036-*`. Reference material: `reference/personas.md` (persona catalog),
+`docs/adr/0036-*`. Read those for the altitude and the `file:line` rigor.
+
+**Canon & sourcing** (why the methodology holds — skill-forge Round 0):
+`research/01-idiomatic-go-architecture.md`,
+`research/02-clean-architecture-ddd-reusable-modules.md`,
+`research/03-tech-debt-detection-metrics.md`,
+`research/04-architecture-audit-methodology.md` — 66 deep-URL sources with Source
+Ledgers (Go Proverbs / Ben Johnson / Kat Zien; Clean Architecture / Cockburn /
+Evans Shared Kernel; Cunningham / Fowler / Tornhill hotspots; ATAM / premortem /
+fitness functions / LLM self-preference). The SKILL.md stays thin by design; the
+ledgers are the citation of record (progressive disclosure).
+
+**Reference material:** `reference/personas.md` (persona catalog),
 `reference/artifact-template.md` (frontmatter + body template + threading).
