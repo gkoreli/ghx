@@ -32,7 +32,7 @@ mechanical config change, or anything a single sharp pass already nails — the 
 
 | Round | Who | Output |
 |---|---|---|
-| **0 — Research (breadth)** | N background research agents, distinct angles | sourced `research/*.md` artifacts |
+| **0 — Research (breadth)** | wave 1: N agents map the canon; wave 2: a **mandatory** context-re-pricing agent that audits the canon | sourced `research/*.md` artifacts |
 | **1 — Author the draft** | the orchestrator (authorship is *not* delegated) | `SKILL.md` draft + committed research provenance |
 | **2 — Adversarial review (breadth)** | M background reviewers, distinct scopes | ranked `reviews/*.md` critiques |
 | **3 — Reconcile (the judge)** | the orchestrator | accept/decline decisions + a revision |
@@ -43,11 +43,20 @@ mechanical config change, or anything a single sharp pass already nails — the 
 
 ## Round 0 — Delegated research
 
-- **Decompose the domain into ~5 distinct, non-overlapping angles**; one background agent per
-  angle. Include **at least one adversarial/contrarian angle**, and — for any product/tech
-  artifact — a **"does the conventional wisdom still hold in *our* context?"** lens. (In the
-  worked example, that lens — "the consumer is an AI agent, not a human" — was the single
-  most valuable artifact.)
+- **Wave 1 — map the canon.** Decompose the domain into ~4–5 distinct, non-overlapping
+  angles; one background agent per angle — the established frameworks, methods, and expert
+  perspectives.
+- **Wave 2 — the context re-pricing pass (a mandatory default, run it every time, not an
+  angle you hope to notice).** After Wave 1 lands, launch one more agent whose whole job is to
+  **audit the canon against *our* actual context** — "does this conventional wisdom still hold
+  *here*?" It **reads the Wave-1 artifacts** and tags each load-bearing claim
+  HOLDS / ADAPT / OUTDATED-OR-INVERTED, rather than piling on a parallel stream of more
+  research. Time it *after* the canon exists (so it has something to audit) and *before*
+  Round 1 (so its verdicts shape authorship). In the worked example this pass — "the consumer
+  is an AI agent, not a human" — was the single most valuable artifact and produced results
+  (e.g. a headline metric that *inverts*) that additive research would have missed. It only
+  happened there because it was caught mid-flight; making it a standing step is the whole
+  point, so the next skill doesn't depend on someone noticing.
 - **Sourcing discipline is the biggest quality lever — enforce it verbatim on every agent:**
   every substantive claim carries a **specific deep URL** (the exact essay/doc/paper, never a
   homepage) **+ a one-line rationale** for why it is authoritative and why it matters here;
@@ -128,6 +137,11 @@ You are the authoritative judge, and a model adjudicating its own delegated work
   accept/reject call stay in the orchestrator.
 - **Sourcing discipline is the top quality lever** — specific URLs + rationale + verification
   + disclosed degradations + labelled synthesis. Enforce it on every delegated agent.
+- **The context re-pricing pass is a standing Round-0 step, not an afterthought** — one agent
+  that audits the canon ("does this wisdom hold in *our* context?") by reading the other
+  artifacts, not running beside them. It was the highest-leverage step in the worked example
+  and only happened because it was noticed mid-flight — which is exactly why it must be a
+  default.
 - **Commit artifacts as provenance;** the skill should ship with its evidence, every claim
   recomputable (matches `AGENTS.md` Evidence Contract & Visibility/Truthfulness).
 - **Front-load the run-spine;** harnesses may truncate long docs.
