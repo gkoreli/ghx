@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -153,9 +154,11 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 		w.shutdownLocked()
 		return TurnResult{}, "", err
 	}
+	cancelBridgeDone := w.cancelTurnOnRequestDoneLocked(ctx)
+	defer close(cancelBridgeDone)
 	result, sessionID, err := w.configureSession(ctx, opts, live)
 	if err != nil {
-		if IsPeerClosedError(err) {
+		if IsPeerClosedError(err) || ctx.Err() != nil {
 			w.shutdownLocked()
 		}
 		return result, sessionID, err
@@ -164,7 +167,7 @@ func (w *AgentWorker) RunTurn(ctx context.Context, opts RunTurnOptions) (TurnRes
 	if result.AgentInfo == nil {
 		result.AgentInfo = w.agentInfo
 	}
-	if err != nil && IsPeerClosedError(err) {
+	if err != nil && (IsPeerClosedError(err) || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		w.shutdownLocked()
 	}
 	return result, sessionID, err
@@ -182,7 +185,7 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 		return nil
 	}
 	liveness := resolveLivenessTimeout(opts.LivenessTimeout)
-	w.turnCtx, w.cancelTurnCtx = context.WithCancelCause(context.Background())
+	w.turnCtx, w.cancelTurnCtx = context.WithCancelCause(context.WithoutCancel(ctx))
 	agentBin, agentArgs := splitAgentCmd(w.cfg.AgentCmd)
 	if opts.AgentCmd != "" {
 		agentBin, agentArgs = splitAgentCmd(opts.AgentCmd)
@@ -241,6 +244,22 @@ func (w *AgentWorker) ensureStarted(ctx context.Context, opts RunTurnOptions) er
 		w.agentInfo = &ImplementationInfo{Name: initResp.AgentInfo.Name, Version: initResp.AgentInfo.Version, Meta: initResp.AgentInfo.Meta}
 	}
 	return nil
+}
+
+func (w *AgentWorker) cancelTurnOnRequestDoneLocked(ctx context.Context) chan struct{} {
+	done := make(chan struct{})
+	cancel := w.cancelTurnCtx
+	if cancel == nil {
+		return done
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel(ctx.Err())
+		case <-done:
+		}
+	}()
+	return done
 }
 
 func (w *AgentWorker) configureSession(ctx context.Context, opts RunTurnOptions, live *LiveLog) (TurnResult, string, error) {

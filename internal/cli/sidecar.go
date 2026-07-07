@@ -144,7 +144,9 @@ foreground to watch its logs; ` + "`--stop`" + ` asks a running daemon to shut d
 			return sidecar.ShutdownDaemon(context.Background(), VERSION, sidecar.LoadConfig())
 		}
 		cfg := sidecar.LoadConfig()
-		return sidecar.RunDaemon(context.Background(), VERSION, cfg)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		return sidecar.RunDaemon(ctx, VERSION, cfg)
 	},
 }
 

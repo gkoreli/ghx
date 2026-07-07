@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,14 +69,20 @@ type AskResponse struct {
 
 // DaemonServer owns the local JSON-RPC socket and warm sidecar runtime.
 type DaemonServer struct {
-	version string
-	cfg     Config
-	pool    *AgentPool
-	meta    DaemonMetadata
-	ln      net.Listener
-	stop    chan struct{}
-	once    sync.Once
+	version   string
+	cfg       Config
+	pool      *AgentPool
+	meta      DaemonMetadata
+	ln        net.Listener
+	stop      chan struct{}
+	once      sync.Once
+	mu        sync.Mutex
+	drain     sync.WaitGroup
+	draining  bool
+	runnerFor func(session string, cfg Config) TurnRunner
 }
+
+var daemonDrainTimeout = 30 * time.Second
 
 // RunDaemon starts the foreground daemon and blocks until shutdown.
 func RunDaemon(ctx context.Context, version string, cfg Config) error {
@@ -107,7 +114,15 @@ func NewDaemonServer(version string, cfg Config) (*DaemonServer, error) {
 		StartedAt:    time.Now().UTC(),
 		ExePath:      exe,
 	}
-	return &DaemonServer{version: version, cfg: cfg, pool: NewAgentPoolForConfig(cfg), meta: meta, stop: make(chan struct{})}, nil
+	pool := NewAgentPoolForConfig(cfg)
+	return &DaemonServer{
+		version:   version,
+		cfg:       cfg,
+		pool:      pool,
+		meta:      meta,
+		stop:      make(chan struct{}),
+		runnerFor: pool.RunnerFor,
+	}, nil
 }
 
 // Serve accepts newline-delimited JSON-RPC requests on the daemon socket.
@@ -127,6 +142,7 @@ func (s *DaemonServer) Serve(ctx context.Context) error {
 		return err
 	}
 	defer func() {
+		s.waitForDrain(daemonDrainTimeout)
 		s.pool.Shutdown()
 		_ = ln.Close()
 		_ = os.Remove(s.meta.Socket)
@@ -148,18 +164,51 @@ func (s *DaemonServer) Serve(ctx context.Context) error {
 				return err
 			}
 		}
-		go s.handleConn(conn)
+		go s.handleConn(ctx, conn)
 	}
 }
 
 // Shutdown stops the socket accept loop and warm workers.
 func (s *DaemonServer) Shutdown() {
 	s.once.Do(func() {
+		s.mu.Lock()
+		s.draining = true
+		s.mu.Unlock()
 		close(s.stop)
 		if s.ln != nil {
 			_ = s.ln.Close()
 		}
 	})
+}
+
+func (s *DaemonServer) beginAsk() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return errors.New("sidecar daemon is shutting down")
+	}
+	s.drain.Add(1)
+	return nil
+}
+
+func (s *DaemonServer) endAsk() {
+	s.drain.Done()
+}
+
+func (s *DaemonServer) waitForDrain(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		s.drain.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
 
 type rpcRequest struct {
@@ -181,7 +230,7 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func (s *DaemonServer) handleConn(conn net.Conn) {
+func (s *DaemonServer) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	sc := bufio.NewScanner(conn)
 	enc := json.NewEncoder(conn)
@@ -191,15 +240,73 @@ func (s *DaemonServer) handleConn(conn net.Conn) {
 			_ = enc.Encode(rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: err.Error()}})
 			continue
 		}
-		resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
-		result, err := s.dispatch(context.Background(), req)
-		if err != nil {
-			resp.Error = &rpcError{Code: -32000, Message: err.Error()}
-		} else {
-			resp.Result = result
-		}
+		resp := s.handleRPCRequest(ctx, conn, req)
 		_ = enc.Encode(resp)
 	}
+}
+
+func (s *DaemonServer) handleRPCRequest(ctx context.Context, conn net.Conn, req rpcRequest) (resp rpcResponse) {
+	resp = rpcResponse{JSONRPC: "2.0", ID: req.ID}
+	reqCtx, cancel := context.WithCancel(ctx)
+	var watchDone chan struct{}
+	var watchStopped <-chan struct{}
+	if req.Method == "ghx.sidecar.Ask" {
+		watchDone, watchStopped = s.watchConnClosed(reqCtx, conn, cancel)
+	}
+	defer func() {
+		cancel()
+		if watchDone != nil {
+			close(watchDone)
+			_ = conn.SetReadDeadline(time.Now())
+			<-watchStopped
+			_ = conn.SetReadDeadline(time.Time{})
+		}
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "sidecar daemon recovered panic in %s: %v\n%s", req.Method, r, debug.Stack())
+			resp.Result = nil
+			resp.Error = &rpcError{Code: -32603, Message: fmt.Sprintf("internal daemon panic while handling %s", req.Method)}
+		}
+	}()
+	result, err := s.dispatch(reqCtx, req)
+	if err != nil {
+		resp.Error = &rpcError{Code: -32000, Message: err.Error()}
+		return resp
+	}
+	resp.Result = result
+	return resp
+}
+
+func (s *DaemonServer) watchConnClosed(ctx context.Context, conn net.Conn, cancel context.CancelFunc) (chan struct{}, <-chan struct{}) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		var buf [1]byte
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			default:
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := conn.Read(buf[:])
+			if err == nil && n > 0 {
+				cancel()
+				return
+			}
+			if err == nil {
+				continue
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			cancel()
+			return
+		}
+	}()
+	return done, stopped
 }
 
 func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error) {
@@ -207,6 +314,10 @@ func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error
 	case "ghx.sidecar.Ping":
 		return DaemonPing{PID: s.meta.PID, Version: s.meta.Version, ConfigDigest: s.meta.ConfigDigest, Socket: s.meta.Socket, StartedAt: s.meta.StartedAt, ExePath: s.meta.ExePath}, nil
 	case "ghx.sidecar.Ask":
+		if err := s.beginAsk(); err != nil {
+			return nil, err
+		}
+		defer s.endAsk()
 		var ask AskRequest
 		if err := json.Unmarshal(req.Params, &ask); err != nil {
 			return nil, err
@@ -216,7 +327,11 @@ func (s *DaemonServer) dispatch(ctx context.Context, req rpcRequest) (any, error
 		// ask so it is emitted exactly once).
 		decision := RouteQuestion(s.cfg.SessionsDir, ask, RouteConfigFor(s.cfg))
 		ask.Session = decision.Session
-		runner := s.pool.RunnerFor(ask.Session, s.cfg)
+		runnerFor := s.runnerFor
+		if runnerFor == nil {
+			runnerFor = s.pool.RunnerFor
+		}
+		runner := runnerFor(ask.Session, s.cfg)
 		report, turn, err := AskWithTurnRunner(ctx, s.cfg, ask, runner, &decision)
 		if err != nil {
 			return nil, err
@@ -537,9 +652,28 @@ func (c DaemonClient) call(ctx context.Context, method string, params any) (any,
 		return nil, ctx.Err()
 	default:
 	}
+	respCh := make(chan struct {
+		resp rpcResponse
+		err  error
+	}, 1)
+	go func() {
+		var resp rpcResponse
+		err := json.NewDecoder(conn).Decode(&resp)
+		respCh <- struct {
+			resp rpcResponse
+			err  error
+		}{resp: resp, err: err}
+	}()
 	var resp rpcResponse
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return nil, err
+	select {
+	case <-ctx.Done():
+		_ = conn.Close()
+		return nil, ctx.Err()
+	case got := <-respCh:
+		if got.err != nil {
+			return nil, got.err
+		}
+		resp = got.resp
 	}
 	if resp.Error != nil {
 		return nil, errors.New(resp.Error.Message)
