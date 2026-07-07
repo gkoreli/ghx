@@ -2,8 +2,6 @@ package ghx
 
 import (
 	"fmt"
-
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 type FileEntry struct {
@@ -28,7 +26,7 @@ func Explore(repo string, path string) (*ExploreResult, error) {
 	owner := parsedRepo.Owner
 	name := parsedRepo.Name
 
-	gql, err := api.DefaultGraphQLClient()
+	gql, err := githubClients.GraphQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}

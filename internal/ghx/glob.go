@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 // treeEntry represents a single entry from the Git Trees API.
@@ -16,7 +15,7 @@ type treeEntry struct {
 
 // fetchTree returns the full recursive tree for a repo via the Git Trees API (one REST call).
 func fetchTree(repo Repo) ([]treeEntry, error) {
-	gql, err := api.DefaultGraphQLClient()
+	gql, err := githubClients.GraphQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}
@@ -44,7 +43,7 @@ func fetchTree(repo Repo) ([]treeEntry, error) {
 		return nil, fmt.Errorf("could not determine default branch")
 	}
 
-	rest, err := api.DefaultRESTClient()
+	rest, err := githubClients.REST()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST client: %w", err)
 	}

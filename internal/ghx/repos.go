@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 // RepoResult holds one search result
@@ -32,7 +30,7 @@ func Repos(query string, opts ReposOpts) ([]RepoResult, int, error) {
 		limit = 20
 	}
 
-	gql, err := api.DefaultGraphQLClient()
+	gql, err := githubClients.GraphQL()
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}

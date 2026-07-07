@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/gkoreli/ghx/v2/internal/mapengine"
 )
 
@@ -90,7 +89,7 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 		return nil, nil
 	}
 
-	gql, err := api.DefaultGraphQLClient()
+	gql, err := githubClients.GraphQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}

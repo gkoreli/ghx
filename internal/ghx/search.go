@@ -37,7 +37,7 @@ func Search(query string, opts SearchOpts) (*SearchResult, error) {
 		limit = 100
 	}
 
-	rest, err := api.NewRESTClient(api.ClientOptions{
+	rest, err := githubClients.RESTWithOptions(api.ClientOptions{
 		Headers: map[string]string{"Accept": "application/vnd.github.text-match+json"},
 	})
 	if err != nil {
