@@ -18,11 +18,29 @@ const (
 // --recon`. The marshaled JSON (name, description, input schema) is the
 // frozen identity ADR-0032.1 S3 hashes into host-task run manifests, so any
 // change here is a measurement-identity change for host-task evals.
+//
+// Params: question (required), plus optional smart-defaulted scope — repo
+// (omit for cross-GitHub discovery, ADR-0019.1) and session (advanced pin;
+// ghx routes follow-ups automatically otherwise, ADR-0030.1). The common
+// case needs only question. The depth dial (NORTH_STAR capability 3) is
+// flagged for a follow-up that lands here and in the serve handler together
+// — see the note in the tool body.
 func ReconMCPTool() mcp.Tool {
 	return mcp.NewTool(ReconToolName,
-		mcp.WithDescription("Ask ghx repo questions in English; returns a compact, auditable evidence report. Delegate the whole reconnaissance question instead of step-driving repository exploration. Follow-up questions are routed to the right investigation session automatically (the route is reported with each answer)."),
-		mcp.WithString("question", mcp.Required(), mcp.Description("English question about the repo")),
-		mcp.WithString("repo", mcp.Description("owner/repo (optional scope; omit for cross-GitHub discovery questions like \"which repos do X\")")),
-		mcp.WithString("session", mcp.Description("advanced: pin a specific session; normally omit — ghx routes for you (ADR-0030.1)")),
+		mcp.WithDescription("Delegate a whole code-reconnaissance question to the ghx sidecar and get back a compact, auditable evidence report. ghx explores GitHub for you — do not step-drive repository exploration yourself; ask the goal in plain English and let ghx do the reading, mapping, and searching under the hood.\n\nThe report contains: answer (the direct answer); verified (claims ghx backed by evidence it actually read — trust these); evidence / relevantFiles (the sources and where to look); uncertainty / nextReads (what it could not confirm and what to read next). Every answer ends with an artifacts pointer (session dir + trace id) — the on-disk audit trail behind the report. Follow-up questions are routed to the right investigation session automatically, and the route is reported with each answer, so you never manage sessions yourself. A fresh question takes tens of seconds; follow-ups on the same thread are faster."),
+		mcp.WithString("question", mcp.Required(), mcp.Description("The reconnaissance goal, in plain English. State what you want to know, not how to find it: \"How does hono implement middleware chaining, and which files define it?\" beats \"grep for middleware\". One question per call — follow up rather than bundling several asks together.")),
+		mcp.WithString("repo", mcp.Description("owner/repo to scope the question to one repository. Optional: omit it for discovery questions that sweep across GitHub (\"which repos / libraries do X\") — ghx finds and verifies the candidates itself.")),
+		mcp.WithString("session", mcp.Description("Advanced, rarely needed: pin this call to a specific investigation thread. Normally omit — ghx routes follow-ups to the right session for you.")),
+		// FLAGGED FOR FABLE (depth dial, deliberately NOT shipped here): the
+		// north star wants the consumer surface to expose depth (cheap|normal|
+		// deep) as a smart-defaulted dial (NORTH_STAR capability 3). The plumbing
+		// exists — AskRequest.Depth → depthBudgets (session_options.go), already
+		// on the CLI as `--depth`. Adding it to this tool is a two-file atomic
+		// change: (1) a `depth` mcp.WithString param here, (2) handleRecon in
+		// internal/cli/serve.go reading request.GetString("depth","normal") and
+		// forwarding it instead of the hardcoded "normal". serve.go is owned by
+		// the CLI worker this round, so the param is withheld rather than shipped
+		// as a schema field the handler silently ignores. Both are ADR-0032.1 S3
+		// measurement-identity changes — land together.
 	)
 }

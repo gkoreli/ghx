@@ -12,40 +12,36 @@ metadata:
 
 # ghx — code reconnaissance service
 
-ghx is a specialist agent that explores GitHub repos for you. Ask it
-questions in plain English; it returns a compact evidence report. Never
-explore a remote repo step-by-step yourself — delegate the whole question.
+ghx is a specialist agent that explores GitHub for you. Ask it a question
+in plain English; it returns a compact evidence report. Never explore a
+remote repo step-by-step yourself — delegate the whole question and let ghx
+do the reading, mapping, and searching under the hood.
 
 ## Ask
 
-    ghx sidecar ask [--repo <owner/repo>] "<question>"
+Send ghx one English question. Two entry points, same service:
 
-Give --repo when you know the repo. Omit it for discovery questions —
-"which repos/libraries do X" — and the sidecar sweeps GitHub, verifies
-top candidates, and ranks them. Normally omit --session too: the daemon
-routes each ask — explicit --session pins a thread, a repo mention routes
-to the repo-slug session, else a warm continuation, then ledger overlap,
-then a new question-derived discovery session — and prints the route as
-"session: <name> (routed: <rule>)". Add --json for the full structured
-report wrapped as {report, artifacts}.
+- MCP: the `recon` tool — `recon(question, repo?)`.
+- CLI: `ghx sidecar ask "<question>"`.
+
+Name a repo when you know it. Leave it out for discovery questions — "which
+repos or libraries do X" — and ghx sweeps GitHub, verifies the top
+candidates by reading them, and ranks them.
 
 ## Asking well
 
-State the goal, not the steps: "How does hono implement middleware
-chaining, and which files define it?" beats "run grep for middleware".
-One investigation per question; follow up rather than bundling.
+State the goal, not the steps: "How does hono implement middleware chaining,
+and which files define it?" beats "run grep for middleware". One
+investigation per question; follow up rather than bundling. Follow-ups stay
+on the right thread automatically — you never manage sessions.
 
 ## Reading the report
 
-- answer — the direct answer
-- verified — claims backed by evidence the sidecar actually read
-- relevantFiles / evidence — where to look and what each source showed
-- uncertainty / nextReads — what it could not confirm and what to read next
+- answer — the direct answer.
+- verified — claims ghx backed by evidence it actually read; trust these.
+- relevantFiles / evidence — where to look and what each source showed.
+- uncertainty / nextReads — what it could not confirm, and what to read next.
 
-Every response ends with "artifacts: <session dir> (trace <id>)" — the
-on-disk audit trail (traces, logs, reports) backing the report.
-If a turn lands in the wrong session, correct it with
-`ghx sidecar sessions reroute <session> <turn> <dest>`.
-
-Trust verified claims; treat inferred/unverified ones as leads. A fresh
-question takes tens of seconds; session follow-ups are faster.
+Every answer ends with an artifacts pointer (session dir + trace id): the
+on-disk audit trail behind the report. Treat inferred or unverified claims
+as leads. A fresh question takes tens of seconds; follow-ups are faster.
