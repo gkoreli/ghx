@@ -1,0 +1,26 @@
+{
+  "id": "mux-status-code-conformance",
+  "objective": "gorilla/mux returns an inconsistent HTTP status when a path is registered under multiple methods and a GET request fails only the GET route's query-value constraint. Per HTTP semantics the router should surface Not Found (ErrNotFound / 404) because no route fully matches the request, but mux instead leaves ErrMethodMismatch (405) set from the sibling POST route. Make Route.Match conform to the correct status: when a candidate route matches the path/method but its query constraint is unsatisfied, a lingering ErrMethodMismatch from other candidates must be cleared so the router reports ErrNotFound, while a genuine method-only mismatch on a valid path still reports ErrMethodMismatch.",
+  "workspaceRepo": "gorilla/mux",
+  "pinnedSha": "24c3e7f499efd8b1429cfe789c7e6a3631357045",
+  "image": "golang:1.24-bookworm",
+  "network": "none",
+  "setupCmds": [
+    "cd /workspace && go mod download",
+    "cat > /workspace/ghx_f2p_test.go <<'GHXEOF'\npackage mux\n\nimport (\n\t\"net/http\"\n\t\"testing\"\n)\n\n// Hidden F2P conformance test (ADR-0032.1 S4). A GET whose only GET route has an\n// unsatisfied query constraint, sharing its path with a POST route, must yield\n// ErrNotFound (404), not ErrMethodMismatch (405).\nfunc TestGHXConformanceInvalidQueryIsNotFound(t *testing.T) {\n\temptyHandler := func(w http.ResponseWriter, r *http.Request) {}\n\tr := NewRouter()\n\tr.HandleFunc(\"/api\", emptyHandler).Methods(\"POST\")\n\tr.HandleFunc(\"/api\", emptyHandler).Queries(\"time\", \"{time:[0-9]+}\").Methods(\"GET\")\n\treq, _ := http.NewRequest(\"GET\", \"http://localhost/api?time=-4\", nil)\n\tmatch := new(RouteMatch)\n\tif r.Match(req, match) {\n\t\tt.Fatal(\"should not match: query constraint unsatisfied\")\n\t}\n\tif match.MatchErr != ErrNotFound {\n\t\tt.Fatalf(\"MatchErr = %v, want ErrNotFound (404 conformance)\", match.MatchErr)\n\t}\n}\nGHXEOF"
+  ],
+  "failToPassCmds": [
+    "cd /workspace && go test . -run TestGHXConformanceInvalidQueryIsNotFound -count=1"
+  ],
+  "passToPassCmds": [
+    "cd /workspace && go test . -run 'TestNoMatchMethodErrorHandler|TestErrMatchNotFound' -count=1"
+  ],
+  "explorationSubQuestions": [
+    {
+      "question": "In gorilla/mux Route.Match at this pinned revision, when a path/method candidate route is rejected because its query constraint is unsatisfied, is a match.MatchErr==ErrMethodMismatch (set by a sibling method-only route) cleared, and what is the correct HTTP status the router should ultimately report for that request?",
+      "groundTruth": "At this revision the query-mismatch branch does NOT clear a sibling ErrMethodMismatch, so the router wrongly reports 405; the conforming fix clears match.MatchErr to nil in that branch when it is ErrMethodMismatch, so the outer matcher reports ErrNotFound (404) since no route fully matches.",
+      "verifiedAt": "2026-07-06"
+    }
+  ],
+  "memorizationCanary": { "checkedAt": "2026-07-06", "result": "pass" }
+}

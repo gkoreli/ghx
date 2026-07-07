@@ -1,0 +1,31 @@
+{
+  "id": "chi-fancywriter-readfrom-tee",
+  "objective": "In go-chi/chi, the middleware WrapResponseWriter reports twice the real byte count from BytesWritten() when a Tee writer is attached and the response is streamed through ReadFrom (io.ReaderFrom). Access-log and metrics middleware built on WrapResponseWriter therefore double-count response sizes for any Tee'd, ReadFrom-served response. Find the root cause in the middleware response-writer wrapper and fix BytesWritten() so it equals the number of bytes actually written, without breaking the non-Tee ReadFrom fast path.",
+  "workspaceRepo": "go-chi/chi",
+  "pinnedSha": "a54874f0e2f12647a19e82ee70dfa8185014100c",
+  "image": "golang:1.24-bookworm",
+  "network": "none",
+  "setupCmds": [
+    "cd /workspace && go mod download",
+    "cat > /workspace/middleware/ghx_f2p_test.go <<'GHXEOF'\npackage middleware\n\nimport (\n\t\"bytes\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"strings\"\n\t\"testing\"\n)\n\n// Hidden F2P regression test (ADR-0032.1 S4). httpFancyWriter.ReadFrom must\n// not double-count bytes when a Tee writer routes writes through\n// basicWriter.Write (which already increments the counter).\nfunc TestGHXReadFromTeeByteCount(t *testing.T) {\n\toriginal := &httptest.ResponseRecorder{HeaderMap: make(http.Header), Body: new(bytes.Buffer)}\n\tf := &httpFancyWriter{basicWriter: basicWriter{ResponseWriter: original}}\n\tvar teeBuf bytes.Buffer\n\tf.Tee(&teeBuf)\n\tconst input = \"hello world\"\n\tn, err := f.ReadFrom(strings.NewReader(input))\n\tif err != nil {\n\t\tt.Fatalf(\"ReadFrom error: %v\", err)\n\t}\n\tif n != int64(len(input)) {\n\t\tt.Fatalf(\"ReadFrom n = %d, want %d\", n, len(input))\n\t}\n\tif got := f.BytesWritten(); got != len(input) {\n\t\tt.Fatalf(\"BytesWritten() = %d, want %d (bug double-counts)\", got, len(input))\n\t}\n\tif !bytes.Equal(teeBuf.Bytes(), []byte(input)) {\n\t\tt.Fatalf(\"tee buffer = %q, want %q\", teeBuf.Bytes(), input)\n\t}\n}\nGHXEOF"
+  ],
+  "failToPassCmds": [
+    "cd /workspace && go test ./middleware -run TestGHXReadFromTeeByteCount -count=1"
+  ],
+  "passToPassCmds": [
+    "cd /workspace && go test ./middleware -run TestBasicWriterDiscardsWritesToOriginalResponseWriter -count=1"
+  ],
+  "explorationSubQuestions": [
+    {
+      "question": "In the middleware response-writer wrapper at this pinned revision, which concrete type's ReadFrom method handles the Tee case, and does the write it performs (io.Copy through basicWriter) already increment the byte counter?",
+      "groundTruth": "httpFancyWriter.ReadFrom handles the Tee case via io.Copy(&f.basicWriter, r); basicWriter.Write already increments basicWriter.bytes, so the extra `f.basicWriter.bytes += int(n)` after the copy double-counts.",
+      "verifiedAt": "2026-07-06"
+    },
+    {
+      "question": "Why must the NON-Tee ReadFrom path still add n to the byte counter itself?",
+      "groundTruth": "The non-Tee path delegates to the underlying ResponseWriter's io.ReaderFrom, which bypasses basicWriter.Write, so that branch must add n itself; only the Tee branch double-counts.",
+      "verifiedAt": "2026-07-06"
+    }
+  ],
+  "memorizationCanary": { "checkedAt": "2026-07-06", "result": "pass" }
+}

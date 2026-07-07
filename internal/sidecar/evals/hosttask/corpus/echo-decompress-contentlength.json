@@ -1,0 +1,26 @@
+{
+  "id": "echo-decompress-contentlength",
+  "objective": "In labstack/echo, the Decompress middleware swaps the request body for a gzip reader but leaves Request.ContentLength set to the COMPRESSED size. Downstream middleware that trusts ContentLength as the decoded body size — notably BodyLimit — then rejects or mis-sizes requests, because after streaming decompression the decoded length is unknown. Align the Decompress middleware with the net/http contract that ContentLength must be -1 (unknown) once the body is a stream whose length is not known ahead of time, so BodyLimit measures the actual decoded bytes rather than the compressed count.",
+  "workspaceRepo": "labstack/echo",
+  "pinnedSha": "6a390cb5a791c12993140e00e66090e67511b9a0",
+  "image": "golang:1.24-bookworm",
+  "network": "none",
+  "setupCmds": [
+    "cd /workspace && go mod download",
+    "cat > /workspace/middleware/ghx_f2p_test.go <<'GHXEOF'\npackage middleware\n\nimport (\n\t\"bytes\"\n\t\"io\"\n\t\"net/http\"\n\t\"net/http/httptest\"\n\t\"testing\"\n\n\t\"github.com/labstack/echo/v5\"\n\t\"github.com/stretchr/testify/assert\"\n)\n\n// Hidden F2P test (ADR-0032.1 S4). After Decompress replaces the body with the\n// gzip stream, ContentLength must be -1 so BodyLimit sizes the DECODED body,\n// not the compressed request length.\nfunc TestGHXBodyLimitAfterDecompressUsesDecodedSize(t *testing.T) {\n\te := echo.New()\n\tbody := \"ok\"\n\tgz, err := gzipString(body)\n\tassert.NoError(t, err)\n\tassert.Greater(t, len(gz), len(body))\n\n\treq := httptest.NewRequest(http.MethodPost, \"/\", bytes.NewReader(gz))\n\treq.Header.Set(echo.HeaderContentEncoding, GZIPEncoding)\n\trec := httptest.NewRecorder()\n\tc := e.NewContext(req, rec)\n\n\terr = Decompress()(BodyLimit(int64(len(body)))(func(c *echo.Context) error {\n\t\tb, readErr := io.ReadAll(c.Request().Body)\n\t\tif readErr != nil {\n\t\t\treturn readErr\n\t\t}\n\t\treturn c.String(http.StatusOK, string(b))\n\t}))(c)\n\tassert.NoError(t, err)\n\tassert.Equal(t, http.StatusOK, rec.Code)\n\tassert.Equal(t, body, rec.Body.String())\n}\nGHXEOF"
+  ],
+  "failToPassCmds": [
+    "cd /workspace && go test ./middleware -run TestGHXBodyLimitAfterDecompressUsesDecodedSize -count=1"
+  ],
+  "passToPassCmds": [
+    "cd /workspace && go test ./middleware -run 'TestDecompress$|TestBodyLimitReader' -count=1"
+  ],
+  "explorationSubQuestions": [
+    {
+      "question": "After echo's Decompress middleware replaces the request body with a gzip.Reader stream at this pinned revision, what value must Request.ContentLength hold per the net/http convention, and which downstream middleware misbehaves if it is left as the compressed length?",
+      "groundTruth": "Per net/http, ContentLength must be -1 when the body length is unknown (a decompression stream), so Decompress must set c.Request().ContentLength = -1 after swapping the body; otherwise BodyLimit compares against the compressed Content-Length and can reject or mis-size valid requests.",
+      "verifiedAt": "2026-07-06"
+    }
+  ],
+  "memorizationCanary": { "checkedAt": "2026-07-06", "result": "pass" }
+}

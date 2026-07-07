@@ -54,6 +54,12 @@ type SubQuestion struct {
 type Fixture struct {
 	// ID is the stable fixture identity; a safe path segment.
 	ID string `json:"id"`
+	// Objective is the issue/prompt text the host agent is asked to resolve —
+	// the task statement a run drives the host with (it rides on
+	// HostTrial.Objective at run time, ADR-0032.1 S3). Additive and optional
+	// so S1/S2/S3 fixtures that predate the corpus still validate; every S4
+	// corpus fixture carries it and RequireCorpusReady enforces its presence.
+	Objective string `json:"objective,omitempty"`
 	// WorkspaceRepo is the "owner/repo" GitHub repository used as the host
 	// agent's workspace.
 	WorkspaceRepo string `json:"workspaceRepo"`
@@ -155,6 +161,22 @@ func (f Fixture) Validate() error {
 	return nil
 }
 
+// RequireCorpusReady is the stricter check a committed S4 corpus fixture must
+// pass, layered on Validate: it additionally requires the run-driving issue
+// text. Validate keeps Objective optional so the S1–S3 schema example and unit
+// fixtures (which never carry issue text) still validate; the corpus loader
+// (LoadCorpus) applies this stricter gate so a real corpus fixture is never
+// committed without the prompt the host is actually run with.
+func (f Fixture) RequireCorpusReady() error {
+	if err := f.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.Objective) == "" {
+		return fmt.Errorf("fixture %s: objective (issue/prompt text) is required for a corpus fixture (ADR-0032.1 S4)", f.ID)
+	}
+	return nil
+}
+
 // validDate checks a YYYY-MM-DD provenance date.
 func validDate(s string) error {
 	if !dateRE.MatchString(s) {
@@ -167,8 +189,26 @@ func validDate(s string) error {
 }
 
 // LoadFixtures reads and validates all fixture files (*.json) in dir, sorted
-// by filename so runs are deterministic (mirrors evals.LoadTasks).
+// by filename so runs are deterministic (mirrors evals.LoadTasks). It applies
+// the base schema gate (Validate); use LoadCorpus for the stricter, corpus
+// gate that also requires the run-driving issue text.
 func LoadFixtures(dir string) ([]Fixture, error) {
+	return loadFixtures(dir, Fixture.Validate)
+}
+
+// LoadCorpus reads the committed S4 host-task corpus from dir, applying the
+// stricter RequireCorpusReady gate so a corpus fixture is never loaded without
+// its objective. This is the entry point the eval runner uses on the real
+// corpus (ADR-0032.1 S4); LoadFixtures stays the lenient schema-only loader
+// the S1–S3 tests exercise.
+func LoadCorpus(dir string) ([]Fixture, error) {
+	return loadFixtures(dir, Fixture.RequireCorpusReady)
+}
+
+// loadFixtures reads, parses, and validates every *.json fixture in dir with
+// the given per-fixture gate, in deterministic filename order, rejecting
+// duplicate ids.
+func loadFixtures(dir string, gate func(Fixture) error) ([]Fixture, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read fixtures dir: %w", err)
@@ -192,7 +232,7 @@ func LoadFixtures(dir string) ([]Fixture, error) {
 		if err := json.Unmarshal(data, &f); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", name, err)
 		}
-		if err := f.Validate(); err != nil {
+		if err := gate(f); err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		if prev, dup := seen[f.ID]; dup {
