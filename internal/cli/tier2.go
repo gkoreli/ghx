@@ -37,7 +37,7 @@ func tier2Snapshot(cmd *cobra.Command, svc *tier2.Service, repo string) (tier2.S
 		Repo: repo, Ref: ref, SparsePaths: sparse,
 	})
 	if err != nil {
-		return snap, WithExitCode(ExitUpstreamFailure, err)
+		return snap, upstreamError(err)
 	}
 	for _, e := range snap.Evictions {
 		fmt.Fprintf(os.Stderr, "# tier2 evicted: %s@%s reason=%s freed=%dB\n", e.Repo, shortSHA(e.SHA), e.Reason, e.FreedBytes)
@@ -106,7 +106,7 @@ codemap is not installed (install hint included); no clone happens in that case.
 			if errors.Is(err, tier2.ErrCodemapNotInstalled) {
 				fmt.Fprintln(os.Stderr, tier2.CodemapInstallHint)
 			}
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 
 		snap, err := tier2Snapshot(cmd, svc, args[0])
@@ -122,7 +122,7 @@ codemap is not installed (install hint included); no clone happens in that case.
 			if run.Stderr != "" {
 				fmt.Fprint(os.Stderr, run.Stderr)
 			}
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Print(run.Stdout)
 		return nil
@@ -157,7 +157,7 @@ exit 3 when ast-grep is not installed. Patterns pass through to ast-grep verbati
 			if errors.Is(err, tier2.ErrAstGrepNotInstalled) {
 				fmt.Fprintln(os.Stderr, tier2.AstGrepInstallHint)
 			}
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 
 		snap, err := tier2Snapshot(cmd, svc, args[0])
@@ -171,7 +171,7 @@ exit 3 when ast-grep is not installed. Patterns pass through to ast-grep verbati
 			if run.Stderr != "" {
 				fmt.Fprint(os.Stderr, run.Stderr)
 			}
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Print(run.Stdout)
 		if !run.Matched() {
@@ -215,7 +215,7 @@ external binary required.`,
 
 		result, err := svc.RunRepomap(cmd.Context(), snap, req)
 		if err != nil {
-			return WithExitCode(ExitUpstreamFailure, err)
+			return upstreamError(err)
 		}
 		fmt.Fprintln(os.Stderr, "# "+result.String())
 		out, err := json.MarshalIndent(result, "", "  ")

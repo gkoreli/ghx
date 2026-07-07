@@ -24,7 +24,7 @@ type ExploreResult struct {
 func Explore(repo string, path string) (*ExploreResult, error) {
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid repo format, expected owner/name")
+		return nil, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx explore gkoreli/ghx", repo)
 	}
 	owner := parts[0]
 	name := parts[1]
