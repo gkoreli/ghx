@@ -66,6 +66,21 @@
 //     check — the subject model was asked for the fix from the issue text
 //     alone, with no repository access. result "pass" means no from-weights
 //     fix appeared; a "fail" fixture is disqualified and Validate rejects it.
+//   - objective (S4, additive/optional): the issue/prompt text the host is
+//     run with. Validate keeps it optional so the S1–S3 example and unit
+//     fixtures still validate; the committed corpus carries it and LoadCorpus
+//     enforces it (RequireCorpusReady).
+//
+// # Committed corpus (S4)
+//
+// The six hand-authored tasks (ADR-0032.1 D3) live as committed JSON under
+// corpus/ with a provenance README. LoadFixtures is the lenient schema-only
+// loader the S1–S3 tests use against testdata/fixtures; LoadCorpus is the
+// strict loader for the real corpus/ directory — it additionally requires the
+// objective. Each corpus fixture pins its workspace repo at the commit just
+// before an upstream fix (bug present at pinnedSha) and injects its hidden F2P
+// test via a setup command, so the agent never sees the grading criterion
+// (SWE-bench's hidden-test invariant, expressed with the existing schema).
 //
 // # Provisioner
 //

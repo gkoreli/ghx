@@ -1,0 +1,26 @@
+{
+  "id": "mux-multi-query-same-path",
+  "objective": "In gorilla/mux, when two routes share the same path but differ only by their query-parameter constraints (e.g. GET /api?foo=... and GET /api?bar=...), a request that satisfies the SECOND route's query is not matched: Route.Match leaves a stale method-mismatch error set from the first candidate route and returns it instead of clearing it once a later route fully matches. Find the method-mismatch clearing logic in Route.Match and fix it so a request matching any same-path route (regardless of which earlier candidate set a mismatch error) matches cleanly with no MatchErr.",
+  "workspaceRepo": "gorilla/mux",
+  "pinnedSha": "2b030fc311d07b8c5950807800b03b2d32a7142c",
+  "image": "golang:1.24-bookworm",
+  "network": "none",
+  "setupCmds": [
+    "cd /workspace && go mod download",
+    "cat > /workspace/ghx_f2p_test.go <<'GHXEOF'\npackage mux\n\nimport (\n\t\"net/http\"\n\t\"testing\"\n)\n\n// Hidden F2P regression test (ADR-0032.1 S4). Two same-path routes that differ\n// only by query constraints: a request matching the second must match cleanly.\nfunc TestGHXMultipleQueriesSamePath(t *testing.T) {\n\temptyHandler := func(w http.ResponseWriter, r *http.Request) {}\n\tr := NewRouter()\n\tr.HandleFunc(\"/api\", emptyHandler).Queries(\"foo\", \"{foo:[0-9]+}\").Methods(http.MethodGet)\n\tr.HandleFunc(\"/api\", emptyHandler).Queries(\"bar\", \"{bar:[0-9]+}\").Methods(http.MethodGet)\n\treq, _ := http.NewRequest(http.MethodGet, \"http://localhost/api?bar=4\", nil)\n\tmatch := new(RouteMatch)\n\tif !r.Match(req, match) {\n\t\tt.Fatal(\"should have matched second query route\")\n\t}\n\tif match.MatchErr != nil {\n\t\tt.Fatalf(\"MatchErr should be nil, got %v\", match.MatchErr)\n\t}\n}\nGHXEOF"
+  ],
+  "failToPassCmds": [
+    "cd /workspace && go test . -run TestGHXMultipleQueriesSamePath -count=1"
+  ],
+  "passToPassCmds": [
+    "cd /workspace && go test . -run 'TestMultipleDefinitionOfSamePathWithDifferentMethods|TestErrMatchNotFound' -count=1"
+  ],
+  "explorationSubQuestions": [
+    {
+      "question": "In gorilla/mux Route.Match at this pinned revision, under what exact condition is a previously-set match.MatchErr cleared, and why does that condition drop the case where an EARLIER candidate route set a non-method-mismatch error before a later route fully matches?",
+      "groundTruth": "Match only clears match.MatchErr when it equals ErrMethodMismatch and r.handler != nil; it must instead clear on any non-nil MatchErr once the route otherwise matches (the fix changes `== ErrMethodMismatch` to `!= nil`), so a later fully-matching same-path route is not shadowed by a stale error.",
+      "verifiedAt": "2026-07-06"
+    }
+  ],
+  "memorizationCanary": { "checkedAt": "2026-07-06", "result": "pass" }
+}
