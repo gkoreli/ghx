@@ -72,6 +72,12 @@ type Config struct {
 	// (env, hooks, model overrides) apply to sidecar sessions. Eval runs
 	// construct their own Config and are unaffected.
 	AgentSettingSources []string `json:"agentSettingSources,omitempty"`
+	// DaemonWorkerIdleTTLMinutes controls how long an idle warm AgentWorker is
+	// kept alive before shutdown. Nil means the pinned default: 30 minutes.
+	DaemonWorkerIdleTTLMinutes *int `json:"daemonWorkerIdleTTLMinutes,omitempty"`
+	// DaemonMaxConcurrent controls the daemon-wide number of concurrent turns
+	// across sessions. Nil means the pinned default: 4.
+	DaemonMaxConcurrent *int `json:"daemonMaxConcurrent,omitempty"`
 	// Cwd overrides the ACP session cwd. Empty means current working directory.
 	Cwd string `json:"-"`
 	// Env overrides the spawned ACP adapter environment. Nil means inherit.
@@ -80,6 +86,41 @@ type Config struct {
 	// (emitRawSDKMessages:true in _meta.claudeCode.options). Off by default
 	// in production. Set by the eval runner (ADR-0020.1 D5).
 	EvalMode bool `json:"-"`
+}
+
+const (
+	defaultDaemonWorkerIdleTTL = 30 * time.Minute
+	defaultDaemonMaxConcurrent = 4
+)
+
+// DaemonWorkerIdleTTL returns the resolved warm-worker idle timeout. A nil
+// config field preserves the original daemon default.
+func (c Config) DaemonWorkerIdleTTL() time.Duration {
+	if c.DaemonWorkerIdleTTLMinutes == nil {
+		return defaultDaemonWorkerIdleTTL
+	}
+	return time.Duration(*c.DaemonWorkerIdleTTLMinutes) * time.Minute
+}
+
+// DaemonMaxConcurrentTurns returns the resolved daemon-wide turn concurrency.
+// A nil config field preserves the original daemon default.
+func (c Config) DaemonMaxConcurrentTurns() int {
+	if c.DaemonMaxConcurrent == nil {
+		return defaultDaemonMaxConcurrent
+	}
+	return *c.DaemonMaxConcurrent
+}
+
+// ValidateDaemonRuntimeConfig rejects invalid daemon runtime tunables before a
+// daemon starts. Unset fields are valid and resolve to the pinned defaults.
+func (c Config) ValidateDaemonRuntimeConfig() error {
+	if c.DaemonWorkerIdleTTLMinutes != nil && *c.DaemonWorkerIdleTTLMinutes <= 0 {
+		return fmt.Errorf("daemonWorkerIdleTTLMinutes must be greater than zero minutes (got %d)", *c.DaemonWorkerIdleTTLMinutes)
+	}
+	if c.DaemonMaxConcurrent != nil && *c.DaemonMaxConcurrent <= 0 {
+		return fmt.Errorf("daemonMaxConcurrent must be greater than zero (got %d)", *c.DaemonMaxConcurrent)
+	}
+	return nil
 }
 
 // CaptureContent reports whether GenAI message-content log records should be

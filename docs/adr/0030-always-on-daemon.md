@@ -512,3 +512,13 @@ Remaining follow-up:
   ergonomics pass.
 - Windows named-pipe support is still out of this Unix-socket implementation;
   Windows keeps the daemonless fallback path.
+
+## Implementation Note — 2026-07-07
+
+The runtime-ergonomics follow-up for daemon pool limits is implemented:
+`~/.ghx/config.json` now accepts `daemonWorkerIdleTTLMinutes` and
+`daemonMaxConcurrent`. Unset fields preserve the original daemon behavior
+(30-minute warm-worker idle TTL, four cross-session turns), explicit zero or
+negative values fail daemon startup with field-named errors, and both fields
+participate in the D6 config digest so a running daemon with different runtime
+tunables is treated as stale.

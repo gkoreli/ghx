@@ -24,10 +24,16 @@ type AgentPool struct {
 
 // NewAgentPool constructs an empty warm ACP worker pool.
 func NewAgentPool() *AgentPool {
+	return NewAgentPoolForConfig(Config{})
+}
+
+// NewAgentPoolForConfig constructs an empty warm ACP worker pool using the
+// daemon runtime tunables resolved from cfg.
+func NewAgentPoolForConfig(cfg Config) *AgentPool {
 	return &AgentPool{
 		workers:       map[string]*AgentWorker{},
-		ttl:           30 * time.Minute,
-		maxConcurrent: make(chan struct{}, 4),
+		ttl:           cfg.DaemonWorkerIdleTTL(),
+		maxConcurrent: make(chan struct{}, cfg.DaemonMaxConcurrentTurns()),
 	}
 }
 

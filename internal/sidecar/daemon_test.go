@@ -112,6 +112,73 @@ func TestDaemonSocketLifecycle(t *testing.T) {
 	}
 }
 
+func TestDaemonRuntimeConfigDefaultsAndValidation(t *testing.T) {
+	home := shortGHXHome(t)
+	cfg := sidecar.Config{AgentCmd: "mock", SessionsDir: filepath.Join(home, "sessions")}
+	if got := cfg.DaemonWorkerIdleTTL(); got != 30*time.Minute {
+		t.Fatalf("unset DaemonWorkerIdleTTL = %s, want 30m", got)
+	}
+	if got := cfg.DaemonMaxConcurrentTurns(); got != 4 {
+		t.Fatalf("unset DaemonMaxConcurrentTurns = %d, want 4", got)
+	}
+	if _, err := sidecar.NewDaemonServer("dev", cfg); err != nil {
+		t.Fatalf("unset daemon runtime config rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		cfg     sidecar.Config
+		wantErr string
+	}{
+		{
+			name:    "zero idle ttl",
+			cfg:     sidecar.Config{AgentCmd: "mock", SessionsDir: cfg.SessionsDir, DaemonWorkerIdleTTLMinutes: intPtr(0)},
+			wantErr: "daemonWorkerIdleTTLMinutes",
+		},
+		{
+			name:    "negative idle ttl",
+			cfg:     sidecar.Config{AgentCmd: "mock", SessionsDir: cfg.SessionsDir, DaemonWorkerIdleTTLMinutes: intPtr(-1)},
+			wantErr: "daemonWorkerIdleTTLMinutes",
+		},
+		{
+			name:    "zero max concurrent",
+			cfg:     sidecar.Config{AgentCmd: "mock", SessionsDir: cfg.SessionsDir, DaemonMaxConcurrent: intPtr(0)},
+			wantErr: "daemonMaxConcurrent",
+		},
+		{
+			name:    "negative max concurrent",
+			cfg:     sidecar.Config{AgentCmd: "mock", SessionsDir: cfg.SessionsDir, DaemonMaxConcurrent: intPtr(-1)},
+			wantErr: "daemonMaxConcurrent",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := sidecar.NewDaemonServer("dev", tc.cfg); err == nil {
+				t.Fatal("NewDaemonServer accepted invalid daemon runtime config")
+			} else if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want field %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfigDigestIncludesDaemonRuntimeTunables(t *testing.T) {
+	base := sidecar.Config{AgentCmd: "mock", SessionsDir: "/tmp/sessions"}
+	baseDigest := sidecar.ConfigDigest(base)
+	if got := sidecar.ConfigDigest(sidecar.Config{AgentCmd: "mock", SessionsDir: "/tmp/sessions"}); got != baseDigest {
+		t.Fatalf("same config digest changed: %s != %s", got, baseDigest)
+	}
+	if got := sidecar.ConfigDigest(sidecar.Config{AgentCmd: "mock", SessionsDir: "/tmp/sessions", DaemonWorkerIdleTTLMinutes: intPtr(31)}); got == baseDigest {
+		t.Fatal("daemonWorkerIdleTTLMinutes did not participate in ConfigDigest")
+	}
+	if got := sidecar.ConfigDigest(sidecar.Config{AgentCmd: "mock", SessionsDir: "/tmp/sessions", DaemonMaxConcurrent: intPtr(5)}); got == baseDigest {
+		t.Fatal("daemonMaxConcurrent did not participate in ConfigDigest")
+	}
+}
+
+func intPtr(n int) *int {
+	return &n
+}
+
 func TestDaemonAskReusesWarmMockAgent(t *testing.T) {
 	home := shortGHXHome(t)
 	agent, promptLog, starts := buildDaemonMockAgent(t, []map[string]any{

@@ -91,6 +91,9 @@ func RunDaemon(ctx context.Context, version string, cfg Config) error {
 
 // NewDaemonServer constructs a daemon server rooted in the active GHX_HOME.
 func NewDaemonServer(version string, cfg Config) (*DaemonServer, error) {
+	if err := cfg.ValidateDaemonRuntimeConfig(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(RuntimeDir(), 0o700); err != nil {
 		return nil, fmt.Errorf("mkdir runtime dir: %w", err)
 	}
@@ -104,7 +107,7 @@ func NewDaemonServer(version string, cfg Config) (*DaemonServer, error) {
 		StartedAt:    time.Now().UTC(),
 		ExePath:      exe,
 	}
-	return &DaemonServer{version: version, cfg: cfg, pool: NewAgentPool(), meta: meta, stop: make(chan struct{})}, nil
+	return &DaemonServer{version: version, cfg: cfg, pool: NewAgentPoolForConfig(cfg), meta: meta, stop: make(chan struct{})}, nil
 }
 
 // Serve accepts newline-delimited JSON-RPC requests on the daemon socket.
@@ -284,12 +287,17 @@ func ConfigDigest(cfg Config) string {
 		// (settingSources on the wire); a warm daemon must not keep
 		// serving the old posture after the config changes.
 		AgentSettingSources []string `json:"agentSettingSources,omitempty"`
+		// DaemonWorkerIdleTTLMinutes and DaemonMaxConcurrent shape warm
+		// daemon process behavior; D6 treats changed runtime tunables as a
+		// stale daemon instead of serving with old pool limits.
+		DaemonWorkerIdleTTLMinutes *int `json:"daemonWorkerIdleTTLMinutes,omitempty"`
+		DaemonMaxConcurrent        *int `json:"daemonMaxConcurrent,omitempty"`
 	}
 	// Hash the explicit override only: an empty value means "own executable",
 	// which the version handshake already validates, and full resolution is
 	// process-dependent (a spawned daemon and a go-test client resolve
 	// differently, which would force restart loops).
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route, AgentSettingSources: cfg.AgentSettingSources})
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route, AgentSettingSources: cfg.AgentSettingSources, DaemonWorkerIdleTTLMinutes: cfg.DaemonWorkerIdleTTLMinutes, DaemonMaxConcurrent: cfg.DaemonMaxConcurrent})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
