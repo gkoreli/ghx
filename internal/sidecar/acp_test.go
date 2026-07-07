@@ -281,3 +281,101 @@ func TestShutdownAgentKillsStubbornProcess(t *testing.T) {
 		t.Error("expected the process to be killed, but it exited cleanly")
 	}
 }
+
+// readToolCallWithLocations builds a Read-kind tool_call START notification
+// (SessionUpdateToolCall) carrying the given location paths — the ACP wire
+// shape the classifier's R6 path-scope rule reads from.
+func readToolCallWithLocations(id string, status acp.ToolCallStatus, paths ...string) acp.SessionNotification {
+	locs := make([]acp.ToolCallLocation, 0, len(paths))
+	for _, p := range paths {
+		locs = append(locs, acp.ToolCallLocation{Path: p})
+	}
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			ToolCall: &acp.SessionUpdateToolCall{
+				ToolCallId: acp.ToolCallId(id),
+				Title:      "Read",
+				Kind:       acp.ToolKindRead,
+				Status:     status,
+				Locations:  locs,
+			},
+		},
+	}
+}
+
+// readToolCallUpdateWithLocations builds a tool_call UPDATE notification
+// (SessionToolCallUpdate) carrying the given location paths.
+func readToolCallUpdateWithLocations(id string, status acp.ToolCallStatus, paths ...string) acp.SessionNotification {
+	locs := make([]acp.ToolCallLocation, 0, len(paths))
+	for _, p := range paths {
+		locs = append(locs, acp.ToolCallLocation{Path: p})
+	}
+	return acp.SessionNotification{
+		SessionId: "s",
+		Update: acp.SessionUpdate{
+			ToolCallUpdate: &acp.SessionToolCallUpdate{
+				ToolCallId: acp.ToolCallId(id),
+				Status:     &status,
+				Locations:  locs,
+			},
+		},
+	}
+}
+
+// TestSessionUpdatePopulatesLocations proves the ACP tool-call locations wire
+// through denyClient.SessionUpdate into ToolCallTrace.Locations, which the
+// host-task R6 path-scope classifier reads (ADR-0032.1 S2). Before this fix
+// the field was declared but never written, so the detector ran on always-empty
+// data. The test feeds a Read start carrying one path and an update adding a
+// second (with the first repeated), and asserts the trace holds the deduped,
+// order-stable union.
+func TestSessionUpdatePopulatesLocations(t *testing.T) {
+	c := &denyClient{result: &TurnResult{}}
+	c.markPromptSent()
+
+	ctx := context.Background()
+	if err := c.SessionUpdate(ctx, readToolCallWithLocations("read-1", acp.ToolCallStatusPending, "/repo/src/a.go")); err != nil {
+		t.Fatalf("start update: %v", err)
+	}
+	// Update repeats the first path (must dedupe) and adds a second.
+	if err := c.SessionUpdate(ctx, readToolCallUpdateWithLocations("read-1", acp.ToolCallStatusCompleted, "/repo/src/a.go", "/repo/src/b.go")); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	if len(c.result.ToolTraces) != 1 {
+		t.Fatalf("expected 1 trace, got %d", len(c.result.ToolTraces))
+	}
+	got := c.result.ToolTraces[0].Locations
+	want := []string{"/repo/src/a.go", "/repo/src/b.go"}
+	if len(got) != len(want) {
+		t.Fatalf("Locations = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Locations = %v, want %v (order-stable union, deduped)", got, want)
+		}
+	}
+}
+
+// TestSessionUpdateLocationsEmptyUpdatePreserves proves an update carrying no
+// locations (the omitempty nil case) leaves an existing trace's Locations
+// intact rather than clearing them.
+func TestSessionUpdateLocationsEmptyUpdatePreserves(t *testing.T) {
+	c := &denyClient{result: &TurnResult{}}
+	c.markPromptSent()
+
+	ctx := context.Background()
+	if err := c.SessionUpdate(ctx, readToolCallWithLocations("read-2", acp.ToolCallStatusPending, "/repo/src/a.go")); err != nil {
+		t.Fatalf("start update: %v", err)
+	}
+	// A status-only update with no locations must not wipe the seeded path.
+	if err := c.SessionUpdate(ctx, readToolCallUpdateWithLocations("read-2", acp.ToolCallStatusCompleted)); err != nil {
+		t.Fatalf("empty update: %v", err)
+	}
+
+	got := c.result.ToolTraces[0].Locations
+	if len(got) != 1 || got[0] != "/repo/src/a.go" {
+		t.Fatalf("Locations = %v, want [/repo/src/a.go] preserved", got)
+	}
+}
