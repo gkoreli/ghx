@@ -10,7 +10,26 @@ prose here.
 
 ## [Unreleased]
 
-Nothing released yet in this cycle.
+Staged on `mainline`, not yet released.
+
+### Added
+
+- **Daemon runtime tunables are configurable** — `daemonWorkerIdleTTLMinutes`
+  and `daemonMaxConcurrent` in `~/.ghx/config.json` set the warm-worker idle TTL
+  (default 30m) and cross-session turn concurrency (default 4). Unset preserves
+  today's behavior; invalid values are rejected; both participate in the daemon
+  config digest so a running daemon stale-replaces on change
+  ([ADR-0030](docs/adr/0030-always-on-daemon.md) follow-up).
+- **`ghx read --line-range` alias for `--lines`** — agents that type
+  `--line-range` (a real mined failure in production traces) now get identical
+  behavior; hidden and conflict-checked (workstream A2).
+
+### Changed
+
+- **`--path` on `explore`/`search` teaches the fix** — an unknown `--path` flag
+  now names the correct invocation (`ghx explore owner/repo src` /
+  `ghx grep owner/repo PATTERN --path PATH`) instead of a bare error
+  (workstream A4).
 
 ## [2.7.0] — 2026-07-07
 

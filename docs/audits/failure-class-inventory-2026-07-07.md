@@ -290,5 +290,3 @@ map must preserve:
   - Resilience markers: `grep -nE 'LivenessTimeoutMarker|maxTurnsErrorMarker|peerClosedMarker|Is(MaxTurns|PeerClosed|LoadSession)' internal/sidecar/acp.go`
   - Anomaly buckets: `grep -nE 'Anomaly[A-Z][A-Za-z]+ =' internal/sidecar/evals/anomalies.go` (12)
 - **Tests exercised:** `go test ./internal/cli -run 'Upstream|Affordance|CodeForError|ExitCode'` → `ok` at `47e2b7c` (pins B1/B2/B3-adjacent behavior).
-</content>
-</invoke>
