@@ -291,6 +291,22 @@ slice passing, a completed refactor step, a committed eval verdict. Rules:
 - `.ghx-evals/` is gitignored; curated eval evidence goes under `docs/evals/`.
 - Never commit secrets, tokens, or personal config.
 
+## Changelog
+
+`CHANGELOG.md` records every released version, newest first, in
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format under
+Semantic-Versioning headers. Two standing obligations:
+
+- **Every user-facing change updates `[Unreleased]` as it lands** — in the right
+  category (Added / Changed / Fixed / Removed / Docs). Where a change carries
+  proof, link the ADR that decided it or the committed eval verdict that measured
+  it; the artifacts are the evidence, not the prose. Pure internal churn with no
+  observable behavior change may be one summary line rather than itemized.
+- **Every release versions the section**: rename `## [Unreleased]` to
+  `## [x.y.z] — YYYY-MM-DD` and open a fresh empty `## [Unreleased]` above it.
+  This lands in the release commit alongside the `bump.js` change, so the
+  released version and its changelog ship together.
+
 ## Version Bumping
 
 **Always use the bump script.** Never edit `package.json` version manually.
@@ -305,9 +321,12 @@ This updates both `version` and all `optionalDependencies` in `package.json`. Th
 
 ## Release Flow
 
-1. `node scripts/bump.js` — bump version
-2. `git commit` + `git push` — triggers CI
-3. CI: tag → GoReleaser (GitHub release + Homebrew tap) → npm publish (OIDC, no token needed)
+1. Version the changelog: `## [Unreleased]` → `## [x.y.z] — YYYY-MM-DD`, then open
+   a fresh empty `## [Unreleased]` above it (see Changelog).
+2. `node scripts/bump.js` — bump version.
+3. `git commit` (release commit carries the bump + versioned changelog) +
+   `git push` — triggers CI.
+4. CI: tag → GoReleaser (GitHub release + Homebrew tap) → npm publish (OIDC, no token needed)
 
 ## SKILL.md Files
 
