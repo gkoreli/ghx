@@ -96,3 +96,74 @@ config and let the recon skill do the talking._
 - Ground: eligibility refused (reason not surfaced anywhere — manifest has no baselineReuse block, no log line) and the runner silently ran fresh plain+ghx+sidecar — the 3x-more-expensive shape the caller explicitly tried to avoid. Refusal must print WHICH check failed and require explicit opt-in before fresh-baseline fallback.
 - Trace: internal/sidecar/evals/.ghx-evals/runs/gate-run-2026-07-06-persona-reuse/ (quarantined diagnostic round, 18 eps, not a verdict).
 - Disposition: open — diagnose eligibility failure (suspect: prior-run mapengine trial count 7>5 from top-ups, or relative run-dir path handling) + make refusal loud.
+
+---
+
+_2026-07-07 dogfood run (worker w3): depth dial + A4 affordances + ADR-0032.1
+Locations, on two repos NOT previously used — `charmbracelet/bubbletea` (Go TUI)
+and `pallets/click` (Python CLI). Binary built from this worktree's HEAD
+(`e8816ec` = release **v2.6.0**), used only as `/tmp/ghx-dogfood-w3`. Doctor:
+preflight PASS (gh-token via GH_TOKEN, ACP handshake OK, sink served by the
+dogfood binary; codemap optional-missing). Agent = scripts/eval-agent-acp.sh
+(real Claude Code ACP adapter, claude-sonnet-5). Every ask returned exit 0 with
+accurate, file-cited answers — the happy path is solid; items below are edges._
+
+## 2026-07-07 depth dial produces a real evidence gradient — confirmation
+- Attempted: identical question ("How does the Program event loop dispatch messages to a Model's Update method, and where is that wired?") on `charmbracelet/bubbletea` at `--depth cheap|normal|deep`, pinned to fresh sessions (`bt-cheap|bt-normal|bt-deep`) to defeat context carryover.
+- Ground (works as designed): monotonic gradient in evidence breadth — files traced 1→2→3 (tea.go; +input.go; +input.go+tty.go), verified bullets 3→3→4, report.size 3092→3572→3934 bytes (metrics.jsonl), latency 47.6→48.2→54.0s. Deep alone surfaced the tty.go `initInputReader` input goroutine and added an Uncertainty caveat. The dial visibly buys depth for a modest (~13%) latency cost.
+- Trace: ~/.ghx/sessions/{bt-cheap,bt-normal,bt-deep}/ (compare reports/*.json relevantFiles + metrics.jsonl report.size).
+- Disposition: confirmation — depth dial is a genuine, observable knob.
+
+## 2026-07-07 cross-language recon + structured citations hold up — confirmation
+- Attempted: `sidecar ask --repo pallets/click --depth normal "How does the @click.command decorator turn a function into a Command...?"` (Python, first use of this repo).
+- Ground: accurate answer citing exact symbols/lines (decorators.py `command()` L168, `_param_memo` L314). Report JSON carries the citations structurally, not just in prose: `report.commandsRun` lists the real invocations (`ghx inspect ...`, `ghx read ... --lines 137-260`), each `report.verified[].evidence` names the exact `ghx read --lines` command + what it showed, `report.relevantFiles` lists paths. Task-4a evidence bar (answers cite files AND commands) is met.
+- Trace: ~/.ghx/sessions/click-normal/reports/1-*.json.
+- Disposition: confirmation.
+
+## 2026-07-07 A4 affordances name the fix on invocation errors — confirmation
+- Attempted: `ghx search charmbracelet/bubbletea "x" --repo ...` (wrong flag) and a 0-result search.
+- Ground: unknown-flag error printed "unknown flag --repo; use --help, e.g. ghx search --help" (exit 2) — names the exact next command (internal/cli/ghx.go:524-526); a 0-result search printed "→ To search repos by topic, use: ghx repos \"<query>\"". Both point at the fix, as A4 intends. Bare-cobra paths (`explore` no-args, unknown flag) correctly return exit 2.
+- Trace: n/a (invocation errors, no session).
+- Disposition: confirmation.
+
+## 2026-07-07 `explore` maps a malformed slug to exit 3 (upstream) not 2 (bad invocation) — soft
+- Attempted: `/tmp/ghx-dogfood-w3 explore badslug`.
+- Ground: prints "invalid repo format, expected owner/name" but exits **3** (ExitUpstreamFailure). A malformed slug is a bad *invocation* → should be exit **2**. `inspect` already special-cases this exact error to `ExitBadInvocation` (internal/cli/ghx.go:415-416), but `exploreCmd` blankets every error to `ExitUpstreamFailure` (internal/cli/ghx.go:100), so the two commands disagree on the same error class. A scripting agent that distinguishes "my args were wrong" (2) from "GitHub is down" (3) is misled by `explore`. The message also names no example invocation.
+- Expected: exit 2, ideally with an example (`ghx explore owner/name`).
+- Suggested fix: give `exploreCmd` (and `read`/`tree`/`grep` if they share the gap) the `strings.Contains(err, "invalid repo format") → WithExitCode(ExitBadInvocation, ...)` guard that `inspect` already has.
+- Trace: n/a (invocation error).
+- Disposition: open.
+
+## 2026-07-07 `read` of a nonexistent repo returns exit 0 — soft
+- Attempted: `/tmp/ghx-dogfood-w3 read totally/nonexistent-repo-xyz123 README.md`.
+- Ground: prints "=== README.md (not found) ===" and exits **0**. A scripting agent checking `$?` reads this as success and would proceed on empty content. A nonexistent repo/ref or an unresolved requested file should not report OK.
+- Expected: exit 1 (ExitNoResults) when no requested file resolves, or exit 3 when the repo/ref 404s.
+- Suggested fix: in the read command, when zero requested files resolve (or the repo/ref lookup 404s), return `ExitNoResults`/`ExitUpstreamFailure` instead of nil.
+- Trace: n/a (invocation error).
+- Disposition: open.
+
+## 2026-07-07 live 401 on `search` prints raw HTTP with no fix-it affordance — soft [A4 gap]
+- Attempted: `GH_TOKEN=ghp_invalidbadtoken... /tmp/ghx-dogfood-w3 search charmbracelet/bubbletea "func eventLoop"`.
+- Ground: exit **3** (correct) but the message is the bare upstream string "search failed: HTTP 401: Bad credentials (https://api.github.com/...)" — no affordance. `sidecar doctor`/preflight already owns the right remediation ("Run `gh auth login`, or set GH_TOKEN/GITHUB_TOKEN"; internal/sidecar/preflight.go:148), but the hot-path command error doesn't surface it. The A4 promise (errors name the fix) is unmet on the single most common live failure. Separately: an *empty* `GH_TOKEN=` degraded to exit 1 "0 results" (go-gh fell back to the `gh` keyring token), i.e. missing-auth can masquerade as no-results — no clean auth-absent signal.
+- Expected: 401/403 upstream errors name `gh auth login` / GH_TOKEN as the fix.
+- Suggested fix: map 401/403 in the CLI error path to an affordance reusing the preflight.go remediation string.
+- Trace: n/a (live upstream error, no session emitted).
+- Disposition: open.
+
+## 2026-07-07 tool-call Locations empty — binary predates the S2 fix; and the fix may not receive live data — soft [ADR-0032.1]
+- Attempted: verify Task-4b — that ToolCallTrace.Locations is populated on file/read tool calls (the 5aec071 / ADR-0032.1 S2 fix). Checked traces.jsonl across all four sessions.
+- Ground (two findings):
+  (1) SETUP MISMATCH — this worktree's HEAD is `e8816ec` = release **v2.6.0**, one release behind mainline (v2.7.0). `git merge-base --is-ancestor 5aec071 HEAD` = **NO**: the S2 fix is *not* in the dogfood binary. In this binary's acp.go the `u.ToolCall`/`u.ToolCallUpdate` handlers (lines 530-576) never write `tr.Locations`. So the empty Locations I observe (0 location attrs across bt-cheap/bt-normal/bt-deep/click-normal) are expected-for-this-binary, **not** a mainline regression. A dogfood worker sent to verify a mainline fix was handed the pre-fix binary — cut dogfood worktrees from mainline HEAD, not a tag.
+  (2) NUANCE the fix doesn't cover — mainline's `mergeLocations` (denyclient.go:232,256) only populates from whatever the ACP notification carries (`tc.Locations`/`tcu.Locations`). All 12 tool calls in every session are `kind=execute` (the agent shells out to `ghx read/search/inspect` via the ACP execute tool, not native ACP read/search tools). ACP execute-tool notifications generally don't carry file `locations`, so R6 path-scope likely still sees empty Locations in real sidecar usage. The fix's tests (acp_test.go) prove population from *synthetic* Locations; nothing proves the live Claude Code adapter emits Locations for the sidecar's execute-driven recon.
+- Expected: on a fix-bearing binary, read/search-shaped tool calls populate Locations that R6 can scope on.
+- Suggested fix: (process) build dogfood binaries from mainline HEAD so the binary matches the fix under test; (product) add a live assertion that the ACP adapter actually emits `tc.Locations` for the sidecar's tool-call pattern — if execute-kind calls never carry them, derive path-scope from the `ghx` argv in `tr.Title`/`RawInput` rather than relying on ACP Locations.
+- Trace: ~/.ghx/sessions/{bt-cheap,bt-normal,bt-deep,click-normal}/traces.jsonl (0 `"locations"` attrs; all spans `ghx.sidecar.tool.kind=execute`).
+- Disposition: open.
+
+## 2026-07-07 sidecar token metric undercounts a turn's real cost — soft [observability]
+- Attempted: measure per-depth *cost* from metrics.jsonl `gen_ai.client.token.usage`.
+- Ground: input is a constant **102** tokens across cheap/normal/deep; output 812/145/170; reasoning absent/1057/554. These are far too small (and too input-flat) to be the 12-tool exploration — they reflect only the sidecar's own orchestration model, not the subject ACP agent (claude-sonnet-5) that does the actual work. Depth's effect on real token cost is therefore not observable from the committed artifacts, which pinches the depth-vs-cost half of the depth-dial story and the visibility tenet.
+- Expected: a metric from which a reader can recover what a depth level actually cost.
+- Suggested fix: surface the subject agent's token usage if the ACP adapter reports it, or relabel the metric so it's unambiguous it excludes subject-agent cost.
+- Trace: ~/.ghx/sessions/{bt-cheap,bt-normal,bt-deep}/metrics.jsonl.
+- Disposition: open.
