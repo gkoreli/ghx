@@ -26,8 +26,10 @@ self-preference regime — arXiv:2404.13076), findings were **not** accepted on 
 - **Orchestrator self re-derivation (done):** the load-bearing facts were recomputed by Fable
   from raw artifacts — `.claude-plugin/plugin.json` (H1); `docs/evals/corpus-discrimination-2026-07-07.md`
   table (H2); `grep -rn schemaVersion internal/` + `internal/sidecar/report.go` (M3);
-  `internal/cli/serve.go:208-220` `handleRecon` (M1); `wc -l internal/sidecar/prompt.go` = 350,
-  which **contradicts** a persona's "141 lines" figure (L1 nuance). Competitor repos verified
+  `internal/cli/serve.go:208-220` `handleRecon` (M1); the rendered persona doctrine (L1) —
+  where PF1 caught *my* own error: `wc -l internal/sidecar/prompt.go` = 350 was a non-comparable
+  whole-file measurement, and the persona's **141 lines** is in fact correct (rendered
+  `BuildPersonaSystemPrompt()` = 141 lines / ~1,714 tokens, `PA-0001.8`). Competitor repos verified
   live via `gh` (DeusData/codebase-memory-mcp 27.8k★, Aider 47k★, Repomix).
 - **Shared-prior caution applied:** H2's convergence across the AI-PM and North-Star personas is
   **not** independent corroboration — both read the same `corpus-discrimination` doc; it was
@@ -96,7 +98,7 @@ brain itself, dogfooded live during the audit, *worked* — proving the thesis i
 - **AX · Orchestration/compose · report schema.** Empty-`verified` / unverified answers are not elevated to the `answer` surface (F4); cited paths carry no repo qualifier, so they 404 on scope-drift (F5) (`PA-0001.1`). → **workstream B**.
 
 ### L1 — Number drift in the strategy docs  ·  Severity: Low-Med (L3×I1)
-- **North-Star + Platform · strategy-doc-as-product · `NORTH_STAR.md`/ADRs.** SPT quoted four ways (16×/24×/25×/35×; the 24×≈compression identity is reclassified into H2 as *proof*, not drift). The "~400-line persona doctrine" anchoring the **P4 exit trigger** is **overstated**: the rendered recon doctrine is `BuildPersonaSystemPrompt()` (`internal/sidecar/prompt.go:37`), ~**130–141 lines** of raw-string prompt — not ~400, and not the 350-line *whole file* (which also holds `BuildDiscoveryPersonaSystemPrompt()` at :221 + assembly helpers). **Correction (PF1, via the PA-0001 process retrospective):** my initial judge note dismissed the persona's "141" by comparing it to the 350-line whole file — a non-comparable measurement (evidence-drift); the persona was substantially right and "~400" *is* overstated. **Sharpened + verified (PA-0001.9):** `prompt.go:32` uses "~400 *tokens*" for the per-turn *savings* of moving the persona to the system prompt — a **different quantity** than NORTH_STAR's "~400 *lines*" of doctrine; the actual rendered doctrine is ~137 lines / ~1.6k tokens, so "~400" is both ~3× inflated (vs lines) *and* **unit-conflated** (lines vs tokens) across the docs/code. → reconcile the figures; cite the **measured rendered-doctrine cost** (~137 lines / ~1.6k tokens) for the exit trigger. Recompute: `sed -n '37,220p' internal/sidecar/prompt.go | wc -l`.
+- **North-Star + Platform · strategy-doc-as-product · `NORTH_STAR.md`/ADRs.** SPT quoted four ways (16×/24×/25×/35×; the 24×≈compression identity is reclassified into H2 as *proof*, not drift). The "~400-line persona doctrine" anchoring the **P4 exit trigger** is **overstated**: the rendered recon doctrine is `BuildPersonaSystemPrompt()` (`internal/sidecar/prompt.go:37`), ~**130–141 lines** of raw-string prompt — not ~400, and not the 350-line *whole file* (which also holds `BuildDiscoveryPersonaSystemPrompt()` at :221 + assembly helpers). **Correction (PF1, via the PA-0001 process retrospective):** my initial judge note dismissed the persona's "141" by comparing it to the 350-line whole file — a non-comparable measurement (evidence-drift); the persona was substantially right and "~400" *is* overstated. **Sharpened + verified (PA-0001.9):** `prompt.go:32` uses "~400 *tokens*" for the per-turn *savings* of moving the persona to the system prompt — a **different quantity** than NORTH_STAR's "~400 *lines*" of doctrine; the actual rendered doctrine is ~137 lines / ~1.6k tokens, so "~400" is both ~3× inflated (vs lines) *and* **unit-conflated** (lines vs tokens) across the docs/code. → reconcile the figures; cite the **measured rendered-doctrine cost** for the exit trigger — **exact: 141 lines / 6,858 B / ~1,714 tokens** (`PA-0001.8`, by *rendering* `BuildPersonaSystemPrompt()`; no `sed`/`wc` over source reproduces it — `sed -n '37,220p'` spans two funcs + a const = 184). The persona's original **141** was right; the distiller's 137 undercounted.
 
 ### L2 — A failed milestone risks reading as working  ·  Severity: Low (L2×I1)
 - **AI-PM + North-Star + Platform · capability-claims · `NORTH_STAR.md`/M8.** M8 anticipation's D1 gate FAILED (nextReads recall 0.071/0.000) but is described in prose alongside working capabilities; `nextReads` is promised-but-unenforced (`PA-0001.3` F6 → ADR-0031.2). The failed gate already halted the build correctly — the fix is narrative, ensuring nothing cites M8 as evidence it works.
@@ -160,6 +162,35 @@ judge verdicts:
 
 **Net actionable core: H1 › H2 › M1** (+ the license/trust and unversioned-report items); **H3 is
 the highest-*stakes* strategic watch.** Cross-family adjudication still owed before any go/no-go.
+
+## Evidence & cross-reference ledger (decision-grade)
+
+Full receipts: **`PA-0001.8`** (internal — source `file:line`+recompute, north-star/tenet passages,
+eval + manual-run artifacts, every cell re-derived) and **`PA-0001.7`** (external — competitor /
+native-alternative / OSS-inspiration deep hyperlinks + rationale + what-to-absorb). Top rows:
+
+| # | Source (recompute) | Strategy (north star / tenet) | Experiment / manual | External |
+|---|---|---|---|---|
+| **H1** | `.claude-plugin/plugin.json` ships `skills/ghx`(232L)+`ghx-mcp`, omits `ghx-recon`(47L) · `grep -c recon .claude-plugin/plugin.json`=0 | NORTH_STAR *The North Star*: "needs **zero knowledge of the ghx CLI** — it never loads the ghx skill file at all" | live dogfood `PA-0001.1` (`ask` 38s, exit 0, HIC 0) | — |
+| **H2** | corpus recompute reproduced field-for-field: express 0.9<1.0, openai 0.8<1.0 & <plain 0.95; 4/6 at ceiling → **2/6 discriminate** | NORTH_STAR tenet: M4 is a "**conservative floor**, never a ceiling"; C8 = **0 committed episodes**; κ uncalibrated | `docs/evals/corpus-discrimination-2026-07-07.md` (recompute in §Provenance); `TRUST.md` | — |
+| **H3** | `internal/sidecar/report.go:38-57` no version (`grep -c Version …/report.go`=0) vs eval `judge-config-v1` | NORTH_STAR *The Moat*: "the moat is the **agentic brain, not the tools**"; M10 *blocked* | discovery dogfood on disk | [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) 27.9k★ + arXiv; native `Explore` (local-only) |
+| **M1** | `internal/cli/serve.go:208-221` — `json.Marshal` then `Route.Line()`+`FooterLine()` prose | recommended surface must be the cleanest | — | — |
+| **L1** | rendered `BuildPersonaSystemPrompt()` = **141 lines / ~1,714 tok** (`PA-0001.8`) | anchors P4 exit trigger; NORTH_STAR "~400" ~2.8× inflated + unit-conflated | — | — |
+| **NS-rec** | evidence contract = the switching cost `Explore` lacks | NORTH_STAR *The Moat* + "evidence, not vibes" | — | absorb: [repomix](https://github.com/yamadashy/repomix) `--compress`, [aider](https://github.com/Aider-AI/aider) `repomap.py` |
+
+**Deltas the evidence pass produced (judged):**
+- **L1 was under-corrected twice — now fixed.** The persona's **141** was right (I mis-measured 350;
+  the distiller undercounted 137); exact = 141 lines / ~1,714 tokens; my old L1 recompute was also
+  wrong and is corrected, as is the Judge-step provenance bullet. **The process caught the judge three times** — the strongest validation of the design.
+- **`Explore` correction:** no longer Haiku-by-default (v2.1.198 inherits the main model) — PA-0001.4's
+  "cheap Haiku" flavor is stale, but the load-bearing boundary (Explore = **local-only**; no
+  GitHub-wide / no-clone / no persisted artifact) is **re-confirmed** → H3's reposition holds.
+- **New finding — M5 (Med): ghx discovery is GitHub-only, blind to its most dangerous rival's own
+  docs.** Verifying native `Explore` (on `code.claude.com/docs`) required a `curl` fallback because
+  the discovery tier is GitHub-scoped. → workstream A/B (extend discovery beyond GitHub, or name the
+  boundary); also an adjacent-idea. `Source: PA-0001.7 friction log.`
+- **M4 evidence pointer stale:** NORTH_STAR M4 cites the confirmatory run its own README calls the
+  "old instrument"; the citable run is fixbatch (16.6×). Fold into H2's narrative fix.
 
 ## What is actually fine (checked with equal rigor — and load-bearing here)
 
