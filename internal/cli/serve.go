@@ -181,12 +181,25 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	// local question-slug defaulting.
 	session := request.GetString("session", "")
 
+	// Depth dial (NORTH_STAR capability 3): forward the caller's requested
+	// recon budget through the same AskRequest.Depth field the CLI `--depth`
+	// flag uses (session_options.go depthBudgets), so the MCP consumer path
+	// and `ask --depth` behave identically. Omitting depth keeps today's
+	// smart default ("normal"). An invalid value is rejected with the valid
+	// set named, rather than silently coerced — the tool must not quietly do
+	// something other than what the agent asked.
+	depth := request.GetString("depth", "normal")
+	if !isValidReconDepth(depth) {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"invalid depth %q: valid values are cheap, normal, deep", depth)), nil
+	}
+
 	cfg := sidecar.LoadConfig()
 	report, turn, err := askSidecar(ctx, cfg, sidecar.AskRequest{
 		Session:  session,
 		Repo:     repo,
 		Question: question,
-		Depth:    "normal",
+		Depth:    depth,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -205,6 +218,19 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		}
 	}
 	return mcp.NewToolResultText(text), nil
+}
+
+// isValidReconDepth reports whether depth is one of the recon budget dials
+// the sidecar accepts (session_options.go depthBudgets). The handler rejects
+// anything else instead of letting the daemon silently coerce it to normal,
+// so the MCP consumer gets a clear error naming the valid options.
+func isValidReconDepth(depth string) bool {
+	switch depth {
+	case "cheap", "normal", "deep":
+		return true
+	default:
+		return false
+	}
 }
 
 func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
