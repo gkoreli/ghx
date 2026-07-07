@@ -46,12 +46,20 @@ for a product finding, but its findings are always framed in product terms.
    tokens/knowledge from the main agent's context, make reconnaissance cheaper or more
    proficient, make evidence more auditable, or produce better training trajectories? A
    finding that ignores the north star is out of scope; a *product move* that fails the
-   filter is itself a finding.
+   filter is itself a finding. **And the yardstick itself is auditable:** where the north star
+   or a tenet has fallen behind ghx's velocity, name it with evidence and propose its evolution
+   — a high-value finding class. The north star evolves *deliberately* (not re-litigated every
+   run); respect the tenets, challenge them only with evidence, and we all evolve together.
 
 2. **Agentic-first — re-price classic PM advice before applying it.** ghx's primary
    consumer is an **AI agent**, not a human; most PM canon assumes a human with eyes,
-   memory, felt emotion, and an attention budget. Tag each framework before use (full
-   audit: `research/06-agentic-first-lens.md §3`):
+   memory, felt emotion, and an attention budget. This is **2026**: we build an agentic-first
+   product with agentic-first engineering, forward-looking — learn from history, but never
+   adopt an archaic, pre-AI-scale idea just because it once worked (the world it worked in had
+   no AI at this scale of capacity, influence, or coherence). **Every delegated agent —
+   personas, validators, the distiller — must hold this whole picture** (`NORTH_STAR.md` vision
+   + tenets, `AGENTS.md` tenets, this posture) and never audit blindsided of it. Tag each
+   framework before use (full audit: `research/06-agentic-first-lens.md §3`):
    - **HOLDS** — outcomes-over-output, JTBD (as a lens), 7-Powers, the red-team stack,
      Cagan's four risks, PM craft and the personas themselves.
    - **ADAPT** — Nielsen heuristics, journey mapping, positioning, information-scent/docs:
@@ -116,7 +124,10 @@ milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by refle
 3. **Delegate breadth.** Spawn read-only background persona-agents (text-only tools; no
    worktrees needed), one per persona, using the template below. Any GitHub/OSS exploration
    in the audit (competitive, discovery, absorption scouting) **dogfoods ghx itself** — using
-   the product to audit the product both proves it and yields free eval signal.
+   the product to audit the product both proves it and yields free eval signal. **Every
+   delegated agent (personas, validators, the distiller) first internalizes `NORTH_STAR.md` +
+   `AGENTS.md` tenets and judges against the whole-product big picture (directive 2) — none
+   audits blindsided.**
 4. **Each persona-agent** returns a findings artifact *and* a "what I checked and found
    sound" (nulls) section — persona-level honesty, not just report-level.
 5. **Judge (the load-bearing step).** For each returned finding: does the evidence hold on
@@ -131,13 +142,27 @@ milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by refle
    bias, so flag any finding that got only a same-family check. Record *who judged it and how a
    reader checks the judge* —
    the same calibration the product demands of its own eval judge (`AGENTS.md`
-   Visibility/Truthfulness). Do not run a milestone decision on an unchecked judge.
+   Visibility/Truthfulness). Do not run a milestone decision on an unchecked judge. **Recompute
+   each finding's exact quantity via its own command** — measure the *same* thing it claims
+   (comparing a whole-file line count to a rendered-doctrine count is evidence-drift; the PA-0001
+   retrospective caught exactly this). Then **order accepted findings by leverage** (north-star
+   impact × cheapness of fix), not severity alone — tell the reader what to do *first*.
 6. **Rank & synthesize** into one report (contract below): summary → ranked findings →
    *What is actually fine* → adjacent-idea proposals. Rank by severity, then north-star
    leverage.
 7. **Honest close.** Commit negatives; state what was *not* audited; name residual
    uncertainty. For a high-stakes audit, run a second round with a different persona set,
    or red-team the audit's own findings.
+8. **Convergence & distillation (final pass).** After the synthesis, delegate a **fresh,
+   no-stake agent** to mine the whole thread — cross-validate findings across the codebase,
+   **re-run the reproduction/recompute commands**, do any manual validation — and distil the
+   **intersection of ideas** into a final artifact (`PA-000N.9-distilled`). **Genuine
+   convergence across *independent* personas and evidence is high signal; a lone suggestion is
+   low signal — but discount *shared-prior* convergence** (agreement because agents read the
+   same source is not independent corroboration, directive 5). You remain the judge: read and
+   respect every perspective, then **support or veto each distilled idea with evidence and
+   cross-references — eat the fish, throw the bones** (there are many). The distiller surfaces
+   and ranks; it never stands unjudged.
 
 **Copyable persona-agent delegation prompt:**
 
@@ -180,14 +205,19 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
 - **Executive summary** — the single highest-leverage finding first, in north-star terms.
 - **Ranked findings**, each with:
   - **Persona · Scope · Surface** it came from.
-  - **Evidence** — `file:line`, command+output, a trace/session path, or a doc quote;
-    recomputable by a human.
+  - **Novelty** — `NEW` / `KNOWN-CONFIRMED⟨ref⟩` / `KNOWN-DISPUTED⟨ref⟩`: does this already live
+    in `TRUST.md` / an ADR / a prior `PA-000N`? If known, cite it and state the *delta* you add;
+    a zero-delta restatement is **not** a finding (anti-repetition, directive 6).
+  - **Evidence** — cite by **symbol + a quoted snippet + a one-line recompute command**, not a
+    bare `file:line` (line numbers drift). Recomputable by a human; the judge recomputes the
+    finding's **exact quantity** via that command.
   - **Severity** (Likelihood × Impact) and **Disposition** — *sound* / *needs work* /
     *invalidates*. A "needs work" finding **routes to a workstream (A/B/C) or proposes an
     ADR**, not a bare "owner + date".
   - **North-star relationship** — filter pass/fail, or the tenet/milestone it bears on.
-  - **Who judged it & how to check** — for High findings, name the independent/cross-family
-    check and how a reader re-derives it (self-preference guard, directive 5).
+  - **Verification state** — `self-verified` / `same-family-adjudicated` / `cross-family-adjudicated`;
+    a **High finding is not milestone-citable below `cross-family-adjudicated`** (Process step 5).
+    Name who judged it and how a reader re-derives it (self-preference guard, directive 5).
   - **Cross-reference** — for any external framework or competitor claim: a **specific**
     deep URL + one line on **why it matters**. No vague or invented links; if unverified,
     say so.
@@ -198,7 +228,14 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
   utility → feature → whole tool under the hood), each with *what to take*, *where it plugs
   in*, and its *north-star-filter alignment*. Steal openly, with attribution; competition is
   a supply of building blocks, not a threat (`AGENTS.md` Open Source Leverage).
+- **North-star / tenet evolution proposals** — where the audit found the *yardstick itself*
+  stale or lagging ghx's velocity: name it, with evidence, and propose the evolution
+  (deliberate, not per-run — directive 1). Respect the tenets; challenge them only with evidence.
 - **What was not audited** — axes deliberately omitted this round.
+
+The **`PA-000N.9-distilled`** convergence pass (Process step 8) is the final deliverable: it
+ranks the above by cross-persona *independent* convergence × leverage, and separates the
+high-conviction recommendations from the discarded bones.
 
 ---
 

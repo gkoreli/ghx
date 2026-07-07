@@ -131,6 +131,10 @@ You are the authoritative judge, and a model adjudicating its own delegated work
 - **Finalize:** the skill directory ships as `SKILL.md` + `research/` + `reviews/`, and the
   commit history tells the story (research → draft → review → reconcile). Commit provenance;
   don't leave it in scratch.
+- **For multi-agent *outputs* (e.g. an audit), add a convergence/distillation pass:** a fresh,
+  no-stake agent mines the intersection of the fan-out — *genuine* cross-agent convergence is
+  high signal, *shared-prior* convergence (same source) is not — into one distilled artifact the
+  orchestrator then judges (support/veto with evidence; eat the fish, throw the bones).
 
 ---
 
