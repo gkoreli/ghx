@@ -167,3 +167,113 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Suggested fix: surface the subject agent's token usage if the ACP adapter reports it, or relabel the metric so it's unambiguous it excludes subject-agent cost.
 - Trace: ~/.ghx/sessions/{bt-cheap,bt-normal,bt-deep}/metrics.jsonl.
 - Disposition: open.
+
+<!-- ============================================================= -->
+<!-- 2026-07-07 — v2.8.0 dogfood run (depth dial, Snapshot, panic   -->
+<!-- fix, daemon). Binary: `go build -o /tmp/ghx-dogfood-280`,      -->
+<!-- worktree HEAD 0a7ac7f = release tag v2.8.0 (ADR-0036 B2 commit -->
+<!-- e4d7a1f present). ACP agent = production eval-agent-acp.sh.    -->
+<!-- Unfamiliar repos: tidwall/gjson (Go), sindresorhus/p-queue     -->
+<!-- (TS), python-attrs/attrs (Python).                             -->
+<!-- ============================================================= -->
+
+## 2026-07-07 v2.8.0 cross-language recon (3 unfamiliar repos, 3 depths) all land with cited evidence — confirmation
+- Attempted: one real recon ask per repo, one per depth tier — `gjson --depth cheap` ("how does gjson parse a path expression without unmarshalling the whole doc"), `p-queue --depth normal` ("how is the concurrency limit enforced / which task runs next"), `attrs --depth deep` ("how is __init__ generated, exec-vs-slots decision"). All first-time repos.
+- Ground (works as designed): all three returned accurate answers with structured citations — every `verified[]` bullet names the exact `ghx read … --lines A-B` (or `ghx inspect`) command and what it showed, `relevantFiles` lists real paths, and each ends with the `artifacts: <session dir> (trace <id>)` footer. gjson → gjson.go parseObjectPath/parseObject co-parse (L982/L1196); p-queue → `#tryToStartAnother`/`PriorityQueue.dequeue` (source/index.ts, source/priority-queue.ts); attrs → `_attrs_to_init_script`+`_compile_and_eval` exec, slots only picks `_create_slots_class` vs `_patch_original_class` (src/attr/_make.py). Each carried an honest Uncertainty section. Task-1 + Task-4a (answers cite files AND commands) met on all three. All exit 0.
+- Trace: ~/.ghx/sessions/{tidwall-gjson,sindresorhus-p-queue,python-attrs-attrs}/reports/*.json (traces 71b9c57…, 5984e38…, b9757af…).
+- Disposition: confirmation.
+
+## 2026-07-07 depth dial (cheap|normal|deep) exercised end-to-end — confirmation, with a latency gradient
+- Attempted: `sidecar ask --depth {cheap,normal,deep}` across the three repos above (one tier each).
+- Ground: all three tiers run cleanly (exit 0). Latency gradient consistent with a widening command budget: **cheap 40.7s → normal 60.9s → deep 106.2s** (`time` wall clock). `--depth` is a real, documented flag (`Command budget: cheap|normal|deep`, default normal) and the on-disk artifacts show a per-turn `budget:` field. This complements the earlier same-question depth study (bt-cheap/normal/deep) — the dial is a genuine knob across repos too.
+- Trace: session dirs above; grep `budget` in *.jsonl.
+- Disposition: confirmation.
+
+## 2026-07-07 ADR-0036 B2 Snapshot{Repo,SHA} is live in read/explore result JSON — confirmation
+- Attempted: verify Task-2 — that read/explore now carry a resolved commit SHA. Probed the agent-facing code-mode surface: `ghx code 'var r = codemode.explore({repo:"tidwall/gjson"}); return {keys:Object.keys(r), snapshot:r.snapshot};'` and the same for `read({repo, files:["go.mod"]})`.
+- Ground: both carry it. explore → `"snapshot":{"repo":{"Name":"gjson","Owner":"tidwall"},"sha":"7d8b3821e9d2acf35e8a226b63fcf801078e9b96"}`; read → same snapshot on each FileResult. The SHA **matches** `gh api repos/tidwall/gjson/commits/master --jq .sha` (7d8b3821…) — provenance is real and correct, not a placeholder. Source: internal/ghx/explore.go:99,142 and read.go:136,141 populate `Snapshot{Repo, SHA: …DefaultBranchRef.Target.OID}`; type at internal/ghx/repo.go:17; unit test TestReadCarriesResolvedSnapshotSHA (client_test.go:111).
+- Trace: reproduce with the two `ghx code` snippets above.
+- Disposition: confirmation.
+
+## 2026-07-07 Snapshot SHA is computed but under-surfaced — an agent isn't told it exists — soft [ADR-0036 B2]
+- Attempted: find every surface where a consuming agent/human could observe the resolved SHA it now pays to compute.
+- Ground (five gaps that blunt the re-fetchability win B2 exists for):
+  (1) **code-mode `--list` type stubs omit it.** `ghx code --list` declares `explore: (input) => { description; branch; files[]; readme }` and `read: (…) => { path; content; byteSize; notFound; … }[]` — **no `snapshot` field** on either. The runtime JSON carries `snapshot`, but the very type contract handed to the agent hides it, so a stub-trusting agent never reads `r.snapshot.sha`.
+  (2) **register.go `Returns:` schema omits it** too (internal/ghx/register.go:11 = `{ description; branch; files[]; readme }`) — same omission at the MCP tool-declaration layer.
+  (3) **Human CLI text output omits it.** `ghx explore tidwall/gjson` and `ghx read …` print no SHA; there is **no `--json`** on read/explore to extract it (`read --json` → "unknown flag --json; use --full"). A human dogfooding the bare CLI cannot see which commit was read.
+  (4) **Not in any session artifact.** The resolved SHA (7d8b3821…) appears in **zero** of the gjson session's traces/logs/live/metrics jsonl — the sidecar consumes CLI *text* (which lacks it), so provenance never reaches the committed evidence a judge would audit.
+  (5) **sidecar `Evidence` struct still `{Source, Summary}`** (internal/sidecar/report.go:31) — no SHA field. ADR-0036 B2's literal deliverable ("thread the resolved tip SHA into `Evidence`") is not implemented; ADR-0036 is status "proposed". Minor: nested `repo` serializes PascalCase `{"Name","Owner"}` while every sibling field is lowercase (`sha`, `branch`) — a JSON-casing inconsistency (the `ghx.Repo` struct lacks json tags).
+- Expected: the surface that ships the value should advertise it — snapshot in the code-mode/`Returns` type stubs, threaded into `Evidence`, and reachable from the CLI (a `--json` on read/explore, or a `snapshot:` line in text). Lowercase the nested `repo` keys.
+- Suggested fix: add `snapshot` to the register.go `Returns`/type-stub schema for explore+read; add the SHA to `sidecar.Evidence` and emit it in tool-call traces; add json tags to `ghx.Repo` (`json:"name"`,`json:"owner"`); offer `--json` (or a provenance footer) on read/explore.
+- Trace: `ghx code --list`; internal/ghx/register.go:11; internal/sidecar/report.go:31; ~/.ghx/sessions/tidwall-gjson/*.jsonl (no SHA).
+- Disposition: open.
+
+## 2026-07-07 `tree`/`explore`/`read`/`inspect` all exit 2 on a malformed slug (2.8.0 panic fix) — confirmation, resolves a prior open item
+- Attempted: verify Task-3 — the 2.8.0 panic fix and unified bad-invocation exit code. `ghx tree noslash`, and `explore|read|inspect` on `badslug`.
+- Ground: `ghx tree noslash` → exit **2**, no panic, message "invalid repo \"noslash\": expected owner/repo, e.g. ghx explore gkoreli/ghx" (names an example invocation = A4 affordance). `explore badslug`, `read noslashhere x`, `inspect badslug concern` **all** exit **2** with the same shaped message. This **resolves** the earlier open item ("`explore` maps a malformed slug to exit 3 not 2", logged on the v2.6.0 binary): the CHANGELOG [2.8.0] "tree/explore/read no longer panic or misreport a malformed repo" fix has landed and is now consistent across commands.
+- Trace: n/a (invocation errors, deterministic).
+- Disposition: confirmation (supersedes the 2026-07-07 w3 "explore → exit 3" entry above).
+
+## 2026-07-07 daemon auto-spawns and stays warm; supervisor-hardened asks "just work" — confirmation (+ log-path friction)
+- Attempted: verify Task-4 daemon behavior. Ran the three live asks cold (no daemon at start), then checked process + logs.
+- Ground: a warm daemon **auto-spawned** — `pgrep` shows `54167 /tmp/ghx-dogfood-280 sidecar daemon --background` (spawned by the ask itself, using the dogfood binary). All three asks completed with `Report accepted.` in the log; no crash. Supervisor hardening working as advertised.
+- FRICTION (soft, docs/discoverability): the daemon log is at **`~/.ghx/runtime/daemon.log`**, not `~/.ghx/daemon.log` — the path named in the task brief (and worth checking in any support doc) **does not exist** (`ls ~/.ghx/daemon.log` → No such file). `sidecar doctor` prints the sessions dir but never the daemon log/socket location. Separately, the log carries repeated Node SDK noise: `(node:…) [CLAUDE_SDK_CAN_USE_TOOL_SHADOWED] Warning: canUseTool will not be invoked for: mcp__ghx-report-sink__submit_report` — benign but pollutes the log.
+- Expected: docs/doctor should name the real log path (`~/.ghx/runtime/daemon.log`); suppress or downgrade the SDK shadow warning.
+- Trace: `pgrep -fl "ghx.*daemon"`; `tail ~/.ghx/runtime/daemon.log`.
+- Disposition: confirmation on the daemon; log-path/docs = open (soft).
+
+## 2026-07-07 sidecar `ask` frontend always exits 0 — BLOCKED and invalid input map to success — soft [ADR-0034]
+- Attempted: exercise sidecar-frontend failure classes. `sidecar ask --repo badslugnoslash "test"` (invalid slug) and `--repo tidwall/gjson --depth bogus "…"` (invalid depth).
+- Ground: the bad-slug ask returned a well-reasoned **BLOCKED** report ("not a valid GitHub repository identifier … no investigation possible") but exit **0**. The core CLI maps the same malformed slug to exit 2 (see above), so the sidecar frontend swallows the failure class into success. Under ADR-0034's unified failure-class model, a BLOCKED-because-unusable-input turn should not exit 0 — a scripting agent checking `$?` cannot distinguish "answered" from "couldn't even start". (Answered turns also exit 0, so `$?` carries no signal at all for `ask`.)
+- Expected: BLOCKED-due-to-invalid-invocation → exit 2; genuinely-no-evidence → exit 1; answered → 0.
+- Suggested fix: map the report's outcome/failure-class to an exit code in the `sidecar ask` command wrapper, mirroring the core CLI's 0/1/2/3 contract.
+- Trace: ~/.ghx/sessions/badslugnoslash/ (trace 7043be2…); rerun `ghx sidecar ask --repo badslugnoslash "test"; echo $?` → 0.
+- Disposition: open.
+
+## 2026-07-07 `--depth bogus` is silently accepted, not validated against cheap|normal|deep — soft
+- Attempted: `sidecar ask --repo tidwall/gjson --depth bogus "How is Get implemented?"`.
+- Ground: no validation error — the ask ran a **full normal report** and exited 0, silently treating the invalid depth as a default. The new depth dial names its valid set in `--help` ("cheap|normal|deep") but doesn't enforce it, so a typo (`--depth deeep`, `--depth high`) runs at an unintended budget with no warning. Contrast the crisp A4 affordances on other bad input (e.g. `read --json` → "unknown flag --json; use --full").
+- Expected: reject an out-of-set `--depth` with exit 2 and a message naming the valid values, e.g. "invalid --depth \"bogus\"; use cheap|normal|deep".
+- Suggested fix: validate the `--depth` flag against {cheap,normal,deep} in the ask command's PreRunE (or via a pflag enum) and error with the valid set.
+- Trace: rerun the command; observe a normal report + exit 0.
+- Disposition: open.
+
+## 2026-07-07 `--depth` is not recorded in session `meta.json` — soft [visibility]
+- Attempted: recover which depth produced a committed session from its artifacts.
+- Ground: `meta.json` records name/repo/scope/turnCount/acpSessionId/agentCmd/env/timestamps but **no `depth`/command-budget field**. An auditor reading a session dir cannot tell whether it was cheap, normal, or deep — yet depth changes the evidence breadth and cost. This pinches the visibility/truthfulness tenet: a run parameter that materially shapes the result isn't recoverable from the committed record.
+- Expected: `meta.json` (or the turn record) captures the depth/command-budget used.
+- Suggested fix: persist the resolved `--depth` (and the numeric command budget it maps to) into `meta.json` / the per-turn ledger.
+- Trace: ~/.ghx/sessions/tidwall-gjson/meta.json (no depth key).
+- Disposition: open.
+
+## 2026-07-07 sidecar agent narration fabricated downstream exit codes — soft [ADR-0034 / evidence accuracy]
+- Attempted: reconcile the BLOCKED report's self-reported evidence with reality. On the bad-slug ask the agent's Uncertainty section stated: "Ran `ghx explore badslugnoslash` -> exit code **3**" and "Ran `ghx inspect badslugnoslash "test"` -> exit code **1**".
+- Ground: both claims are **wrong** — running those exact commands against this binary gives exit **2** for *both* (verified directly: `explore badslug` → 2, `inspect badslug concern` → 2). The agent's narrated exit codes don't match the tool's actual codes, so a reader trusting the report's cited evidence would mis-model the CLI's failure-class contract (which is in fact consistent at 2 for malformed slugs). This is an evidence-fidelity gap in the report layer, adjacent to ADR-0034: the report should cite observed exit codes, not plausible-sounding ones.
+- Expected: cited exit codes in a report equal the codes the tool actually returned.
+- Suggested fix: capture and echo the real `$?` from the agent's tool invocations into the trace/report rather than letting the model narrate them from memory.
+- Trace: ~/.ghx/sessions/badslugnoslash/reports/*.json vs `ghx explore badslug; echo $?` (=2) and `ghx inspect badslug c; echo $?` (=2).
+- Disposition: open.
+
+## 2026-07-07 404-repo failure class splits: `explore` exits 3, `read` exits 0 — soft [ADR-0034] (reconfirms prior open item)
+- Attempted: nonexistent repo via both commands. `explore tidwall/this-repo-does-not-exist-xyz` and `read tidwall/this-repo-does-not-exist-xyz README.md`.
+- Ground: `explore` → exit **3** with a good affordance ("→ Repository, branch, or path not found. Confirm owner/repo with `ghx repos <query>` and the layout with `ghx explore owner/repo`…"). `read` on the *same nonexistent repo* → exit **0** with body "=== README.md (not found) ===" — treating a missing repo as a missing file, giving a scripting agent a false success. This **reconfirms** the earlier open "`read` of a nonexistent repo returns exit 0" item on the 2.8.0 binary and adds the explore-vs-read divergence (3 vs 0 for one condition). For comparison, `search` with no matches correctly returns exit **1** and names `ghx repos "<query>"`.
+- Expected: a nonexistent repo/ref → exit 3 (or ≥1) on `read` too, matching `explore`.
+- Suggested fix: in the read path, when the repo/ref 404s or zero requested files resolve, return ExitUpstreamFailure/ExitNoResults instead of nil (as previously suggested for the standalone item).
+- Trace: rerun both commands; `echo $?`.
+- Disposition: open (reconfirmed).
+
+## 2026-07-07 source-built binary self-reports version "dev"; doctor's ghx-binary check finds a stale 2.5.0 on PATH — soft [provenance]
+- Attempted: confirm the binary under test is v2.8.0. `ghx version` and `sidecar doctor`.
+- Ground: `ghx version` → **"ghx dev"** (a source `go build` injects no ldflags version). `sidecar doctor` compounds the confusion: its `ghx-binary` check reports "ghx found: **ghx 2.5.0**" (a *different, stale* binary on PATH), while `report-sink-version` reports "served by /tmp/ghx-dogfood-280 (via current executable), **version dev**". So three different version signals appear in one preflight, none of which says "2.8.0". Provenance is only recoverable out-of-band (worktree HEAD = `0a7ac7f`, tag v2.8.0; ADR-0036 B2 commit e4d7a1f present; CHANGELOG [2.8.0]). For dogfooding/support this makes "which build am I running?" unanswerable from the tool itself.
+- Expected: a build (even from source) should be able to self-identify its release, and doctor should reconcile the PATH binary vs the running executable rather than reporting a stale third version.
+- Suggested fix: stamp version via `-ldflags -X` in the documented build recipe (or derive from `git describe` at build time); in doctor, note when the PATH `ghx` differs from the running executable.
+- Trace: `/tmp/ghx-dogfood-280 version`; `/tmp/ghx-dogfood-280 sidecar doctor`.
+- Disposition: open (minor).
+
+## 2026-07-07 code-mode transpile error returns exit 0 — soft [minor]
+- Attempted: an early code-mode probe using top-level `await`: `ghx code '(async…)()'` and `ghx code 'const r = await explore(…)'`.
+- Ground: prints "transpile: transpile: Top-level await is not available in the configured target environment (\"es2015\")" but exits **0**. A snippet that failed to transpile/run is a bad invocation; exit 0 lets a scripting agent treat a non-executed script as success. (Doubled "transpile: transpile:" prefix is also a minor cosmetic nit.) The `--help` does document the sync `codemode.explore({…}); return …` contract, so this is a validation/exit-code gap, not a usability blocker.
+- Expected: a transpile/compile failure → exit 2.
+- Suggested fix: return ExitBadInvocation when the JS fails to transpile; de-dupe the error prefix.
+- Trace: `ghx code 'const r = await explore("x/y"); return r;'; echo $?` → 0.
+- Disposition: open (minor).
