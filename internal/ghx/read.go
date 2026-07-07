@@ -46,17 +46,13 @@ type ReadOpts struct {
 
 // Read fetches 1-10 files from a GitHub repo in one API call using GraphQL aliases.
 // Returns one FileResult per requested file.
-func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
+func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 	if opts == nil {
 		opts = &ReadOpts{}
 	}
 
-	parsedRepo, err := ParseRepo(repo)
-	if err != nil {
-		return nil, err
-	}
-	owner := parsedRepo.Owner
-	name := parsedRepo.Name
+	owner := repo.Owner
+	name := repo.Name
 
 	// Expand globs: detect glob patterns, fetch tree, resolve to exact paths
 	hasGlobs := false
@@ -71,7 +67,7 @@ func Read(repo string, files []string, opts *ReadOpts) ([]FileResult, error) {
 	globOrigin := make(map[string]string)
 
 	if hasGlobs {
-		tree, err := fetchTree(parsedRepo)
+		tree, err := fetchTree(repo)
 		if err != nil {
 			return nil, fmt.Errorf("glob expansion failed: %w", err)
 		}

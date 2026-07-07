@@ -101,6 +101,29 @@ func TestGhxCoreErrorInvalidRepoIsBadInvocation(t *testing.T) {
 	}
 }
 
+func TestRepoScopedCommandsParseRepoAtEdge(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *cobra.Command
+		args []string
+	}{
+		{name: "explore", cmd: exploreCmd, args: []string{"noslash"}},
+		{name: "read", cmd: readCmd, args: []string{"noslash", "README.md"}},
+		{name: "tree", cmd: treeCmd, args: []string{"noslash"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd.RunE(tt.cmd, tt.args)
+			if err == nil || !strings.Contains(err.Error(), "invalid repo") {
+				t.Fatalf("RunE error = %v, want invalid repo", err)
+			}
+			if got := CodeForError(err); got != ExitBadInvocation {
+				t.Fatalf("exit code = %d, want %d", got, ExitBadInvocation)
+			}
+		})
+	}
+}
+
 func TestTeachingFlagErrorPathSuggestions(t *testing.T) {
 	tests := []struct {
 		name string

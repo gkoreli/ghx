@@ -95,7 +95,11 @@ complete tree and README.`,
 		}
 		budget, _ := cmd.Flags().GetInt("budget")
 		fullMode, _ := cmd.Flags().GetBool("full")
-		result, err := ghxlib.Explore(args[0], path)
+		repo, err := ghxlib.ParseRepo(args[0])
+		if err != nil {
+			return ghxCoreError(err)
+		}
+		result, err := ghxlib.Explore(repo, path)
 		if err != nil {
 			return ghxCoreError(err)
 		}
@@ -180,7 +184,11 @@ map plus a narrowing hint rather than flooding output.`,
 			Budget:    budget,
 			FullMode:  fullMode,
 		}
-		results, err := ghxlib.Read(args[0], args[1:], opts)
+		repo, err := ghxlib.ParseRepo(args[0])
+		if err != nil {
+			return ghxCoreError(err)
+		}
+		results, err := ghxlib.Read(repo, args[1:], opts)
 		if err != nil {
 			return ghxCoreError(err)
 		}
@@ -458,7 +466,11 @@ fully recursive); directories are shown with a trailing slash.`,
 		if depth < 0 {
 			return WithExitCode(ExitBadInvocation, fmt.Errorf("--depth must be >= 0 (0 = full recursive), e.g. ghx tree gkoreli/ghx --depth 2"))
 		}
-		results, err := ghxlib.Tree(args[0], path, ghxlib.TreeOpts{Depth: depth})
+		repo, err := ghxlib.ParseRepo(args[0])
+		if err != nil {
+			return ghxCoreError(err)
+		}
+		results, err := ghxlib.Tree(repo, path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
 			return ghxCoreError(err)
 		}

@@ -80,7 +80,7 @@ func TestExploreUsesInjectedGraphQLClientOffline(t *testing.T) {
 	githubClients = fakeGithubClientProvider{graphQL: fakeGQL}
 	t.Cleanup(func() { githubClients = oldClients })
 
-	got, err := Explore("cli/cli", "")
+	got, err := Explore(Repo{Owner: "cli", Name: "cli"}, "")
 	if err != nil {
 		t.Fatalf("Explore returned error: %v", err)
 	}

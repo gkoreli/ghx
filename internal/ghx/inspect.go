@@ -241,7 +241,8 @@ func (w *BudgetWriter) Used() int {
 
 // Inspect searches, fetches, maps, ranks, and snippets concern-local evidence.
 func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, error) {
-	if _, err := ParseRepo(repo); err != nil {
+	parsedRepo, err := ParseRepo(repo)
+	if err != nil {
 		return nil, err
 	}
 	query = strings.TrimSpace(query)
@@ -298,7 +299,7 @@ func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, er
 	}
 
 	paths := candidatePaths(candidates, maxInspectFetchedFiles)
-	readResults, err := Read(repo, paths, &ReadOpts{FullMode: true})
+	readResults, err := Read(parsedRepo, paths, &ReadOpts{FullMode: true})
 	if err != nil {
 		return nil, err
 	}

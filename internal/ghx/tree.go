@@ -11,12 +11,8 @@ type TreeOpts struct {
 // Tree returns file listing for a repo, optionally filtered to a path prefix.
 // Without Depth: returns blobs only (backward compatible).
 // With Depth: returns both blobs and directories (dirs suffixed with "/"), filtered to N levels.
-func Tree(repo string, path string, opts TreeOpts) ([]string, error) {
-	parsedRepo, err := ParseRepo(repo)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := fetchTree(parsedRepo)
+func Tree(repo Repo, path string, opts TreeOpts) ([]string, error) {
+	entries, err := fetchTree(repo)
 	if err != nil {
 		return nil, err
 	}

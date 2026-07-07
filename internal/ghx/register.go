@@ -89,7 +89,11 @@ func RegisterTools(r *codemode.Registry) {
 }
 
 func wrapExplore(args map[string]any) (any, error) {
-	repo, _ := args["repo"].(string)
+	repoSlug, _ := args["repo"].(string)
+	repo, err := ParseRepo(repoSlug)
+	if err != nil {
+		return nil, err
+	}
 	path, _ := args["path"].(string)
 	return Explore(repo, path)
 }
@@ -121,7 +125,11 @@ func wrapSearch(args map[string]any) (any, error) {
 }
 
 func wrapRead(args map[string]any) (any, error) {
-	repo, _ := args["repo"].(string)
+	repoSlug, _ := args["repo"].(string)
+	repo, err := ParseRepo(repoSlug)
+	if err != nil {
+		return nil, err
+	}
 	files := []string{}
 	if f, ok := args["files"].([]any); ok {
 		for _, file := range f {
@@ -150,7 +158,11 @@ func wrapRead(args map[string]any) (any, error) {
 }
 
 func wrapTree(args map[string]any) (any, error) {
-	repo, _ := args["repo"].(string)
+	repoSlug, _ := args["repo"].(string)
+	repo, err := ParseRepo(repoSlug)
+	if err != nil {
+		return nil, err
+	}
 	path, _ := args["path"].(string)
 	depth := 0
 	if d, ok := args["depth"].(float64); ok {

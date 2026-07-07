@@ -18,13 +18,9 @@ type ExploreResult struct {
 
 // Explore returns branch, tree, and README for a repo (or subdirectory listing).
 // If path is empty, returns root tree + README. If path is set, returns subdirectory entries only.
-func Explore(repo string, path string) (*ExploreResult, error) {
-	parsedRepo, err := ParseRepo(repo)
-	if err != nil {
-		return nil, err
-	}
-	owner := parsedRepo.Owner
-	name := parsedRepo.Name
+func Explore(repo Repo, path string) (*ExploreResult, error) {
+	owner := repo.Owner
+	name := repo.Name
 
 	gql, err := githubClients.GraphQL()
 	if err != nil {

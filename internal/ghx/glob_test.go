@@ -92,18 +92,18 @@ func TestExpandGlobs_PreservesOrder(t *testing.T) {
 	}
 }
 
-func TestTreeBadSlugReturnsErrorWithoutPanic(t *testing.T) {
+func TestWrapTreeBadSlugReturnsErrorWithoutPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("Tree panicked for invalid repo: %v", r)
+			t.Fatalf("wrapTree panicked for invalid repo: %v", r)
 		}
 	}()
 
-	_, err := Tree("noslash", "", TreeOpts{})
+	_, err := wrapTree(map[string]any{"repo": "noslash"})
 	if err == nil {
-		t.Fatal("Tree error = nil, want invalid repo error")
+		t.Fatal("wrapTree error = nil, want invalid repo error")
 	}
 	if !strings.Contains(err.Error(), "invalid repo") {
-		t.Fatalf("Tree error = %q, want invalid repo", err)
+		t.Fatalf("wrapTree error = %q, want invalid repo", err)
 	}
 }

@@ -238,10 +238,14 @@ func handleExplore(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallT
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	parsedRepo, err := ghxlib.ParseRepo(repo)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	path := request.GetString("path", "")
 
-	result, err := ghxlib.Explore(repo, path)
+	result, err := ghxlib.Explore(parsedRepo, path)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -297,6 +301,10 @@ func handleRead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	parsedRepo, err := ghxlib.ParseRepo(repo)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	pathsArg, err := request.RequireString("paths")
 	if err != nil {
@@ -315,7 +323,7 @@ func handleRead(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	mapKind := request.GetString("kind", "")
 	mapEngine := request.GetString("mapEngine", "")
 
-	results, err := ghxlib.Read(repo, paths, &ghxlib.ReadOpts{
+	results, err := ghxlib.Read(parsedRepo, paths, &ghxlib.ReadOpts{
 		Grep:      grepPattern,
 		Lines:     lineRange,
 		Map:       mapMode,
@@ -336,11 +344,15 @@ func handleTree(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	parsedRepo, err := ghxlib.ParseRepo(repo)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	path := request.GetString("path", "")
 	depth := request.GetInt("depth", 0)
 
-	results, err := ghxlib.Tree(repo, path, ghxlib.TreeOpts{Depth: depth})
+	results, err := ghxlib.Tree(parsedRepo, path, ghxlib.TreeOpts{Depth: depth})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
