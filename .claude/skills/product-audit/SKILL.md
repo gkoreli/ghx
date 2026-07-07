@@ -148,9 +148,12 @@ Delegation mechanics: `.claude/skills/fable-delegation/SKILL.md`.
 
 ## Output / evidence contract
 
-Write to `docs/audits/product-<focus>-<date>.md`, matching the repo's audit house style.
-Frontmatter: `title`, `date`, `status: "audit"`, `author`, `scope` (one line: surfaces +
-personas + "read-only, no code changes"). Then:
+Write to `docs/product-audit/` — **numbered and threaded like ADRs**, and kept separate from
+the *code* audits in `docs/audits/`. An audit round is `PA-000N` (the synthesis report); each
+persona-agent writes a threaded artifact `PA-000N.k-<persona>.md`; the synthesis is
+`PA-000N-<focus>.md`. Match the repo's audit house style. Frontmatter: `title`, `date`,
+`status: "audit"`, `audit: "PA-000N"`, `persona`/`author`, `scope` (one line: surfaces +
+personas + "read-only, no code changes"). Then (for the synthesis `PA-000N`):
 
 - **Executive summary** — the single highest-leverage finding first, in north-star terms.
 - **Ranked findings**, each with:
