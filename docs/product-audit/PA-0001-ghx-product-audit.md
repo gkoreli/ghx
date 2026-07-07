@@ -32,12 +32,13 @@ self-preference regime — arXiv:2404.13076), findings were **not** accepted on 
 - **Shared-prior caution applied:** H2's convergence across the AI-PM and North-Star personas is
   **not** independent corroboration — both read the same `corpus-discrimination` doc; it was
   re-derived from the artifact directly, not from the agents' agreement.
-- **Independent cross-family adjudication — PENDING (not run this session).** The Codex/gpt-5.5
-  adjudicator was dispatched read-only but returned a usage-limit error ("try again at 12:03");
-  no alternative non-Claude adjudicator is available. **Therefore every High finding below is
-  self-verified but NOT yet cross-family-checked, and none may feed a milestone go/no-go until
-  that check runs** (retry Codex, or Goga adjudicates). This gap is the honest state, recorded
-  rather than hidden.
+- **Independent adjudication — same-family DONE (`PA-0001.6`), cross-family still owed.** The
+  Codex/gpt-5.5 (cross-family) adjudicator was usage-capped, so per directive 5 a **fresh,
+  no-stake Claude adjudicator** re-derived C1–C5 (a *partial* mitigation — removes the stake /
+  shared-context bias, not the model-family bias). It **confirmed the spine of all three High
+  findings and sharpened four** (see **Adjudication outcome** below). **The cross-family check
+  remains owed; no High finding feeds a milestone go/no-go until it runs** (retry Codex, or Goga
+  adjudicates).
 
 ## Executive summary
 
@@ -99,6 +100,38 @@ brain itself, dogfooded live during the audit, *worked* — proving the thesis i
 
 ### L2 — A failed milestone risks reading as working  ·  Severity: Low (L2×I1)
 - **AI-PM + North-Star + Platform · capability-claims · `NORTH_STAR.md`/M8.** M8 anticipation's D1 gate FAILED (nextReads recall 0.071/0.000) but is described in prose alongside working capabilities; `nextReads` is promised-but-unenforced (`PA-0001.3` F6 → ADR-0031.2). The failed gate already halted the build correctly — the fix is narrative, ensuring nothing cites M8 as evidence it works.
+
+## Adjudication outcome (PA-0001.6 — same-family, fresh/no-stake)
+
+An independent, no-stake Claude adjudicator re-derived C1–C5 from the raw files (the
+**cross-family Codex check remains owed**). It **CONFIRMED the spine of all three High findings**
+and sharpened four:
+
+- **H1 — CONFIRM, soften "inverts."** Verified (`plugin.json:3-6`; `grep -c recon` = 0; both
+  surfaces default heavy, `--recon` opt-in). But it is a **known, openly sign-posted M5 gap**,
+  and both heavy skills already self-redirect to `--recon` in their first blockquote — a
+  *redirected* gap, not a *hidden* contradiction. **Leverage caveat:** H1 assumes the plugin is
+  the dominant install channel; a plain binary install ships no skills, so impact is
+  channel-dependent — size it before acting. Still the **highest-leverage fix** (one-file edit).
+- **H2 — CONFIRM, two corrections.** (a) sidecar < ghx on both discriminating tasks holds
+  **across two runs** (fixbatch + confirmatory, recomputed) — state it as cross-run robustness,
+  and note the `corpus-discrimination` doc **postdates** the banner (the cleanest proof this is
+  *framing lag, not fabrication*). (b) **Nuance the SPT label:** "not a quality meter" over-states
+  — the numerator *is* a quality proxy; SPT is a **context-efficiency** meter by design, and its
+  gameability is **downstream of the gate-vs-quality (uncalibrated-judge) hole**, not intrinsic.
+  The "24× ≈ 25×-smaller-denominator" identity is the **proof** of that mechanism — reclassify it
+  from L1 into H2.
+- **H3 — CONFIRM the spine, DOWN-GRADE the Explore sub-claim to NUANCE.** "Current advantage, not
+  a Power" is right (M10 blocked, κ uncalibrated). But native `Explore` competes only on the
+  **local-repo benefit** (context protection); it **cannot** do ghx's measured **capability** —
+  remote / GitHub-wide, no-clone recon + discovery. The audit conflated *benefit* (where Explore
+  overlaps) with *capability* (where it does not). Net: ghx's core domain is **uncontested by
+  Explore**, which *strengthens* the position — reposition on remote + discovery + the evidence
+  contract; don't fight Explore on the local tree.
+- **M3 — CONFIRM, severity → Medium** (additive-`omitempty` evolution makes it moderate).
+
+**Status:** the High findings are now **self-verified + same-family-adjudicated**; the
+**cross-family (Codex/gpt-5.5 or Goga) check is still owed** before any feeds a milestone go/no-go.
 
 ## What is actually fine (checked with equal rigor — and load-bearing here)
 
