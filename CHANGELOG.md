@@ -49,6 +49,233 @@ that measures the sidecar against an unaided agent is wired end to end.
   daemon also refuses to spawn from a `.test` binary, preventing lingering
   duplicate daemons during test runs.
 
+## [2.5.0] — 2026-07-06
+
+The release that completes the sidecar's ambient plumbing: agents can now
+authenticate as themselves through the sidecar, enterprise Claude installs work
+without wrapper-script friction, every turn writes a live event log as it
+happens, and the measurement stack gains the at_least(n) gate forms that make
+paired-cell comparisons sound.
+
+### Added
+
+- **Client auth-env passthrough** ([ADR-0033.1](docs/adr/0033.1-client-auth-env-passthrough.md)).
+  The sidecar now forwards the calling shell's auth environment to the agent, so
+  an agent that asks authenticates with its own credentials rather than the
+  sidecar host's. No wrapper scripts, no key copying.
+- **`agentSettingSources` opt-in** ([ADR-0033.2](docs/adr/0033.2-agent-setting-sources-optin.md)).
+  Enterprise Claude Code installs (toolbox, wrapper-script launchers) can declare
+  their settings sources at config time; the sidecar passes them through so the
+  agent boots with the right profile without a `CLAUDE_CODE_EXECUTABLE` detour.
+- **Real-time `live.jsonl` turn log** ([ADR-0022.1](docs/adr/0022.1-live-turn-log.md)).
+  Every sidecar turn now appends events — text chunks, tool calls, thoughts — to
+  `live.jsonl` as they happen, giving `tail -f` a human-readable window into an
+  in-flight turn. The end-of-turn `traces.jsonl` OTLP record is unchanged.
+- **`config init --claude-exe`** — pins the ACP adapter to a specific Claude Code
+  binary (toolbox installs, side-by-side versions). Companion to the
+  `agentSettingSources` opt-in.
+- **Tier-2 backend availability in `sidecar doctor`** — reports which tier-2
+  backends are available (embedded repomap vs optional external binaries like
+  ast-grep), so setup problems surface before a real ask hits them.
+- **Host-task eval S1 + S2** ([ADR-0032.1](docs/adr/0032.1-host-task-evals-decision.md)).
+  The host-task harness gains a workspace provisioner and outcome grader (S1), plus
+  write-policy enforcement and exploration/engineering attribution (S2), building
+  the scaffold for the arm-B comparison shipped in 2.6.0.
+- **`nextReads` concrete-paths contract + lenient normalizer**
+  ([ADR-0031.2](docs/adr/0031.2-nextreads-contract-revision.md)). The sidecar
+  persona now requires concrete file paths in `nextReads` hints; a lenient
+  normalizer repairs common deviations rather than rejecting them hard.
+- **ADR-0025.2 residuals closed** — G1 paired-cell and G3 char-ceiling
+  `at_least(n)` gate forms wired; `GHX_EVAL_GATE_AT_LEAST` env override for CI
+  ([ADR-0025.2](docs/adr/0025.2-gate-reducers-stability.md)).
+
+### Fixed
+
+- **Enterprise-wrapper hang resolved** — `settingSources: []` combined with a
+  `CLAUDE_CODE_EXECUTABLE` wrapper stalled the agent on boot; documented and
+  eliminated by the `agentSettingSources` opt-in path.
+
+## [2.4.2] — 2026-07-06
+
+A usability patch: the sidecar now works out of the box without manual adapter
+configuration, authentication errors teach the fix, SDK noise is filtered from
+surfaced diagnostics, and `ask --local` lets the calling agent grant tier-2
+local backends from the CLI without touching config.
+
+### Added
+
+- **`ask --local`** — grants tier-2 local backends (repomap, ast-grep) from the
+  CLI for a single ask, without requiring a config change. Agents can escalate
+  opportunistically when local tools are available
+  ([ADR-0028.1](docs/adr/0028.1-cli-ergonomics-batch.md)).
+- **Zero-config quickstart** documented in README — `ghx sidecar ask` works
+  immediately after `ghx sidecar config init --claude-acp` with the pinned
+  adapter default; no extra configuration step.
+
+### Fixed
+
+- **Zero-config adapter default** — the ACP adapter is now the pinned default;
+  first-time users no longer need to set the adapter field manually after `config
+  init`.
+- **Auth hint leads with the adapter's own login flow** — when the agent reports
+  an auth failure the surfaced hint now shows the adapter-specific login command
+  first, not a generic credential hint.
+- **Benign SDK boilerplate filtered from surfaced stderr** — low-signal SDK
+  startup noise no longer appears in the sidecar's diagnostics output, making
+  real errors easier to spot.
+- **Anticipation miner test is hermetic** — frozen eval artifacts are never
+  rewritten by suite runs; provenance paths are portable across machines
+  ([ADR-0031.1](docs/adr/0031.1-anticipation-v1-decision.md)).
+
+## [2.4.1] — 2026-07-06
+
+A hardening patch focused on agent-facing diagnostics and measurement-stack
+integrity: the sidecar now surfaces loud, actionable errors instead of silent
+failures, session working directories are neutral by default, and the eval
+framework can annotate structurally fragile gates.
+
+### Added
+
+- **Loud sidecar diagnostics, neutral session cwd, agent provenance**
+  ([ADR-0033](docs/adr/0033-sidecar-out-of-box-agent-config.md)). The sidecar
+  surfaces loud, structured error messages when the agent cannot start or
+  authenticate; session working directories default to a neutral location so agent
+  file writes go somewhere predictable; provenance metadata is recorded per
+  session.
+- **`sidecar doctor --live`** — a live connectivity check that verifies the daemon
+  can actually reach the configured adapter and report-sink, not just that config
+  parses.
+- **`at_least(n)` gate reducer + fragility annotation**
+  ([ADR-0025.2](docs/adr/0025.2-gate-reducers-stability.md)). Gates that pass by
+  a slim margin can now be flagged FRAGILE in the verdict, so readers know which
+  thresholds to watch. A `FRAGILE` verdict is still a pass; it is an honest signal
+  about headroom.
+
+### Fixed
+
+- **OTLP logs and metrics UTF-8 sanitization** — invalid UTF-8 sequences in log
+  and metric strings no longer drop the span; a shared proto-string sanitizer
+  covers all OTLP exporters (extends the trace-level fix from 2.4.0).
+
+## [2.4.0] — 2026-07-06
+
+The release that makes tier escalation deliberate and observable: every
+exploration path now runs through an escalation policy engine that records its
+decision, session routing is live with automatic reroute recovery, and the sidecar
+persona is revised a third time with explicit tier-2 and discovery citation
+doctrine. The measurement stack also gains real-token cost accounting alongside
+the earlier chars/4 estimate.
+
+### Added
+
+- **Escalation policy engine** ([ADR-0024.2](docs/adr/0024.2-escalation-policy.md)).
+  Every exploration path now evaluates a policy before escalating to tier-2 tools;
+  decisions are recorded in `tier-decisions.jsonl` per session so escalation is
+  auditable, not implicit.
+- **Session routing cascade + reroute recovery**
+  ([ADR-0030.1](docs/adr/0030.1-session-routing.md)). The always-on daemon routes
+  asks through a deterministic R1–R5 cascade; a failed route recovers via reroute
+  rather than erroring, and route decisions are observable in the session log.
+- **Persona revision 3 — tier-2 doctrine + discovery read-then-cite**
+  ([ADR-0029.2](docs/adr/0029.2-persona-revision-3-tier2-discovery-citations.md)).
+  The sidecar persona now carries explicit guidance on when to escalate to tier-2
+  tools and requires that discovery-mode answers cite the repos/files read before
+  making a claim.
+- **Discovery e2e episode runner** — a reusable eval driver for discovery-class
+  tasks replaces the throwaway spot driver; discovery episodes are now first-class
+  eval citizens ([ADR-0019.2](docs/adr/0019.2-discovery-eval-tasks.md)).
+- **Real-token SPT accounting**
+  ([ADR-0016.11](docs/adr/0016.11-real-token-accounting.md)). Eval runs now report
+  real token counts and costs alongside the chars/4 estimate used previously, with
+  TRUST H5 promoted to the trust ledger.
+- **M7 tier-2 slices 3 + 4 — ast-grep and repomap absorbed**
+  ([ADR-0024.1](docs/adr/0024.1-escalation-tiers-decision.md)). `local:ast-grep`
+  and `local:repomap` are now first-class tier-2 backends, selectable alongside the
+  snapshot/codemap backends shipped in 2.3.0.
+
+### Fixed
+
+- **OTLP trace UTF-8 sanitization** — invalid UTF-8 sequences in span attributes
+  no longer drop the span; the exporter sanitizes before serializing.
+- **Artifact names unique across skills** — release artifacts no longer collide
+  when multiple skills ship binaries with the same base name; brew formula updated
+  accordingly.
+- **Daemon config digest includes resolved report-sink exe** — the daemon
+  correctly detects a changed sink binary and restarts, rather than serving stale
+  config (integration audit F1).
+
+### Changed
+
+- **Persona revision 3** tightens tier-2 escalation guidance and adds
+  discovery-mode citation discipline on top of the inspect-first posture introduced
+  in revision 2 ([ADR-0029.2](docs/adr/0029.2-persona-revision-3-tier2-discovery-citations.md)).
+
+## [2.3.0] — 2026-07-06
+
+The release that operationalizes the always-on daemon, closes the tier-2
+reconnaissance gap, and hardens the measurement stack against the biggest
+remaining threats to its validity. The sidecar daemon now runs warm in the
+background; `ghx inspect` gives agents a one-shot budgeted concern probe; tier-2
+gains its first two absorbed backends (snapshot substrate + codemap); discovery
+eval tasks are wired end-to-end; and the judge evaluation rail ships its first
+live cross-family scores.
+
+### Added
+
+- **Always-on sidecar daemon** ([ADR-0030](docs/adr/0030-always-on-daemon.md)).
+  The daemon runs warm in the background, holds a session registry, and accepts
+  socket IPC from the CLI — so the first ask of a session does not pay a cold-start
+  penalty. `ghx sidecar daemon start/stop/status` manages the lifecycle.
+- **`ghx inspect`** ([ADR-0028.2](docs/adr/0028.2-ghx-inspect.md)). A one-shot
+  budgeted concern-inspection command: given a concern, ghx reads into the relevant
+  parts of a repo and returns a focused answer within the budget. Designed for
+  agents that need a quick targeted probe, not a full exploration.
+- **Tier-2 snapshot substrate + codemap absorbed**
+  ([ADR-0024.1](docs/adr/0024.1-escalation-tiers-decision.md)). The first two M7
+  tier-2 items land: a local snapshot/cache substrate that backs tier-2 reads
+  without re-fetching, and `local:codemap` absorbed as a first-class tier-2
+  backend. (`local:ast-grep` and `local:repomap` follow in 2.4.0.)
+- **Discovery eval class** ([ADR-0019.2](docs/adr/0019.2-discovery-eval-tasks.md)).
+  Discovery-mode tasks — "which repos/libraries do X" — are now a first-class eval
+  class with their own task harness, scorer, and gates, separate from the
+  repo-scoped exploration class.
+- **Judge evaluation CLI rail** ([ADR-0023.1](docs/adr/0023.1-judge-scorer-decision.md)).
+  A `claude-cli` secondary transport runs cross-family judge evaluations at k=1;
+  first live scores are PRELIMINARY (same-family bias under investigation as TRUST
+  H1). The full judge sweep of 144 episodes completes within this release window.
+- **SFT training record exporter**
+  ([ADR-0017.1](docs/adr/0017.1-training-data-exports-decision.md)). Committed
+  episodes can now be exported as training JSONL for supervised fine-tuning
+  pipelines.
+- **Persona revision 2 — inspect-first exploration**
+  ([ADR-0029.1](docs/adr/0029.1-persona-revision-2-inspect-first.md)). The sidecar
+  persona is revised to lead with `ghx inspect` before committing to a full
+  exploration, reducing unnecessary deep reads on shallow questions.
+- **Session routing pre-registration** ([ADR-0030.1](docs/adr/0030.1-session-routing.md)).
+  The deterministic routing cascade is pre-registered and accepted; the live
+  implementation ships in 2.4.0.
+- **ADR-0020.2 resume steering** ([ADR-0020.2](docs/adr/0020.2-resume-steering.md)).
+  `LoadSession` now carries the full session-options meta so resumed turns receive
+  correct steering context (TRUST H8 fixed, live-verified).
+- **Trace-capture completeness audit** ([ADR-0016.10](docs/adr/0016.10-trace-capture-completeness.md)).
+  A raw-SDK audit, comparator, and `trace_capture_gap` anomaly detector verify
+  that the OTLP trace pipeline captures every span the SDK emits (TRUST H3).
+
+### Changed
+
+- **Trust ledger elevated to tracked workstream** — `TRUST.md` is now a
+  first-class north-star workstream tracking C7/C8 open-questions; the
+  visibility/truthfulness tenet is binding on all agents.
+- **Embedded skills refreshed** — recon skill and classic CLI skill updated with
+  sidecar-first framing, verified command surface, and the measured map claim.
+
+### Fixed
+
+- **Closed-book memorization confound ruled out** (TRUST H2). A closed-book probe
+  harness (agents answer without repo access) shows 0.067 vs open-book 0.926,
+  refuting the memorization confound for this corpus
+  ([ADR-0016.9](docs/adr/0016.9-memorization-confound-audit.md)).
+
 ## [2.2.0] — 2026-07-06
 
 The release that turns the sidecar from a working prototype into something you
@@ -167,5 +394,11 @@ carry a citable verdict.
   [docs/evals/gate-run-2026-07/](docs/evals/gate-run-2026-07/). Verdicts are read
   as a conservative floor; the artifacts are the proof either way.
 
-[Unreleased]: https://github.com/gkoreli/ghx/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/gkoreli/ghx/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/gkoreli/ghx/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/gkoreli/ghx/compare/v2.4.2...v2.5.0
+[2.4.2]: https://github.com/gkoreli/ghx/compare/v2.4.1...v2.4.2
+[2.4.1]: https://github.com/gkoreli/ghx/compare/v2.4.0...v2.4.1
+[2.4.0]: https://github.com/gkoreli/ghx/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/gkoreli/ghx/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/gkoreli/ghx/compare/v2.1.19...v2.2.0
