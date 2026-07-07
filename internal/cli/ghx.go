@@ -154,6 +154,10 @@ map plus a narrowing hint rather than flooding output.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		grepPattern, _ := cmd.Flags().GetString("grep")
 		lineRange, _ := cmd.Flags().GetString("lines")
+		lineRangeAlias, _ := cmd.Flags().GetString("line-range")
+		if lineRange == "" {
+			lineRange = lineRangeAlias
+		}
 		normalizedLines, err := normalizedReadLineRange(cmd, lineRange)
 		if err != nil {
 			return WithExitCode(ExitBadInvocation, err)
@@ -265,6 +269,7 @@ map plus a narrowing hint rather than flooding output.`,
 func init() {
 	readCmd.Flags().String("grep", "", "Filter output to matching lines")
 	readCmd.Flags().String("lines", "", "Extract specific line range (e.g., 42-80)")
+	readCmd.Flags().String("line-range", "", "Hidden alias for --lines START-END")
 	readCmd.Flags().Int("start", 0, "Hidden alias for --lines START-END")
 	readCmd.Flags().Int("end", 0, "Hidden alias for --lines START-END")
 	readCmd.Flags().Int("offset", 0, "Hidden alias for --lines START-END")
@@ -275,6 +280,7 @@ func init() {
 	readCmd.Flags().String("map-engine", "auto", "Map engine: auto|regex|tree-sitter")
 	readCmd.Flags().Int("budget", 12000, "Approximate output budget in characters before structural fallback")
 	readCmd.Flags().Bool("full", false, "Show complete file contents without budget fallback")
+	_ = readCmd.Flags().MarkHidden("line-range")
 	_ = readCmd.Flags().MarkHidden("start")
 	_ = readCmd.Flags().MarkHidden("end")
 	_ = readCmd.Flags().MarkHidden("offset")
@@ -517,7 +523,7 @@ func teachingFlagError(cmd *cobra.Command, err error) error {
 		return WithExitCode(ExitBadInvocation, err)
 	}
 	nearest := nearestFlag(cmd, flag)
-	if alias := knownFlagAlias(flag); alias != "" {
+	if alias := knownFlagAlias(cmd, flag); alias != "" {
 		nearest = alias
 	}
 	if nearest == "" {
@@ -571,21 +577,31 @@ func nearestFlag(cmd *cobra.Command, unknown string) string {
 	return "--" + candidates[0].name
 }
 
-func knownFlagAlias(flag string) string {
+func knownFlagAlias(cmd *cobra.Command, flag string) string {
 	switch flag {
 	case "start", "end", "offset", "limit", "line-range":
 		return "--lines START-END"
+	case "path":
+		switch cmd.CommandPath() {
+		case "ghx explore":
+			return "path argument"
+		case "ghx search":
+			return "ghx grep owner/repo PATTERN --path PATH"
+		}
 	case "type":
 		return "--lang LANG"
-	default:
-		return ""
 	}
+	return ""
 }
 
 func exampleForFlag(cmd *cobra.Command, nearest string) string {
 	switch nearest {
 	case "--lines START-END":
 		return "ghx read owner/repo main.go --lines 40-80"
+	case "path argument":
+		return "ghx explore owner/repo src"
+	case "ghx grep owner/repo PATTERN --path PATH":
+		return "ghx grep owner/repo \"query\" --path src"
 	case "--lang LANG":
 		return "ghx search owner/repo \"middleware\" --lang go"
 	case "--glob":
@@ -620,14 +636,22 @@ func levenshtein(a, b string) int {
 }
 
 func normalizedReadLineRange(cmd *cobra.Command, lineRange string) (string, error) {
+	lineRangeAlias, _ := cmd.Flags().GetString("line-range")
 	start, _ := cmd.Flags().GetInt("start")
 	end, _ := cmd.Flags().GetInt("end")
 	offset, _ := cmd.Flags().GetInt("offset")
 	limit, _ := cmd.Flags().GetInt("limit")
+	hasLineRangeAlias := cmd.Flags().Changed("line-range")
 	hasStart := cmd.Flags().Changed("start") || cmd.Flags().Changed("end")
 	hasOffset := cmd.Flags().Changed("offset") || cmd.Flags().Changed("limit")
+	if cmd.Flags().Changed("lines") && hasLineRangeAlias {
+		return "", fmt.Errorf("--lines cannot be combined with hidden alias --line-range")
+	}
+	if lineRange == "" && hasLineRangeAlias {
+		lineRange = lineRangeAlias
+	}
 	if lineRange != "" && (hasStart || hasOffset) {
-		return "", fmt.Errorf("--lines cannot be combined with hidden aliases --start/--end or --offset/--limit")
+		return "", fmt.Errorf("--lines cannot be combined with hidden aliases --line-range, --start/--end, or --offset/--limit")
 	}
 	if hasStart && hasOffset {
 		return "", fmt.Errorf("--start/--end cannot be combined with --offset/--limit")
