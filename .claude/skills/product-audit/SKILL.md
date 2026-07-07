@@ -180,10 +180,14 @@ Tools: text-only (WebSearch/WebFetch/curl/gh). No browser automation, no screens
   For GitHub/OSS exploration (competitive/discovery/absorption scouting), DOGFOOD ghx itself
   (its discovery tier is built for this) — fall back to gh/web only where ghx can't yet do
   the job, and log that gap as a finding.
-Deliver a findings artifact. Each finding: persona·scope·surface | evidence (file:line /
-  command+output / trace path / doc quote) | severity (Likelihood×Impact) | north-star
-  relationship | a SPECIFIC cross-ref URL + one line on why it matters. DH5/DH6 bar: quote
-  the target, name the flaw. Add a "what I checked and found SOUND" (nulls) section.
+Deliver a findings artifact. Each finding: persona·scope·surface | novelty (NEW/KNOWN⟨ref⟩) |
+  EVIDENCE across every applicable class, each verified — SOURCE (file:line + quoted snippet +
+  a recompute command), STRATEGY (the exact tenet / north-star / ADR passage it bears on,
+  quoted), EXPERIMENT (the committed eval / manual-run / trace artifact path + recompute) |
+  severity (Likelihood×Impact) | CROSS-REFS as SPECIFIC deep hyperlinks + one line on why each
+  matters (external framework, competitor, AND the OSS repo/file where an idea is inspired or
+  absorbed — never a bare homepage; verify each resolves). DH5/DH6 bar: quote the target, name
+  the flaw. Add a "what I checked and found SOUND" (nulls) section.
 Return: artifact path, top findings, source count, least-confident call.
 ```
 
@@ -203,6 +207,13 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
 + personas + "read-only, no code changes"). Then (for the synthesis `PA-000N`):
 
 - **Executive summary** — the single highest-leverage finding first, in north-star terms.
+- **Evidence & cross-reference ledger (decision-grade)** — the receipts, consolidated so a
+  decision-maker acts from this doc alone (not by spelunking the persona artifacts): per top
+  finding, its **source** (`file:line` + quoted snippet + recompute command), **strategy** (the
+  exact tenet / north-star / ADR passage), **experiment** (the eval / manual-run / trace artifact
+  path + recompute), and **external / OSS-inspiration** (specific deep hyperlinks + why each
+  matters, and — for absorbed ideas — what we took). Conclusions without this ledger are **not
+  decision-ready**; build it in the synthesis (delegate to a dedicated evidence agent if large).
 - **Ranked findings**, each with:
   - **Persona · Scope · Surface** it came from.
   - **Novelty** — `NEW` / `KNOWN-CONFIRMED⟨ref⟩` / `KNOWN-DISPUTED⟨ref⟩`: does this already live
@@ -218,9 +229,11 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
   - **Verification state** — `self-verified` / `same-family-adjudicated` / `cross-family-adjudicated`;
     a **High finding is not milestone-citable below `cross-family-adjudicated`** (Process step 5).
     Name who judged it and how a reader re-derives it (self-preference guard, directive 5).
-  - **Cross-reference** — for any external framework or competitor claim: a **specific**
-    deep URL + one line on **why it matters**. No vague or invented links; if unverified,
-    say so.
+  - **Cross-reference** — for any external claim (framework, competitor, **or the OSS repo/file
+    where an idea was inspired or absorbed**): a **specific deep hyperlink** (exact GitHub
+    file/repo, essay, paper, doc — never a bare homepage) + one line on **why it matters** (and,
+    for absorbed ideas, *what we took*). Verify each resolves; no vague or invented links; if
+    unverified, say so.
 - **"What is actually fine"** — supposed problems checked and found sound, equal rigor.
 - **Adjacent-idea proposals** — labelled as proposals, each filtered against the north star
   and named on the Ansoff grid (penetration / development / diversification).
