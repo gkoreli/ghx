@@ -10,7 +10,25 @@ prose here.
 
 ## [Unreleased]
 
-Nothing released yet in this cycle.
+Staged on `mainline`, not yet released. Agent-experience fixes from the v2.8.0
+dogfood.
+
+### Changed
+
+- **The resolved commit SHA is now visible to agents** — `ghx code` type stubs
+  and the code-mode result advertise `snapshot: { repo: { owner; name }; sha }`
+  on `explore`/`read`, so an agent can read *which commit* the reconnaissance
+  saw (the [ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md)
+  B2 `Snapshot` was computed but not surfaced); `ghx.Repo` JSON keys are
+  lowercased for consistent serialization.
+
+### Fixed
+
+- **`ghx code` exits 2 on a transpile/parse/run failure** (was 0 in some paths)
+  and no longer doubles the `transpile:` error prefix.
+- **`ghx sidecar ask --depth <invalid>` is rejected with exit 2** naming the
+  valid set (`cheap|normal|deep`) before any daemon call, instead of silently
+  coercing — matching the MCP recon path.
 
 ## [2.8.0] — 2026-07-07
 
