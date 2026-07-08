@@ -15,6 +15,16 @@ dogfood.
 
 ### Changed
 
+- **The zero-knowledge recon skill now ships in the default install** —
+  `.claude-plugin/plugin.json` now lists `./skills/ghx-recon` **first**, so an
+  uninformed agent lands on the 47-line delegation surface (`ghx serve --recon` /
+  `ghx skill --recon`) instead of only the heavy power-user CLI skill that the
+  north star wants hidden. Additive — the `ghx`/`ghx-mcp` power-user skills are
+  unchanged. Ships the product audit's #1 finding
+  ([PA-0001](docs/product-audit/PA-0001-ghx-product-audit.md) H1, cross-family
+  cleared in [PA-0001.10](docs/product-audit/PA-0001.10-cross-family-adjudication.md);
+  workstream B2). Making recon the *default* of `ghx skill` is the deferred,
+  non-additive half.
 - **The resolved commit SHA is now visible to agents** — `ghx code` type stubs
   and the code-mode result advertise `snapshot: { repo: { owner; name }; sha }`
   on `explore`/`read`, so an agent can read *which commit* the reconnaissance

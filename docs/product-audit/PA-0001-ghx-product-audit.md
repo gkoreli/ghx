@@ -34,13 +34,16 @@ self-preference regime — arXiv:2404.13076), findings were **not** accepted on 
 - **Shared-prior caution applied:** H2's convergence across the AI-PM and North-Star personas is
   **not** independent corroboration — both read the same `corpus-discrimination` doc; it was
   re-derived from the artifact directly, not from the agents' agreement.
-- **Independent adjudication — same-family DONE (`PA-0001.6`), cross-family still owed.** The
-  Codex/gpt-5.5 (cross-family) adjudicator was usage-capped, so per directive 5 a **fresh,
-  no-stake Claude adjudicator** re-derived C1–C5 (a *partial* mitigation — removes the stake /
-  shared-context bias, not the model-family bias). It **confirmed the spine of all three High
-  findings and sharpened four** (see **Adjudication outcome** below). **The cross-family check
-  remains owed; no High finding feeds a milestone go/no-go until it runs** (retry Codex, or Goga
-  adjudicates).
+- **Independent adjudication — same-family DONE (`PA-0001.6`), cross-family DONE (`PA-0001.10`).**
+  A fresh no-stake Claude adjudicator first re-derived C1–C5 (partial mitigation). The owed
+  **cross-family (Codex/gpt-5.5)** check then **ran and passed** (2026-07-07, session `019f3f9a`):
+  it **CONFIRMED H1 and H2, confirmed the spine of H3** (advantage-not-yet-a-Power; `report.go`
+  unversioned), **endorsed the H1>H2>M1 ranking**, and added two corrections now folded — (a) H3's
+  "the true alternative *is* native Explore" is over-collapsed (Explore competes on
+  context-isolation, does **not** replace remote GitHub-wide recon / discovery / artifacts /
+  evidence contract), and (b) H1 is safe to ship **only additively** (add `ghx-recon` to the
+  manifest; do *not* remove the heavy skills or flip the `ghx skill` default as a "one-file"
+  change). Both PA threads now carry an independent cross-family second opinion.
 
 ## Executive summary
 
@@ -67,7 +70,7 @@ brain itself, dogfooded live during the audit, *worked* — proving the thesis i
 - **Persona·Scope·Surface:** Agent Experience · Context-budget/progressive-disclosure · distribution/plugin.
 - **Evidence:** `.claude-plugin/plugin.json` → `"skills": ["./skills/ghx","./skills/ghx-mcp"]` (re-derived by Fable). The recon skill / single `recon` tool is opt-in on all three surfaces (`PA-0001.1` F1). `inspect` and `tier2` — the best signal-per-token collapses — are absent from `ghx skill` and MCP entirely (`PA-0001.1` F3).
 - **North-star relationship:** fails the core thesis ("main agent needs zero ghx knowledge; context is sacred") at the *default* install.
-- **Disposition:** Needs work → **workstream B2** (zero-CLI adoption surface, = M5 frontier): make the recon/single-tool surface the default; demote the CLI skill to opt-in; expose `inspect` on the recommended surface.
+- **Disposition:** **PARTIALLY SHIPPED (2026-07-07).** The cross-family-cleared *additive* fix landed: `./skills/ghx-recon` added **first** to `.claude-plugin/plugin.json` (the zero-knowledge surface is now installed and top-billed; removes nothing). **Remaining → workstream B2 / Goga's call** (the non-additive half, deliberately not bundled): make the recon/single-tool surface the *default* of `ghx skill`; relegate the CLI skill to opt-in; expose `inspect` on the recommended surface.
 - **Who judged / how to check:** self-verified (`cat .claude-plugin/plugin.json`). **Cross-family: pending.**
 
 ### H2 — The flagship narrative overstates what the honest ledgers already say  ·  Severity: High (L2×I3)
@@ -76,11 +79,11 @@ brain itself, dogfooded live during the audit, *worked* — proving the thesis i
 - **Fairness (the important part):** this is **narrative/framing lag, NOT fabrication.** Every caveat above is stated in ghx's *own* committed ledgers; `corpus-discrimination` is a self-authored honest analysis that *proposes fixes* (R1–R4). Credit is due (see nulls).
 - **North-star relationship:** bears on the "both, not one" rebuttal, the moat-via-measurement thesis, and the Visibility/Truthfulness tenet ("read the M4 verdict as a conservative floor, never a ceiling").
 - **Disposition:** Needs work → **workstream C** (run C8 host-task eval; land the κ-calibrated judge — C4) **+ a NORTH_STAR banner honesty pass** making the flagship say what the ledgers say; adopt the corpus refresh (R1–R4) via a pre-registered eval-corpus ADR.
-- **Who judged / how to check:** self-verified against the committed doc (recompute commands are in `corpus-discrimination-2026-07-07.md` §Provenance). **Cross-family: pending.**
+- **Who judged / how to check:** self-verified against the committed doc (recompute commands are in `corpus-discrimination-2026-07-07.md` §Provenance). **Cross-family: CONFIRMED (`PA-0001.10`)** — the narrative-inflation framing is upheld; the ledger itself is honest.
 
 ### H3 — "Brain not tools" is a current advantage, not yet a Power — and the true alternative ships in the host  ·  Severity: High (L2×I3)
 - **Persona·Scope·Surface:** Competitive-Paranoid + Platform/Scale · competitive / moat / distribution · `NORTH_STAR.md` moat + dogfooded GitHub recon.
-- **Evidence:** the moat's two named barriers are unrealized — cornered-resource trajectory data → trained model (M10, *blocked*) and the process-power judge (κ *not calibrated*); the brain is `NORTH_STAR.md`'s own admitted "~400 lines of quirky instructions" (no barrier yet). The **true alternative is the host's native `Explore` subagent** (read-only, cheaper model, context-isolated) — ghx's exact Benefit, free from the platform — not "the agent greps files itself" (`PA-0001.4` F1/F2). A benchmark-backed competitor, **DeusData/codebase-memory-mcp (27.8k★, arXiv, "99% fewer tokens", auto-installs into 11 agents incl. Claude Code)**, is claiming the aggregation/distribution Power; **no eval measures whether an agent *selects* ghx** (ADR-0032.1 arm-B is an ablation, not a selection contest) (`PA-0001.3` F3).
+- **Evidence:** the moat's two named barriers are unrealized — cornered-resource trajectory data → trained model (M10, *blocked*) and the process-power judge (κ *not calibrated*); the brain is `NORTH_STAR.md`'s own admitted "~400 lines of quirky instructions" (no barrier yet). The **true alternative is the host's native `Explore` subagent** (read-only, cheaper model, context-isolated) — ghx's exact Benefit, free from the platform — not "the agent greps files itself" (`PA-0001.4` F1/F2). **[Cross-family nuance, `PA-0001.10`]:** Explore is *a* real alternative on the *context-isolation* axis, but it does **not** substitute for ghx's remote-first GitHub-wide recon, discovery tier, committed artifacts/traces, and evidence contract — so naming it *sharpens* the moat comparison, it does not collapse it. A benchmark-backed competitor, **DeusData/codebase-memory-mcp (27.8k★, arXiv, "99% fewer tokens", auto-installs into 11 agents incl. Claude Code)**, is claiming the aggregation/distribution Power; **no eval measures whether an agent *selects* ghx** (ADR-0032.1 arm-B is an ablation, not a selection contest) (`PA-0001.3` F3).
 - **North-star relationship:** the moat thesis and P4. Per the generative-competition doctrine (`AGENTS.md`), the move is **accelerate + absorb**, not retreat.
 - **Disposition:** Needs work → accelerate the data moat + make the **evidence contract a switching cost** (P4); add a **selection-eval arm** (workstream C); **publish the SAFE benchmark** before the category's numbers are set by someone else; absorb (below).
 - **Who judged / how to check:** Explore behavior + competitor stars verified live (`gh`); **F2's assumption that Explore stays local/in-session with no persisted artifact is verified-now-not-future** — the single most important thing to monitor. **Cross-family: pending.**
