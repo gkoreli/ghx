@@ -139,7 +139,18 @@ milestone-grade or genuinely cross-cutting audit. Do not boil the ocean by refle
    neutralize model-family self-preference; if unavailable (e.g. usage-capped), fall back to a
    **fresh, independent Claude adjudicator** (a new agent, no stake, adversarial brief) — a
    *partial* mitigation that removes the stake/shared-context bias but **not** the same-family
-   bias, so flag any finding that got only a same-family check. Record *who judged it and how a
+   bias, so flag any finding that got only a same-family check. **What each pass is actually good for
+   (mechanism, not vibe — PA-0002 worked example):** same-family cross-validation reliably confirms
+   a fact's *existence / direction* (the license exists, the seam exists, the number exists); the
+   **cross-family** pass is what catches *calibration* — over-claims, superlatives, effort-optimism
+   a same-family agent nods through (PA-0002's distiller confirmed all four load-bearing facts;
+   cross-family then corrected every one: "zero GPL"→precise dep terms, "clean drop-in"→a real
+   integration surface, "99%"→"120×", "~80%"→unmeasured). **A capped cross-family check is a
+   *deferred obligation*, not a waiver:** record it OWED, retry when the window resets, and on
+   discharge **fold its corrections back into the synthesis AND any governing ADR that cited the
+   audit** (`PA-0002.10` discharged it hours later and re-flowed three corrections into PA-0002 +
+   ADR-0024.3). Shipping a *pre-registered* decision with cross-family OWED is fine; *accepting/
+   merging* the governing ADR on it is not, until discharge. Record *who judged it and how a
    reader checks the judge* —
    the same calibration the product demands of its own eval judge (`AGENTS.md`
    Visibility/Truthfulness). Do not run a milestone decision on an unchecked judge. **Recompute
@@ -224,11 +235,17 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
     finding's **exact quantity** via that command.
   - **Severity** (Likelihood × Impact) and **Disposition** — *sound* / *needs work* /
     *invalidates*. A "needs work" finding **routes to a workstream (A/B/C) or proposes an
-    ADR**, not a bare "owner + date".
+    ADR**, not a bare "owner + date". A decision-grade audit that reaches a **build / absorb /
+    kill** call names its **governing ADR + pre-registered gate** as the terminal recommendation
+    (authoring the ADR is engineering flow — out of scope — but *naming* it and *defining its
+    gate* is the audit's job; PA-0002 → ADR-0024.3's `local:cbm` bake-off gate).
   - **North-star relationship** — filter pass/fail, or the tenet/milestone it bears on.
   - **Verification state** — `self-verified` / `same-family-adjudicated` / `cross-family-adjudicated`;
     a **High finding is not milestone-citable below `cross-family-adjudicated`** (Process step 5).
-    Name who judged it and how a reader re-derives it (self-preference guard, directive 5).
+    Name who judged it and how a reader re-derives it (self-preference guard, directive 5). The
+    cross-family adjudication is recorded as its **own threaded artifact** (`PA-000N.k`) and — when
+    capped — may land *after* the synthesis/distiller as a trailing artifact that retro-folds its
+    corrections (`PA-0002.10`).
   - **Cross-reference** — for any external claim (framework, competitor, **or the OSS repo/file
     where an idea was inspired or absorbed**): a **specific deep hyperlink** (exact GitHub
     file/repo, essay, paper, doc — never a bare homepage) + one line on **why it matters** (and,
@@ -239,8 +256,13 @@ from the skill's fixed charter boundary below), `persona`/`author`, `scope` (one
   and named on the Ansoff grid (penetration / development / diversification).
 - **Absorption candidates** — open-source/competitor components worth absorbing (idea →
   utility → feature → whole tool under the hood), each with *what to take*, *where it plugs
-  in*, and its *north-star-filter alignment*. Steal openly, with attribution; competition is
-  a supply of building blocks, not a threat (`AGENTS.md` Open Source Leverage).
+  in*, and its *north-star-filter alignment*. **"Where it plugs in" must enumerate the *full*
+  change surface** — every registry / list / contract that also changes — not just the
+  happy-path seam: **feasibility/effort is a systematic optimism hotspot** (PA-0002 called a
+  `local:cbm` shell-out a "clean drop-in"; the cross-family pass found the status, tool-registry,
+  and report-ID lists all needed updating too — effort M, not trivial). Steal openly, with
+  attribution; competition is a supply of building blocks, not a threat (`AGENTS.md` Open
+  Source Leverage).
 - **North-star / tenet evolution proposals** — where the audit found the *yardstick itself*
   stale or lagging ghx's velocity: name it, with evidence, and propose the evolution
   (deliberate, not per-run — directive 1). Respect the tenets; challenge them only with evidence.
@@ -349,7 +371,7 @@ Apply each with its agentic-first verdict (directive 2). Pick 3–5 total.
 | Scope | Core question | Grounding |
 |---|---|---|
 | **Agent Experience (AX)** | Can the agent discover, invoke, recover-from, not-be-misled-by, and compose it? | Biilmann AX; Anthropic ACI |
-| **Token economics / signals-per-token** | Context tax per unit of returned signal — **at all three SPT levels** (main-agent, sidecar-internal ~400-line persona-doctrine tax, whole-workflow vs. native delegation) | Anthropic context-engineering; NORTH_STAR ADR-0016.6 |
+| **Token economics / signals-per-token** | Context tax per unit of returned signal — **at all three SPT levels** (main-agent, sidecar-internal persona-doctrine tax [measured ~141 rendered lines / ~1,714 tokens — PA-0001 corrected an inflated "~400"; **recompute, never cite from memory**], whole-workflow vs. native delegation) | Anthropic context-engineering; NORTH_STAR ADR-0016.6 |
 | **Evals-as-user-research** | Does an eval suite serve as user research, and is it *trustworthy* (calibrated judge, guardrails, committed negatives)? Decompose "task success" into sub-metrics — tool-correctness, argument-correctness, task-completion, MCP-task-completion (via `deepeval`). | Hamel evals; **code-localization/retrieval benchmarks (LocAgent, RepoBench, CodeSearchNet — ghx's actual job)**, plus SWE-bench / τ²-bench for downstream task success & pass^k consistency |
 | **Tool / affordance & error-as-affordance** | Do names/schemas make the right call obvious, invalid states unrepresentable, and does every error name the correct next invocation? | Anthropic writing-tools; OpenAI function-calling (<20 active) |
 | **Context-budget / progressive disclosure** | How much doctrine must load into the *main* agent before first success? Ideal: zero. | Anthropic Agent Skills; NORTH_STAR |

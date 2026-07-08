@@ -124,7 +124,15 @@ You are the authoritative judge, and a model adjudicating its own delegated work
   (a Codex/gpt-5.5 adjudicator via `fable-delegation`, or the human). If the cross-family
   checker is unavailable, a **fresh, no-stake Claude** adjudicator is a partial fallback —
   it removes stake/shared-context bias, not model-family bias; flag findings checked only
-  same-family.
+  same-family. **Know what each pass is good for (mechanism, not vibe):** same-family
+  cross-validation reliably confirms a fact's *existence / direction*; the **cross-family** pass
+  is what catches *calibration* — over-claims, superlatives, effort-optimism a same-family agent
+  nods through (worked example: a same-family distiller confirmed four load-bearing facts;
+  cross-family then corrected all four on precision — "zero GPL", "clean drop-in", "99%",
+  "~80%"). **A capped cross-family check is a *deferred obligation*, not a waiver:** record it
+  OWED, retry when the window resets, and on discharge **fold its corrections back into the
+  finalized artifact AND anything downstream that already cited it.** Shipping a *pre-registered*
+  decision with the check OWED is fine; *accepting/merging* on it is not, until discharge.
 - **Revise, then commit** with a message that states what was accepted *and* declined.
 
 ## Iterate / finalize
@@ -187,7 +195,8 @@ product-audit Process step 8, generalized):
 - **Front-load the run-spine;** harnesses may truncate long docs.
 - **Name in/out-of-scope,** and have a reviewer attack it.
 - **Guard the judge** against self-preference; verify load-bearing claims; cross-family check
-  the highest stakes.
+  the highest stakes — same-family confirms *existence*, cross-family catches *overstatement*.
+  A capped cross-family check is a **deferred obligation, not a waiver**: retry and retro-fold.
 - **Background-agent mechanics** (`fable-delegation`, `CLAUDE.md`): run long commands in the
   foreground with generous timeouts; never end a turn while a delegated turn is pending; if a
   worker ends prematurely, relaunch with a state-check of what it already produced.
