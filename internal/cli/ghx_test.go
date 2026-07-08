@@ -173,10 +173,124 @@ func TestSearchQueryRepoFirstAutoQuotes(t *testing.T) {
 }
 
 func TestGrepFlags(t *testing.T) {
-	for _, name := range []string{"glob", "path", "limit"} {
+	for _, name := range []string{"glob", "path", "limit", "ignore-case"} {
 		if grepCmd.Flag(name) == nil {
 			t.Fatalf("grep flag %q not registered", name)
 		}
+	}
+	if grepCmd.Flag("ignore-case").Shorthand != "i" {
+		t.Fatalf("grep --ignore-case shorthand = %q, want i", grepCmd.Flag("ignore-case").Shorthand)
+	}
+}
+
+func TestGrepIgnoreCaseIsAcceptedNoOp(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "without ignore-case", args: []string{"gkoreli/ghx", "RunE"}},
+		{name: "with short ignore-case", args: []string{"-i", "gkoreli/ghx", "RunE"}},
+		{name: "with long ignore-case", args: []string{"--ignore-case", "gkoreli/ghx", "RunE"}},
+	}
+
+	var baselineQuery string
+	var baselineOpts ghxlib.SearchOpts
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetGrepFlags(t)
+			var gotQuery string
+			var gotOpts ghxlib.SearchOpts
+			orig := searchFn
+			defer func() { searchFn = orig }()
+			searchFn = func(query string, opts ghxlib.SearchOpts) (*ghxlib.SearchResult, error) {
+				gotQuery = query
+				gotOpts = opts
+				return &ghxlib.SearchResult{
+					Total: 1,
+					Matches: []ghxlib.SearchMatch{{
+						Repo:     "gkoreli/ghx",
+						Path:     "internal/cli/ghx.go",
+						Fragment: "RunE",
+					}},
+				}, nil
+			}
+
+			args := tt.args
+			if err := grepCmd.ParseFlags(args); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			positional := grepCmd.Flags().Args()
+			err := grepCmd.RunE(grepCmd, positional)
+			if err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+			if tt.name == "without ignore-case" {
+				baselineQuery = gotQuery
+				baselineOpts = gotOpts
+				return
+			}
+			if gotQuery != baselineQuery {
+				t.Fatalf("query = %q, want %q", gotQuery, baselineQuery)
+			}
+			if gotOpts != baselineOpts {
+				t.Fatalf("opts = %#v, want %#v", gotOpts, baselineOpts)
+			}
+		})
+	}
+}
+
+func TestTreePathFlagResolvesSubtree(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantPath string
+		wantErr  string
+		wantCode int
+	}{
+		{name: "path flag", args: []string{"gkoreli/ghx", "--path", "internal", "--depth", "2"}, wantPath: "internal"},
+		{name: "positional path", args: []string{"gkoreli/ghx", "internal", "--depth", "2"}, wantPath: "internal"},
+		{name: "both path forms", args: []string{"gkoreli/ghx", "internal", "--path", "cmd"}, wantErr: "use either positional path or --path, not both", wantCode: ExitBadInvocation},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetTreeFlags(t)
+			var gotPath string
+			var gotDepth int
+			orig := treeFn
+			defer func() { treeFn = orig }()
+			treeFn = func(repo ghxlib.Repo, path string, opts ghxlib.TreeOpts) ([]string, error) {
+				if repo.String() != "gkoreli/ghx" {
+					t.Fatalf("repo = %q, want gkoreli/ghx", repo.String())
+				}
+				gotPath = path
+				gotDepth = opts.Depth
+				return []string{"ghx.go"}, nil
+			}
+
+			if err := treeCmd.ParseFlags(tt.args); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := treeCmd.RunE(treeCmd, treeCmd.Flags().Args())
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("RunE error = %v, want %q", err, tt.wantErr)
+				}
+				if got := CodeForError(err); got != tt.wantCode {
+					t.Fatalf("exit code = %d, want %d", got, tt.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+			if gotPath != tt.wantPath {
+				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+			if gotDepth != 2 {
+				t.Fatalf("depth = %d, want 2", gotDepth)
+			}
+		})
 	}
 }
 
@@ -273,6 +387,52 @@ func newReadAliasCommand() *cobra.Command {
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().Int("limit", 0, "")
 	return cmd
+}
+
+func resetGrepFlags(t *testing.T) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"glob":        "",
+		"path":        "",
+		"limit":       "30",
+		"budget":      "12000",
+		"ignore-case": "false",
+	} {
+		if err := grepCmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("reset grep flag %s: %v", name, err)
+		}
+	}
+	t.Cleanup(func() {
+		for name, value := range map[string]string{
+			"glob":        "",
+			"path":        "",
+			"limit":       "30",
+			"budget":      "12000",
+			"ignore-case": "false",
+		} {
+			_ = grepCmd.Flags().Set(name, value)
+		}
+	})
+}
+
+func resetTreeFlags(t *testing.T) {
+	t.Helper()
+	for name, value := range map[string]string{
+		"depth": "0",
+		"path":  "",
+	} {
+		if err := treeCmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("reset tree flag %s: %v", name, err)
+		}
+	}
+	t.Cleanup(func() {
+		for name, value := range map[string]string{
+			"depth": "0",
+			"path":  "",
+		} {
+			_ = treeCmd.Flags().Set(name, value)
+		}
+	})
 }
 
 func contains(items []string, want string) bool {

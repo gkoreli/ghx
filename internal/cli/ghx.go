@@ -295,12 +295,16 @@ func init() {
 	_ = readCmd.Flags().MarkHidden("limit")
 }
 
-// searchFn is the seam through which searchCmd reaches the code-search backend.
-// It exists so a test can drive the command's error path (e.g. a live 401) and
-// prove the upstream error is surfaced through upstreamError — i.e. the fix-it
-// affordance wiring, not just the affordance table in errors.go, is what dogfood
-// friction F3 (docs/dogfood/FRICTION.md) is about. Production keeps ghxlib.Search.
+// searchFn is the seam through which code-search commands reach the backend. It
+// exists so tests can drive command error paths (e.g. a live 401) and prove the
+// upstream error is surfaced through upstreamError — i.e. the fix-it affordance
+// wiring, not just the affordance table in errors.go, is what dogfood friction
+// F3 (docs/dogfood/FRICTION.md) is about. Production keeps ghxlib.Search.
 var searchFn = ghxlib.Search
+
+// treeFn is the seam through which treeCmd reaches the repo tree backend.
+// Production keeps ghxlib.Tree.
+var treeFn = ghxlib.Tree
 
 var searchCmd = &cobra.Command{
 	Use:   "search [<owner/repo>] <query> [--limit N] [--full]",
@@ -367,7 +371,9 @@ var grepCmd = &cobra.Command{
 Reach for this when your muscle memory is ` + "`grep`/`rg`" + ` — it is backed by GitHub
 code search (AND matching, indexing lag applies), not a local ripgrep over the
 tree, so ` + "`--glob`" + ` maps to a GitHub ` + "`path:`" + ` qualifier. Exit code 1 means the
-pattern matched nothing in the repo.`,
+pattern matched nothing in the repo. ` + "`-i`/`--ignore-case`" + ` is accepted for
+grep/rg compatibility; ghx grep is always case-insensitive because GitHub code
+search does not support case-sensitive matching.`,
 	Example: `  ghx grep gkoreli/ghx "func main"
   ghx grep gkoreli/ghx "cobra.Command" --path internal/cli
   ghx grep gkoreli/ghx "RunE" --glob "internal/**/*.go" --limit 10`,
@@ -378,8 +384,9 @@ pattern matched nothing in the repo.`,
 		path, _ := cmd.Flags().GetString("path")
 		limit, _ := cmd.Flags().GetInt("limit")
 		budget, _ := cmd.Flags().GetInt("budget")
+		_, _ = cmd.Flags().GetBool("ignore-case")
 		query := buildGrepQuery(args[0], args[1], glob, path)
-		result, err := ghxlib.Search(query, ghxlib.SearchOpts{
+		result, err := searchFn(query, ghxlib.SearchOpts{
 			Limit:  limit,
 			Budget: budget,
 		})
@@ -405,6 +412,7 @@ func init() {
 	grepCmd.Flags().String("path", "", "Limit matches to paths containing this value")
 	grepCmd.Flags().IntP("limit", "l", 30, "Number of results")
 	grepCmd.Flags().Int("budget", 12000, "Approximate output budget in characters")
+	grepCmd.Flags().BoolP("ignore-case", "i", false, "Accepted for grep/rg compatibility; ghx grep is always case-insensitive because GitHub code search does not support case-sensitive matching")
 }
 
 var inspectCmd = &cobra.Command{
@@ -457,16 +465,21 @@ func init() {
 var treeCmd = &cobra.Command{
 	Use:   "tree <owner/repo> [path]",
 	Short: "Full recursive tree listing",
-	Long: `Print the full recursive file tree of a repo (or a subtree, given a path). Use it
-when you need the complete file layout rather than the compacted top-level view
+	Long: `Print the full recursive file tree of a repo (or a subtree, given a path or
+` + "`--path`" + `). Use it when you need the complete file layout rather than the compacted top-level view
 ` + "`ghx explore`" + ` gives you. Cap the depth with ` + "`--depth N`" + ` (0, the default, means
 fully recursive); directories are shown with a trailing slash.`,
 	Example: `  ghx tree gkoreli/ghx
-  ghx tree gkoreli/ghx internal --depth 2`,
+  ghx tree gkoreli/ghx internal --depth 2
+  ghx tree gkoreli/ghx --path internal --depth 2`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := ""
+		pathFlag, _ := cmd.Flags().GetString("path")
+		path := pathFlag
 		if len(args) > 1 {
+			if pathFlag != "" {
+				return WithExitCode(ExitBadInvocation, fmt.Errorf("use either positional path or --path, not both"))
+			}
 			path = args[1]
 		}
 		depth, _ := cmd.Flags().GetInt("depth")
@@ -477,7 +490,7 @@ fully recursive); directories are shown with a trailing slash.`,
 		if err != nil {
 			return ghxCoreError(err)
 		}
-		results, err := ghxlib.Tree(repo, path, ghxlib.TreeOpts{Depth: depth})
+		results, err := treeFn(repo, path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
 			return ghxCoreError(err)
 		}
@@ -490,6 +503,7 @@ fully recursive); directories are shown with a trailing slash.`,
 
 func init() {
 	treeCmd.Flags().IntP("depth", "d", 0, "Limit tree depth (0 = full recursive)")
+	treeCmd.Flags().String("path", "", "Subtree to list (alternative to the positional path arg; matches ghx grep/inspect)")
 }
 
 var skillCmd = &cobra.Command{
