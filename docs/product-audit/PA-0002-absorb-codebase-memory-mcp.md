@@ -18,7 +18,8 @@ read-only persona-agents (competitive, platform, engineering, eval, veto), each 
 recon the target; then a fresh no-stake distiller cross-validated the load-bearing facts.
 
 - **Thread:** `PA-0002.1` Competitive (generative) · `.2` Platform/Scale · `.3` Engineering
-  Feasibility · `.4` AI PM Pragmatist · `.5` Anti-Bloat Veto · `.9` convergence & decision-grade ledger.
+  Feasibility · `.4` AI PM Pragmatist · `.5` Anti-Bloat Veto · `.9` convergence & decision-grade ledger
+  · `.10` cross-family (gpt-5.5) adjudication. **Governing ADR: `docs/adr/0024.3` (`local:cbm` + bake-off).**
 
 ## Judge-step provenance (who judged, how to check)
 
@@ -31,9 +32,13 @@ recon the target; then a fresh no-stake distiller cross-validated the load-beari
   abstract, all personas read them) — load-bearing but *not* independent corroboration. The
   **genuine independent** convergence is code-grounded (below); `PA-0002.3` (Engineering) is the
   most independent lens.
-- **Independent cross-family adjudication — OWED (not run).** Codex/gpt-5.5 was usage-capped
-  (twice). No thesis-bearing finding is milestone-citable, and **no governing ADR should merge**,
-  until the cross-family check runs (retry Codex, or Goga adjudicates the overlap accounting + gate design).
+- **Independent cross-family adjudication — DISCHARGED (`PA-0002.10`).** Codex/gpt-5.5 (capped
+  twice, then ran 2026-07-07, session `019f3f73`) independently checked D1–D4 against the target's
+  own `THIRD_PARTY.md`/README and NORTH_STAR line-by-line and **CONFIRMED the net recommendation**
+  ("absorb only the engine narrowly… after a governing ADR plus a ghx-native bake-off; not the
+  whole product/installer/watcher/persistent-index/UI/hook"). Three precision corrections accepted
+  and folded (below): "zero GPL" → precise dep terms; "clean drop-in" → registry/report/policy
+  updates required (effort M); microbench headline is **120×** (5 queries), not "99%".
 
 ## Executive summary — the decision
 
@@ -56,10 +61,10 @@ Full receipts in `PA-0002.9` (cross-validated) and the persona artifacts. Top ro
 | Claim | Source (recompute) | Strategy (north star / tenet) | External (why / what to absorb) |
 |---|---|---|---|
 | **It's a brain-less tool → swallow it (P3)** | target README "does **not** include an LLM… relies on your MCP client to be the intelligence layer" | NORTH_STAR *The Moat* / P3: "codemap, ast-grep, repomap all become internal tools under one brain" | [README](https://github.com/DeusData/codebase-memory-mcp) — the whole thesis in their own words |
-| **License GO** | LICENSE "Copyright (c) 2025 **DeusData**" — MIT; all transitive deps permissive, zero GPL/LGPL/AGPL (`PA-0002.3`) | AGENTS.md *Open Source Leverage*: "MIT in, MIT out" | [LICENSE](https://github.com/DeusData/codebase-memory-mcp/blob/main/LICENSE) — the hard absorption gate, passed |
-| **Shell-out feasible (effort M)** | ghx `internal/sidecar/tier2/toolrun.go:53` `subprocessAdapter` (carries codemap/ast-grep) + `service.go:186,188`; target `src/main.c:9` one-shot `cli <tool> <json>` · plug-in point `internal/sidecar/tier2/cbm.go` (new) | remote-first, escalation explicit — a Tier-2 backend the brain *decides* to invoke | [src/main.c](https://github.com/DeusData/codebase-memory-mcp/blob/main/src/main.c) — the one-shot CLI seam |
+| **License GO** | LICENSE "Copyright (c) 2025 **DeusData**" — MIT; all deps usable under permissive terms — `THIRD_PARTY.md:3-11` MIT/Apache/BSD/ISC/0BSD/Unlicense; zstd dual BSD/GPLv2 (**BSD selected**), JDT EPL-2.0 (**reference-only**) — *not literally "zero GPL"* but a GO (cross-family, `PA-0002.10`) | AGENTS.md *Open Source Leverage*: "MIT in, MIT out" | [LICENSE](https://github.com/DeusData/codebase-memory-mcp/blob/main/LICENSE) — the hard absorption gate, passed |
+| **Shell-out feasible (effort M)** | ghx `internal/sidecar/tier2/toolrun.go:53` `subprocessAdapter` (carries codemap/ast-grep) + `service.go:186,188`; target `src/main.c:9` one-shot `cli <tool> <json>` · plug-in point `internal/sidecar/tier2/cbm.go` (new) · **not a "clean drop-in"** — explicit registry updates required (`status.go:41`, `tool_registry.go:132`, `report.go:45`) + tests (cross-family, `PA-0002.10`) | remote-first, escalation explicit — a Tier-2 backend the brain *decides* to invoke | [src/main.c](https://github.com/DeusData/codebase-memory-mcp/blob/main/src/main.c) — the one-shot CLI seam |
 | **Reject "entirely"** | target: persistent SQLite index + background watcher + `hook_augment.c` in-context injection + 11-agent installer | NORTH_STAR:207 "**Remote-first… No clone, no local index by default**"; "the main agent's **context is sacred**"; Non-Goal:268 | you can gate a *subprocess* behind tier-2; you can't gate a *product's soul* |
-| **Value is a trade, gate it** | arXiv:2603.27277 abstract: **83% quality vs 92% baseline** at ~10× tokens, 19/31 langs; "99%" = a 5-query microbench (README:240) | NORTH_STAR: "**evals are how we know**"; signals-per-token | [arXiv:2603.27277](https://arxiv.org/abs/2603.27277) — vendor's own regression, hidden behind marketing |
+| **Value is a trade, gate it** | arXiv:2603.27277 abstract: **83% quality vs 92% baseline** at ~10× tokens, 2.1× fewer tool calls, 19/31 langs; the token headline = **"120× fewer tokens" on 5 structural queries** (README), not "99%" (cross-family, `PA-0002.10`) | NORTH_STAR: "**evals are how we know**"; signals-per-token | [arXiv:2603.27277](https://arxiv.org/abs/2603.27277) — vendor's own regression, hidden behind marketing |
 | **~80% duplicative** | ghx already ships codemap + ast-grep + native repomap (`service.go:186,188`, `RunRepomap`) — additive ~20% = persistent Cypher call-graph + semantic search | AGENTS.md: "one authoritative owner per concern" | — |
 | **Absorb candidate** | the Hybrid-LSP graph engine → `local:cbm` tier-2 backend; the host-wiring *pattern* (not the hook) → M5/B2 | P3/M7; closes ADR-0026 "precise reference" watchlist (HIGH/HIGH) | [aider repomap](https://github.com/Aider-AI/aider) / [repomix --compress](https://github.com/yamadashy/repomix) — complementary absorptions |
 
@@ -106,9 +111,12 @@ exhausts the GitHub code-search quota at ~10/hr** (recon carried by `read`/`tree
 
 ## What was not audited / owed
 
-- **Cross-family (Codex) adjudication — OWED** (capped). No milestone go/no-go, and no ADR merge,
-  until it (or Goga) checks the overlap accounting and the gate design.
-- The **bake-off itself is not run** (out of scope this round) — it is the recommended *next* action.
+- **Cross-family (Codex) adjudication — DONE (`PA-0002.10`).** gpt-5.5 independently CONFIRMED the
+  net recommendation and gate design; three precision corrections folded. Debt discharged.
+- The **bake-off itself is not run** — it is the recommended *next* action, now pre-registered as
+  **ADR-0024.3** (`local:cbm` gated tier-2 backend + the bake-off gate). Cross-family validated the
+  *decision*; it does **not** substitute for the bake-off (which must measure `local:cbm` on ghx's
+  own tasks before any production wiring).
 - No deep code/architecture audit of the integration (that's `arch-audit`).
 - Whether `local:cbm` actually *clears* the gate is genuinely unknown; the vendor evidence leans
   mildly discouraging but is the wrong baseline/tasks/judge, so it bounds but cannot settle it.
