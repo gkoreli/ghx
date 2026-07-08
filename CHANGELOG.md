@@ -10,8 +10,14 @@ prose here.
 
 ## [Unreleased]
 
-Staged on `mainline`, not yet released. Agent-experience fixes from the v2.8.0
-dogfood.
+Nothing staged yet.
+
+## [2.9.0] — 2026-07-07
+
+Agent-experience hardening from the v2.8.0 dogfood: CLI failure exit codes are
+now classified in core and consistent across commands, the resolved commit SHA
+is surfaced to agents, and eval `Locations` are trustworthy for the ghx-sidecar
+profile.
 
 ### Changed
 
