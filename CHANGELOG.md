@@ -47,6 +47,17 @@ dogfood.
   `owner/repo` slug as bad input (exit 2), and live 401/403 name the
   `gh auth login` / GH_TOKEN fix
   ([ADR-0034](docs/adr/0034-failure-class-model.md) phases 1–2).
+- **Eval `Locations` are trustworthy for the ghx-sidecar profile** — the
+  duplicated `ToolCallTrace`/`ToolStatusTransition` types (SAF runtime + SAFE)
+  are unified onto one canonical owner, deleting the hand-written converter that
+  silently dropped `Locations`, and the sidecar's execute-driven ghx recon now
+  derives path-scope `Locations` from the `ghx` argv when ACP reports none
+  (additive; never overrides real ACP locations). Closes TRUST hole H9. Type
+  dedup is byte-identical for committed artifacts; the capture change was
+  pre-registered and measured (1682 execute traces gain path-scope across the
+  committed corpus, 0 host-task grader verdicts change — execute-kind traces
+  never reach the R6 path-scope rule)
+  ([ADR-0032.2](docs/adr/0032.2-tooltrace-unification-locations-flow.md)).
 
 ## [2.8.0] — 2026-07-07
 
