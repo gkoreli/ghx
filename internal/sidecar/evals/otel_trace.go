@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
@@ -120,7 +121,7 @@ func emitTurnSpan(parent context.Context, tracer trace.Tracer, ep *Episode, turn
 	return logs
 }
 
-func emitToolSpan(parent context.Context, tracer trace.Tracer, turn TurnRecord, tool ToolCallTrace) {
+func emitToolSpan(parent context.Context, tracer trace.Tracer, turn TurnRecord, tool sidecar.ToolCallTrace) {
 	start := nonZeroTime(firstStatusTime(tool), time.Now().UTC())
 	end := nonZeroTime(lastStatusTime(tool), start)
 	name := "tool.call"
@@ -203,7 +204,7 @@ func turnAttributes(ep *Episode, turn TurnRecord) []attribute.KeyValue {
 	return attrs
 }
 
-func toolAttributes(turn TurnRecord, tool ToolCallTrace) []attribute.KeyValue {
+func toolAttributes(turn TurnRecord, tool sidecar.ToolCallTrace) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		semconv.GenAIOperationNameExecuteTool,
 		attribute.String("gen_ai.system", "ghx-evals"),
@@ -265,7 +266,7 @@ func nonZeroTime(t time.Time, fallback time.Time) time.Time {
 	return t
 }
 
-func lastStatus(tool ToolCallTrace) string {
+func lastStatus(tool sidecar.ToolCallTrace) string {
 	if n := len(tool.StatusTransitions); n > 0 {
 		return tool.StatusTransitions[n-1].Status
 	}

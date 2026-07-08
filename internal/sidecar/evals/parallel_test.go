@@ -39,7 +39,7 @@ func stressEpisode(i int) *Episode {
 			Thinking:        "reasoning: " + blob,
 			ToolOutputChars: len(blob),
 			DurationMs:      1234,
-			ToolTraces: []ToolCallTrace{{
+			ToolTraces: []sidecar.ToolCallTrace{{
 				ID:            fmt.Sprintf("tool-%03d", i),
 				Kind:          "read",
 				Title:         "read src/router.ts",

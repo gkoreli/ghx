@@ -127,7 +127,7 @@ type TurnRecord struct {
 	Thinking  string   `json:"thinking,omitempty"`
 	ToolCalls []string `json:"toolCalls"`
 	// ToolTraces carries full ACP tool-call audit data for this turn.
-	ToolTraces []ToolCallTrace `json:"toolTraces,omitempty"`
+	ToolTraces []sidecar.ToolCallTrace `json:"toolTraces,omitempty"`
 	// ReplayedText is message text replayed before this turn's prompt was sent.
 	// It is audit-only and excluded from turn output/accounting.
 	ReplayedText string `json:"replayedText,omitempty"`
@@ -137,7 +137,7 @@ type TurnRecord struct {
 	// ReplayedToolTraces carries ACP tool-call history replayed before this
 	// turn's prompt was sent. It is excluded from actions, observations,
 	// memory/repeat-read scoring, ledger derivation, and char accounting.
-	ReplayedToolTraces []ToolCallTrace `json:"replayedToolTraces,omitempty"`
+	ReplayedToolTraces []sidecar.ToolCallTrace `json:"replayedToolTraces,omitempty"`
 	// RawSDK is the normalized raw-SDK audit for this turn (ADR-0016.10 D1):
 	// tool_use/tool_result blocks and provider-reported token usage captured
 	// from the adapter's _claude/sdkMessage stream. Nil on artifacts produced
@@ -174,27 +174,14 @@ type TurnRecord struct {
 	Error string `json:"error,omitempty"`
 }
 
-// ToolStatusTransition records one observed status for an ACP tool call.
-type ToolStatusTransition struct {
-	Status string    `json:"status"`
-	At     time.Time `json:"at"`
-}
-
-// ToolCallTrace is the durable per-tool-call audit record captured from ACP.
-type ToolCallTrace struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind,omitempty"`
-	Title    string `json:"title,omitempty"`
-	RawInput any    `json:"rawInput,omitempty"`
-	// Locations lists the file paths the tool call reported touching (ACP
-	// tool-call locations). Captured for path-scope decisions: the host-arm
-	// write policy and the exploration/engineering attribution classifier
-	// (ADR-0032.1 S2). Empty when the adapter reports no locations.
-	Locations         []string               `json:"locations,omitempty"`
-	StatusTransitions []ToolStatusTransition `json:"statusTransitions,omitempty"`
-	OutputSize        int                    `json:"outputSize"`
-	OutputExcerpt     string                 `json:"outputExcerpt,omitempty"`
-}
+// sidecar.ToolCallTrace and sidecar.ToolStatusTransition are the durable per-tool-call audit
+// records; they are the SAF runtime's canonical types (sidecar.ToolCallTrace /
+// sidecar.ToolStatusTransition, internal/sidecar/turnresult.go). SAFE depends
+// on those directly rather than keeping a byte-identical copy (ADR-0032.2 D1):
+// one canonical owner, no two-mapper drift, and the eval layer captures every
+// field the runtime records — including Locations, which the deleted copy's
+// converter silently dropped (ADR-0032.2 D2). Referenced as sidecar.ToolCallTrace
+// throughout, exactly as sidecar.Report already is.
 
 // Action is the training/audit action projection of a tool invocation.
 type Action struct {

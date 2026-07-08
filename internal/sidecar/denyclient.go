@@ -128,7 +128,7 @@ func (c *denyClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
 	return &(*traces)[len(*traces)-1]
 }
 
-// mergeLocations unions the paths from an ACP tool-call notification's
+// MergeLocations unions the paths from an ACP tool-call notification's
 // locations into the trace, deduped and order-stable. The ACP wire carries
 // locations on both the tool_call start (SessionUpdateToolCall.Locations) and
 // the tool_call_update (SessionToolCallUpdate.Locations); a start may seed
@@ -137,7 +137,11 @@ func (c *denyClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
 // needs the set of touched paths (ADR-0032.1 S2 path scope). Empty paths are
 // skipped; an update carrying no locations (the omitempty nil case) leaves the
 // trace's Locations unchanged.
-func mergeLocations(tr *ToolCallTrace, locs []acp.ToolCallLocation) {
+//
+// It is exported so the eval-layer capture client (evalClient) reconciles onto
+// the same union semantics instead of replacing the collection (ADR-0032.2 D2):
+// one path-accumulation rule shared by both capture paths.
+func MergeLocations(tr *ToolCallTrace, locs []acp.ToolCallLocation) {
 	for _, l := range locs {
 		p := l.Path
 		if p == "" {
@@ -267,7 +271,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if tc.RawInput != nil {
 			tr.RawInput = tc.RawInput
 		}
-		mergeLocations(tr, tc.Locations)
+		MergeLocations(tr, tc.Locations)
 		tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(tc.Status), At: time.Now().UTC()})
 		size := ContentSize(tc.Content, tc.RawOutput)
 		tr.OutputSize += size
@@ -295,7 +299,7 @@ func (c *denyClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if tcu.RawInput != nil {
 			tr.RawInput = tcu.RawInput
 		}
-		mergeLocations(tr, tcu.Locations)
+		MergeLocations(tr, tcu.Locations)
 		if tcu.Status != nil {
 			tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(*tcu.Status), At: time.Now().UTC()})
 		}

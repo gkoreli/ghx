@@ -361,7 +361,7 @@ func thinkingContent(thinking, content string) string {
 	return "<think>\n" + thinking + "\n</think>\n\n" + content
 }
 
-func sftToolName(trace ToolCallTrace) string {
+func sftToolName(trace sidecar.ToolCallTrace) string {
 	title := strings.TrimSpace(trace.Title)
 	if strings.Contains(title, "submit_report") {
 		return "submit_report"
@@ -401,7 +401,7 @@ func sanitizeToolName(name string) string {
 	return out
 }
 
-func sftToolArguments(trace ToolCallTrace) any {
+func sftToolArguments(trace sidecar.ToolCallTrace) any {
 	if trace.RawInput == nil {
 		return map[string]any{}
 	}

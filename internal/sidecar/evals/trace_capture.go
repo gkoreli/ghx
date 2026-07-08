@@ -63,12 +63,12 @@ type TraceCaptureGap struct {
 // from the raw audit are deliberately NOT a gap (no overcount direction):
 // H3 is about undercounting, and merged retry/wrap-up traces would make the
 // reverse direction structurally noisy.
-func CompareTraceCapture(raw *sidecar.RawSDKAudit, captured []ToolCallTrace) []TraceCaptureGap {
+func CompareTraceCapture(raw *sidecar.RawSDKAudit, captured []sidecar.ToolCallTrace) []TraceCaptureGap {
 	if raw == nil || raw.Messages == 0 {
 		return nil
 	}
 
-	capturedByID := make(map[string]*ToolCallTrace, len(captured))
+	capturedByID := make(map[string]*sidecar.ToolCallTrace, len(captured))
 	for i := range captured {
 		capturedByID[captured[i].ID] = &captured[i]
 	}
@@ -134,7 +134,7 @@ func CompareTraceCapture(raw *sidecar.RawSDKAudit, captured []ToolCallTrace) []T
 
 // hasTerminalStatus reports whether a captured trace recorded a terminal
 // ACP tool-call status.
-func hasTerminalStatus(tr *ToolCallTrace) bool {
+func hasTerminalStatus(tr *sidecar.ToolCallTrace) bool {
 	for _, st := range tr.StatusTransitions {
 		if st.Status == "completed" || st.Status == "failed" {
 			return true

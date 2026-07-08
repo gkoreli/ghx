@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/evals/hosttask"
 )
 
@@ -110,7 +111,7 @@ func TestReconToolUnavailableDetector(t *testing.T) {
 
 	// Marker in a recon-titled tool call's output.
 	ep = hostEpisodeFixture(HostArmSidecar)
-	ep.Turns[0].ToolTraces = []ToolCallTrace{{
+	ep.Turns[0].ToolTraces = []sidecar.ToolCallTrace{{
 		ID: "t1", Title: "mcp__ghx-recon__recon", Kind: "other",
 		OutputExcerpt: "Error: No such tool available: mcp__ghx-recon__recon",
 	}}
@@ -127,7 +128,7 @@ func TestReconToolUnavailableDetector(t *testing.T) {
 	// The same marker on a NON-recon tool call must not fire — the scan is
 	// scoped so unrelated command output cannot false-positive.
 	ep = hostEpisodeFixture(HostArmSidecar)
-	ep.Turns[0].ToolTraces = []ToolCallTrace{{
+	ep.Turns[0].ToolTraces = []sidecar.ToolCallTrace{{
 		ID: "t1", Title: "Terminal", Kind: "execute",
 		OutputExcerpt: "curl: (7) failed to connect to host",
 	}}
@@ -146,12 +147,12 @@ func TestReconToolUnavailableDetector(t *testing.T) {
 
 func TestHostExecuteOutsideWorkspaceDetector(t *testing.T) {
 	const ws = "/eval/workspaces/fx-trial001-abc"
-	execTrace := func(id, cmd string) ToolCallTrace {
-		return ToolCallTrace{ID: id, Title: "Terminal", Kind: "execute", RawInput: map[string]any{"command": cmd}}
+	execTrace := func(id, cmd string) sidecar.ToolCallTrace {
+		return sidecar.ToolCallTrace{ID: id, Title: "Terminal", Kind: "execute", RawInput: map[string]any{"command": cmd}}
 	}
 	cases := []struct {
 		name  string
-		trace ToolCallTrace
+		trace sidecar.ToolCallTrace
 		want  int
 	}{
 		{"shell write escape via python", execTrace("t1", `python3 -c 'open("/tmp/pwned","w").write("x")'`), 1},
@@ -161,14 +162,14 @@ func TestHostExecuteOutsideWorkspaceDetector(t *testing.T) {
 		{"dev null is benign", execTrace("t5", "go test ./... > /dev/null"), 0},
 		{"sed patterns do not match", execTrace("t6", "sed s/foo/bar/ file.txt"), 0},
 		{"relative paths cannot be checked", execTrace("t7", "cp secret.txt ../outside/"), 0},
-		{"non-execute kinds are ignored", ToolCallTrace{ID: "t8", Kind: "read", Title: "/tmp/pwned", Locations: []string{"/tmp/pwned"}}, 0},
+		{"non-execute kinds are ignored", sidecar.ToolCallTrace{ID: "t8", Kind: "read", Title: "/tmp/pwned", Locations: []string{"/tmp/pwned"}}, 0},
 	}
 	for _, arm := range []HostArm{HostArmControl, HostArmSidecar} {
 		for _, tc := range cases {
 			t.Run(string(arm)+"/"+tc.name, func(t *testing.T) {
 				ep := hostEpisodeFixture(arm)
 				ep.HostTask.WorkspaceDir = ws
-				ep.Turns[0].ToolTraces = []ToolCallTrace{tc.trace}
+				ep.Turns[0].ToolTraces = []sidecar.ToolCallTrace{tc.trace}
 				if got := countKind(DetectAnomalies(ep), AnomalyHostExecuteOutsideWorkspace); got != tc.want {
 					t.Fatalf("count = %d, want %d", got, tc.want)
 				}

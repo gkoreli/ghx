@@ -248,7 +248,7 @@ func TestDetectAnomaliesAnswerDocContamination(t *testing.T) {
 			Turn:      0,
 			ToolCalls: []string{"gh api repos/gkoreli/ghx/contents/internal/mapengine/types.go (completed)"},
 			// Replayed history is audit-only (ADR-0016.5) — never contamination.
-			ReplayedToolTraces: []ToolCallTrace{{Title: "ghx read gkoreli/ghx docs/adr/0013-ghx-map-command.md"}},
+			ReplayedToolTraces: []sidecar.ToolCallTrace{{Title: "ghx read gkoreli/ghx docs/adr/0013-ghx-map-command.md"}},
 		}},
 	}
 	if _, ok := anomalyByKind(DetectAnomalies(clean), AnomalyAnswerDocContamination); ok {

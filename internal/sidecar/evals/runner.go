@@ -325,12 +325,12 @@ func populateTurnRecord(rec *TurnRecord, turn *sidecar.TurnResult) {
 	rec.WrapUpRecovered = turn.WrapUpRecovered
 	rec.SessionRecreated = turn.SessionRecreated
 	rec.RawSDK = turn.RawSDK
-	for _, tr := range turn.ToolTraces {
-		rec.ToolTraces = append(rec.ToolTraces, convertSidecarTrace(tr))
-	}
-	for _, tr := range turn.ReplayedToolTraces {
-		rec.ReplayedToolTraces = append(rec.ReplayedToolTraces, convertSidecarTrace(tr))
-	}
+	// ToolTraces are the runtime's canonical sidecar.ToolCallTrace now
+	// (ADR-0032.2 D1), so the drop-prone field-by-field converter is gone: the
+	// full record — Locations included (D2) — carries straight through.
+	rec.ToolTraces = append(rec.ToolTraces, turn.ToolTraces...)
+	rec.ReplayedToolTraces = append(rec.ReplayedToolTraces, turn.ReplayedToolTraces...)
+	fillArgvLocations(rec)
 	rebuildToolSummaries(rec)
 }
 
@@ -440,6 +440,11 @@ func runLiveAgentEpisode(ctx context.Context, cfg RunConfig, ep *Episode, rt epi
 		})
 		record.DurationMs = time.Since(start).Milliseconds()
 		client.current = nil
+		// Direct profiles shell out to ghx over the ACP execute tool too, whose
+		// notifications carry no file locations; derive path-scope from the argv
+		// so the direct-ghx path stays Locations-consistent with the sidecar
+		// path (ADR-0032.2 D4). Additive — never overrides real ACP locations.
+		fillArgvLocations(&record)
 
 		if err != nil {
 			record.Error = err.Error()

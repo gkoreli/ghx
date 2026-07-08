@@ -9,21 +9,6 @@ import (
 	"github.com/gkoreli/ghx/v2/internal/sidecar"
 )
 
-func convertSidecarTrace(in sidecar.ToolCallTrace) ToolCallTrace {
-	out := ToolCallTrace{
-		ID:            in.ID,
-		Kind:          in.Kind,
-		Title:         in.Title,
-		RawInput:      in.RawInput,
-		OutputSize:    in.OutputSize,
-		OutputExcerpt: in.OutputExcerpt,
-	}
-	for _, st := range in.StatusTransitions {
-		out.StatusTransitions = append(out.StatusTransitions, ToolStatusTransition{Status: st.Status, At: st.At})
-	}
-	return out
-}
-
 func rebuildToolSummaries(turn *TurnRecord) {
 	turn.ToolCalls = turn.ToolCalls[:0]
 	for _, tr := range turn.ToolTraces {
@@ -31,7 +16,7 @@ func rebuildToolSummaries(turn *TurnRecord) {
 	}
 }
 
-func toolSummary(tr ToolCallTrace) string {
+func toolSummary(tr sidecar.ToolCallTrace) string {
 	status := ""
 	if n := len(tr.StatusTransitions); n > 0 {
 		status = tr.StatusTransitions[n-1].Status
@@ -46,7 +31,7 @@ func toolSummary(tr ToolCallTrace) string {
 	return input
 }
 
-func resolvedToolInput(tr ToolCallTrace) string {
+func resolvedToolInput(tr sidecar.ToolCallTrace) string {
 	switch v := tr.RawInput.(type) {
 	case string:
 		if strings.TrimSpace(v) != "" {
@@ -147,14 +132,14 @@ func appendTraceProjections(ep *Episode, turn TurnRecord) {
 	}
 }
 
-func firstStatusTime(tr ToolCallTrace) time.Time {
+func firstStatusTime(tr sidecar.ToolCallTrace) time.Time {
 	if len(tr.StatusTransitions) > 0 {
 		return tr.StatusTransitions[0].At
 	}
 	return time.Time{}
 }
 
-func lastStatusTime(tr ToolCallTrace) time.Time {
+func lastStatusTime(tr sidecar.ToolCallTrace) time.Time {
 	if n := len(tr.StatusTransitions); n > 0 {
 		return tr.StatusTransitions[n-1].At
 	}

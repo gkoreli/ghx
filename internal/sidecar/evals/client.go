@@ -39,7 +39,7 @@ type evalClient struct {
 	writes WritePolicy
 }
 
-func (c *evalClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
+func (c *evalClient) upsertTrace(id string, replayed bool) *sidecar.ToolCallTrace {
 	traces := &c.current.ToolTraces
 	if replayed {
 		traces = &c.current.ReplayedToolTraces
@@ -49,7 +49,7 @@ func (c *evalClient) upsertTrace(id string, replayed bool) *ToolCallTrace {
 			return &(*traces)[i]
 		}
 	}
-	*traces = append(*traces, ToolCallTrace{ID: id})
+	*traces = append(*traces, sidecar.ToolCallTrace{ID: id})
 	return &(*traces)[len(*traces)-1]
 }
 
@@ -152,10 +152,8 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if tc.RawInput != nil {
 			tr.RawInput = tc.RawInput
 		}
-		if len(tc.Locations) > 0 {
-			tr.Locations = locationPaths(tc.Locations)
-		}
-		tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(tc.Status), At: nowUTC()})
+		sidecar.MergeLocations(tr, tc.Locations)
+		tr.StatusTransitions = append(tr.StatusTransitions, sidecar.ToolStatusTransition{Status: string(tc.Status), At: nowUTC()})
 		size := sidecar.ContentSize(tc.Content, tc.RawOutput)
 		tr.OutputSize += size
 		appendExcerpt(tr, sidecar.ToolOutputText(tc.Content, tc.RawOutput))
@@ -175,11 +173,13 @@ func (c *evalClient) SessionUpdate(_ context.Context, params acp.SessionNotifica
 		if tcu.RawInput != nil {
 			tr.RawInput = tcu.RawInput
 		}
-		if tcu.Locations != nil { // ACP semantics: replace the collection
-			tr.Locations = locationPaths(tcu.Locations)
-		}
+		// Union onto the same accumulation rule denyClient uses (ADR-0032.2 D2):
+		// the ACP wire may seed locations on the start and add more on updates,
+		// so accumulate rather than replace — a nil-locations update leaves the
+		// set unchanged, matching the runtime capture path exactly.
+		sidecar.MergeLocations(tr, tcu.Locations)
 		if tcu.Status != nil {
-			tr.StatusTransitions = append(tr.StatusTransitions, ToolStatusTransition{Status: string(*tcu.Status), At: nowUTC()})
+			tr.StatusTransitions = append(tr.StatusTransitions, sidecar.ToolStatusTransition{Status: string(*tcu.Status), At: nowUTC()})
 		}
 		size := sidecar.ContentSize(tcu.Content, tcu.RawOutput)
 		tr.OutputSize += size
@@ -212,7 +212,7 @@ func (c *evalClient) HandleExtensionMethod(_ context.Context, method string, par
 
 func nowUTC() time.Time { return time.Now().UTC() }
 
-func appendExcerpt(tr *ToolCallTrace, text string) {
+func appendExcerpt(tr *sidecar.ToolCallTrace, text string) {
 	const max = 2048
 	if text == "" || len(tr.OutputExcerpt) >= max {
 		return
@@ -247,18 +247,6 @@ func (c *evalClient) WriteTextFile(_ context.Context, params acp.WriteTextFileRe
 		return acp.WriteTextFileResponse{}, err
 	}
 	return acp.WriteTextFileResponse{}, nil
-}
-
-// locationPaths flattens ACP tool-call locations to their file paths.
-func locationPaths(locs []acp.ToolCallLocation) []string {
-	if len(locs) == 0 {
-		return nil
-	}
-	paths := make([]string, len(locs))
-	for i, l := range locs {
-		paths[i] = l.Path
-	}
-	return paths
 }
 
 // ReadTextFile is refused: reconnaissance evidence must come from repo tools,

@@ -296,17 +296,9 @@ func RunHostTrial(ctx context.Context, trial HostTrial) (*Episode, error) {
 func hostLiveTraces(ep *Episode) []sidecar.ToolCallTrace {
 	var out []sidecar.ToolCallTrace
 	for _, turn := range ep.Turns {
-		for _, tr := range turn.ToolTraces {
-			out = append(out, sidecar.ToolCallTrace{
-				ID:            tr.ID,
-				Kind:          tr.Kind,
-				Title:         tr.Title,
-				RawInput:      tr.RawInput,
-				Locations:     tr.Locations,
-				OutputSize:    tr.OutputSize,
-				OutputExcerpt: tr.OutputExcerpt,
-			})
-		}
+		// ToolTraces are already sidecar.ToolCallTrace (ADR-0032.2 D1), so this
+		// is a plain live-only flatten — no field-by-field copy to keep in sync.
+		out = append(out, turn.ToolTraces...)
 	}
 	return out
 }

@@ -1,14 +1,18 @@
 package evals
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
+)
 
 func TestToolSummaryFallsBackWhenRawInputEmpty(t *testing.T) {
-	got := toolSummary(ToolCallTrace{
+	got := toolSummary(sidecar.ToolCallTrace{
 		ID:       "tool-1",
 		Kind:     "execute",
 		Title:    "gh api repos/o/r",
 		RawInput: map[string]any{},
-		StatusTransitions: []ToolStatusTransition{
+		StatusTransitions: []sidecar.ToolStatusTransition{
 			{Status: "pending"},
 		},
 	})
@@ -19,11 +23,11 @@ func TestToolSummaryFallsBackWhenRawInputEmpty(t *testing.T) {
 }
 
 func TestToolSummaryFallsBackToIDWhenRawInputAndTitleEmpty(t *testing.T) {
-	got := toolSummary(ToolCallTrace{
+	got := toolSummary(sidecar.ToolCallTrace{
 		ID:       "tool-1",
 		Kind:     "execute",
 		RawInput: map[string]any{},
-		StatusTransitions: []ToolStatusTransition{
+		StatusTransitions: []sidecar.ToolStatusTransition{
 			{Status: "pending"},
 		},
 	})

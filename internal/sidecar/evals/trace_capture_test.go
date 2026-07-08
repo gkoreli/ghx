@@ -30,13 +30,13 @@ func rawUse(t *testing.T, id, name, inputJSON string) sidecar.RawSDKToolUse {
 }
 
 // capturedTrace builds one captured trace with a terminal status and output.
-func capturedTrace(t *testing.T, id, inputJSON string) ToolCallTrace {
+func capturedTrace(t *testing.T, id, inputJSON string) sidecar.ToolCallTrace {
 	t.Helper()
-	return ToolCallTrace{
+	return sidecar.ToolCallTrace{
 		ID:       id,
 		Kind:     "execute",
 		RawInput: decodedInput(t, inputJSON),
-		StatusTransitions: []ToolStatusTransition{
+		StatusTransitions: []sidecar.ToolStatusTransition{
 			{Status: "pending", At: time.Now().UTC()},
 			{Status: "completed", At: time.Now().UTC()},
 		},
@@ -55,7 +55,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 	tests := []struct {
 		name     string
 		raw      *sidecar.RawSDKAudit
-		captured []ToolCallTrace
+		captured []sidecar.ToolCallTrace
 		want     map[string]int // gap kind -> count
 	}{
 		{
@@ -65,7 +65,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				ToolUses:    []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 				ToolResults: []sidecar.RawSDKToolResult{{ToolUseID: "toolu_1", OutputSize: 12}},
 			},
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
 			want:     nil,
 		},
 		{
@@ -77,7 +77,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 					rawUse(t, "toolu_2", "Bash", inputB),
 				},
 			},
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
 			want:     map[string]int{GapMissingToolCall: 1},
 		},
 		{
@@ -87,10 +87,10 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				ToolUses:    []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 				ToolResults: []sidecar.RawSDKToolResult{{ToolUseID: "toolu_1", OutputSize: 12}},
 			},
-			captured: []ToolCallTrace{{
+			captured: []sidecar.ToolCallTrace{{
 				ID:                "toolu_1",
 				RawInput:          decodedInput(t, inputA),
-				StatusTransitions: []ToolStatusTransition{{Status: "pending", At: time.Now().UTC()}},
+				StatusTransitions: []sidecar.ToolStatusTransition{{Status: "pending", At: time.Now().UTC()}},
 				OutputSize:        12,
 				OutputExcerpt:     "x",
 			}},
@@ -102,7 +102,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				Messages: 1,
 				ToolUses: []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 			},
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputB)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputB)},
 			want:     map[string]int{GapInputMismatch: 1},
 		},
 		{
@@ -112,10 +112,10 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				ToolUses:    []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 				ToolResults: []sidecar.RawSDKToolResult{{ToolUseID: "toolu_1", OutputSize: 4096}},
 			},
-			captured: []ToolCallTrace{{
+			captured: []sidecar.ToolCallTrace{{
 				ID:       "toolu_1",
 				RawInput: decodedInput(t, inputA),
-				StatusTransitions: []ToolStatusTransition{
+				StatusTransitions: []sidecar.ToolStatusTransition{
 					{Status: "pending", At: time.Now().UTC()},
 					{Status: "completed", At: time.Now().UTC()},
 				},
@@ -138,13 +138,13 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 		{
 			name:     "nil raw audit skips (pre-ADR artifacts)",
 			raw:      nil,
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
 			want:     nil,
 		},
 		{
 			name:     "zero live messages skips (channel never opened)",
 			raw:      &sidecar.RawSDKAudit{},
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
 			want:     nil,
 		},
 		{
@@ -153,7 +153,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				Messages: 1,
 				ToolUses: []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 			},
-			captured: []ToolCallTrace{
+			captured: []sidecar.ToolCallTrace{
 				capturedTrace(t, "toolu_1", inputA),
 				capturedTrace(t, "toolu_retry", inputB), // merged retry trace
 			},
@@ -166,7 +166,7 @@ func TestCompareTraceCaptureMatrix(t *testing.T) {
 				ToolUses:  []sidecar.RawSDKToolUse{rawUse(t, "toolu_1", "Bash", inputA)},
 				Truncated: true,
 			},
-			captured: []ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
+			captured: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", inputA)},
 			want:     nil,
 		},
 	}
@@ -206,7 +206,7 @@ func TestTraceCaptureGapAnomalyDerivation(t *testing.T) {
 						rawUse(t, "toolu_dropped", "Bash", input),
 					},
 				},
-				ToolTraces: []ToolCallTrace{capturedTrace(t, "toolu_seen", input)},
+				ToolTraces: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_seen", input)},
 			},
 			{Turn: 1}, // no raw audit — must derive nothing
 		},
@@ -231,7 +231,7 @@ func TestTraceCaptureGapAnomalyDerivation(t *testing.T) {
 	// Pre-ADR artifact: no rawSDK field anywhere — zero anomalies of this kind.
 	old := &Episode{
 		ID: "e2", TaskID: "t1", Profile: ProfileSidecar,
-		Turns: []TurnRecord{{Turn: 0, ToolTraces: []ToolCallTrace{capturedTrace(t, "toolu_1", input)}}},
+		Turns: []TurnRecord{{Turn: 0, ToolTraces: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", input)}}},
 	}
 	for _, a := range DetectAnomalies(old) {
 		if a.Kind == AnomalyTraceCaptureGap {
@@ -269,7 +269,7 @@ func TestRawSDKEpisodePersistenceRoundTrip(t *testing.T) {
 				ToolResults: []sidecar.RawSDKToolResult{{ToolUseID: "toolu_1", OutputSize: 12}},
 				Usage:       &sidecar.RawSDKUsage{InputTokens: 900, OutputTokens: 80, CostUSD: 0.01, Source: "result"},
 			},
-			ToolTraces: []ToolCallTrace{capturedTrace(t, "toolu_1", input)},
+			ToolTraces: []sidecar.ToolCallTrace{capturedTrace(t, "toolu_1", input)},
 		}},
 	}
 	ep.Anomalies = DetectAnomalies(ep)

@@ -138,3 +138,33 @@ func TestAttributeEmptyTraces(t *testing.T) {
 		t.Fatalf("TotalChars on empty table = %v, want 0", got)
 	}
 }
+
+// TestArgvLocationsCannotChangeExecuteClassification is the ADR-0032.2 D4
+// blast-radius proof for host-task attribution. D4 synthesizes Locations for
+// execute-kind ghx calls that carried none. The R6 path-scope rule
+// (classifyLocations) only runs for read/edit/delete/move/search kinds; an
+// execute-kind call always routes through R3–R5 on its command line. So adding
+// or removing Locations on an execute-kind trace must leave its class
+// unchanged — no host-task grader verdict can move because of D4.
+func TestArgvLocationsCannotChangeExecuteClassification(t *testing.T) {
+	c, root := testClassifier(t)
+	inside := filepath.Join(root, "main.go")
+	outside := filepath.Join(t.TempDir(), "elsewhere.go")
+
+	// A ghx recon read over the ACP execute tool: engineering by R5 (simple
+	// command that is not an ExplorationCommand). D4 would synthesize a
+	// repo-relative path here — set every scope, including one outside the
+	// workspace, and confirm the execute class never budges.
+	base := sidecar.ToolCallTrace{
+		Kind:     "execute",
+		Title:    "Terminal",
+		RawInput: map[string]any{"command": "ghx read gin-gonic/gin routergroup.go"},
+	}
+	for _, locs := range [][]string{nil, {"routergroup.go"}, {inside}, {outside}, {inside, outside}} {
+		tr := base
+		tr.Locations = locs
+		if got := c.classify(tr); got != ClassEngineering {
+			t.Fatalf("execute ghx call classified as %q with Locations=%v; D4 must not change execute attribution", got, locs)
+		}
+	}
+}

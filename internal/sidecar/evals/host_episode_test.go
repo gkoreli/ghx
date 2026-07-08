@@ -80,7 +80,7 @@ func hostFixture(sha string) hosttask.Fixture {
 // recon MCP server registered → S2 attribution → compliance detection →
 // stubbed grading → artifact roundtrip with recomputable anomalies. It is
 // also the scripted proof of the two S2 obligations: (a) tool-call locations
-// flow to ToolCallTrace.Locations on the eval client path, and (b) execute
+// flow to sidecar.ToolCallTrace.Locations on the eval client path, and (b) execute
 // identity resolves from rawInput.command under the live adapter's
 // "Terminal" titles (sighting 2026-07-06).
 func TestMockHostTrialArmB(t *testing.T) {
@@ -184,8 +184,8 @@ func TestMockHostTrialArmB(t *testing.T) {
 		t.Fatalf("arm-B prompt must not carry the control-arm exploration block:\n%s", log)
 	}
 
-	// S2 obligation (a): locations flow to ToolCallTrace.Locations.
-	var readTrace *ToolCallTrace
+	// S2 obligation (a): locations flow to sidecar.ToolCallTrace.Locations.
+	var readTrace *sidecar.ToolCallTrace
 	for i := range ep.Turns[0].ToolTraces {
 		if ep.Turns[0].ToolTraces[i].ID == "read-1" {
 			readTrace = &ep.Turns[0].ToolTraces[i]

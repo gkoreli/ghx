@@ -31,7 +31,7 @@ func goldenPromptEpisode() *Episode {
 				Question: "Where are routes registered?",
 				Thinking: "Map routergroup.go first, then tree.go.",
 				Text:     "Routes register through RouterGroup in routergroup.go.",
-				ToolTraces: []ToolCallTrace{{
+				ToolTraces: []sidecar.ToolCallTrace{{
 					Title:         "ghx read gin-gonic/gin routergroup.go --map",
 					OutputExcerpt: "func (group *RouterGroup) handle(httpMethod, relativePath string, handlers HandlersChain) IRoutes\nmore signatures follow",
 					OutputSize:    1420,
@@ -41,7 +41,7 @@ func goldenPromptEpisode() *Episode {
 				Turn:     1,
 				Question: "How are :name params captured?",
 				Text:     "Params are captured in tree.go during getValue tree traversal.",
-				ToolTraces: []ToolCallTrace{{
+				ToolTraces: []sidecar.ToolCallTrace{{
 					Title:         "ghx read gin-gonic/gin tree.go --map",
 					OutputExcerpt: "func (n *node) getValue(path string, params *Params, ...) nodeValue",
 					OutputSize:    980,
