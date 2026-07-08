@@ -1,7 +1,7 @@
 ---
 title: "ADR-0034: Unified Failure-Class Model Across Frontends"
 date: "2026-07-07"
-status: "proposed"
+status: "accepted"
 thread: "multi-frontend-architecture"
 author: "Fable (orchestrator) — proposed autonomously; awaits Goga acceptance"
 ---
@@ -10,14 +10,17 @@ author: "Fable (orchestrator) — proposed autonomously; awaits Goga acceptance"
 
 ## Status
 
-**Proposed** (orchestrator, 2026-07-07). Surfaced by the architecture audit
-(`docs/audits/architecture-2026-07-07.md`, finding **M2**). This is a
-cross-cutting refactor touching core plus all three frontends, so it is
-registered as a proposal and **awaits Goga's acceptance before
-implementation** — nothing here is built yet. It extends ADR-0007's
-core/frontend rule ("core owns capabilities; frontends wrap the same core")
-and is consistent with ADR-0010 and the AGENTS.md engineering tenets
-(domain models, service encapsulation, no per-frontend divergence).
+**Accepted** (Goga, 2026-07-07) — implement **phases 1–2 now** (core `FailureClass`
++ typed error + one upstream classifier with tests; then the CLI sources class from
+core, fixing the three dogfooded exit-code frictions and deleting the substring
+matcher). **Phases 3–4 (MCP, sidecar) are sequenced later** behind the host-task/eval
+frontier, not built in this pass. Surfaced by the architecture audit
+(`docs/audits/architecture-2026-07-07.md`, finding **M2**) and motivated concretely by
+the v2.8.0 dogfood exit-code frictions (`docs/dogfood/FRICTION.md`: `explore badslug`→3
+not 2, `read nonexistent`→0, live 401 with no affordance). It extends ADR-0007's
+core/frontend rule ("core owns capabilities; frontends wrap the same core") and is
+consistent with ADR-0010 and the AGENTS.md engineering tenets (domain models, service
+encapsulation, no per-frontend divergence).
 
 ## Context
 
