@@ -59,6 +59,12 @@ half is a large behavior-preserving refactor that makes ghx faster to evolve.
   now names the correct invocation (`ghx explore owner/repo src` /
   `ghx grep owner/repo PATTERN --path PATH`) instead of a bare error
   (workstream A4).
+- **`ghx grep -i/--ignore-case` and `ghx tree --path` are now accepted** — `grep`
+  takes the grep/rg muscle-memory `-i` (a documented no-op: GitHub code search is
+  always case-insensitive), and `tree` accepts `--path <subtree>` as an alias for
+  its positional path, unifying the `--path` grammar across `grep`/`inspect`/`tree`
+  (surfaced dogfooding the [PA-0002](docs/product-audit/PA-0002-absorb-codebase-memory-mcp.md)
+  competitive recon; workstream A).
 - **Sidecar daemon is now supervisor-hardened** — a panic in one turn is
   isolated to that request instead of taking down the daemon and all warm
   sessions; a disconnected/cancelled client actually cancels its turn; and the
