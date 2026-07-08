@@ -132,7 +132,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: exit 2, ideally with an example (`ghx explore owner/name`).
 - Suggested fix: give `exploreCmd` (and `read`/`tree`/`grep` if they share the gap) the `strings.Contains(err, "invalid repo format") → WithExitCode(ExitBadInvocation, ...)` guard that `inspect` already has.
 - Trace: n/a (invocation error).
-- Disposition: open.
+- Disposition: fixed 67ddf6d (ADR-0034 phase 2). Already exit 2 on mainline post-v2.6.0 (the dogfood binary was behind); now every repo-scoped command (explore/read/tree/grep/inspect) sources bad-input from `ParseRepo`'s core `ClassBadInput` rather than a per-command substring guard. Output byte-identical.
 
 ## 2026-07-07 `read` of a nonexistent repo returns exit 0 — soft
 - Attempted: `/tmp/ghx-dogfood-w3 read totally/nonexistent-repo-xyz123 README.md`.
@@ -140,7 +140,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: exit 1 (ExitNoResults) when no requested file resolves, or exit 3 when the repo/ref 404s.
 - Suggested fix: in the read command, when zero requested files resolve (or the repo/ref lookup 404s), return `ExitNoResults`/`ExitUpstreamFailure` instead of nil.
 - Trace: n/a (invocation error).
-- Disposition: open.
+- Disposition: fixed f029add + 67ddf6d (ADR-0034 phases 1–2). Core `Read` no longer swallows a repo/ref-level GraphQL failure to `NotFound`+nil — it returns a classified upstream error, so `read totally/nonexistent-repo-xyz123 README.md` now exits 3 (404). When the repo resolves but zero requested paths do, the CLI returns `ExitNoResults` (exit 1) after still printing the per-file `(not found)` lines.
 
 ## 2026-07-07 live 401 on `search` prints raw HTTP with no fix-it affordance — soft [A4 gap]
 - Attempted: `GH_TOKEN=ghp_invalidbadtoken... /tmp/ghx-dogfood-w3 search charmbracelet/bubbletea "func eventLoop"`.
@@ -148,7 +148,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: 401/403 upstream errors name `gh auth login` / GH_TOKEN as the fix.
 - Suggested fix: map 401/403 in the CLI error path to an affordance reusing the preflight.go remediation string.
 - Trace: n/a (live upstream error, no session emitted).
-- Disposition: open.
+- Disposition: fixed 67ddf6d (ADR-0034 phase 2). Already carried the `gh auth login` affordance on mainline post-v2.6.0; the hint is now selected by the core classifier from the structured HTTP status (`*api.HTTPError.StatusCode`) rather than a CLI substring table, and the auth-hint wording mirrors the preflight remediation. Exit 3 + affordance byte-identical. Note: the empty-`GH_TOKEN=` masquerade is go-gh credential resolution (an empty env var is ignored in favor of the stored `gh` login) — correct when a login exists, and not a classification bug; left as-is.
 
 ## 2026-07-07 tool-call Locations empty — binary predates the S2 fix; and the fix may not receive live data — soft [ADR-0032.1]
 - Attempted: verify Task-4b — that ToolCallTrace.Locations is populated on file/read tool calls (the 5aec071 / ADR-0032.1 S2 fix). Checked traces.jsonl across all four sessions.

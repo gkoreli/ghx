@@ -3,7 +3,7 @@ title: "ADR-0034: Unified Failure-Class Model Across Frontends"
 date: "2026-07-07"
 status: "accepted"
 thread: "multi-frontend-architecture"
-author: "Fable (orchestrator) — proposed autonomously; awaits Goga acceptance"
+author: "Fable (orchestrator) — proposed autonomously; accepted by Goga"
 ---
 
 # 0034. Unified Failure-Class Model Across Frontends
@@ -21,6 +21,10 @@ not 2, `read nonexistent`→0, live 401 with no affordance). It extends ADR-0007
 core/frontend rule ("core owns capabilities; frontends wrap the same core") and is
 consistent with ADR-0010 and the AGENTS.md engineering tenets (domain models, service
 encapsulation, no per-frontend divergence).
+
+**Phases 1–2 are implemented** (core taxonomy + CLI mapping; see
+"Implementation" below). Phases 3–4 (MCP `serve.go`, sidecar report) remain
+open.
 
 ## Context
 
@@ -119,6 +123,50 @@ Lift failure-class into core and map it once per frontend.
 
 Each phase is independently shippable and independently verifiable, consistent
 with ADR-0025's incremental-delivery posture.
+
+## Implementation (phases 1–2, as built)
+
+**Phase 1 — core owns the taxonomy** (`internal/ghx/failure.go`).
+`FailureClass` is `ClassNone/ClassNoResults/ClassBadInput/ClassUpstream`
+(mirroring the CLI's exit 0/1/2/3). `ghx.Error{Class, Err, Hint}` carries it;
+`Error()`/`Unwrap()` delegate to `Err` so the rendered text and the wrapped
+chain (e.g. an `*api.HTTPError`) stay intact — the message is byte-identical to
+the pre-existing error. `ClassifyUpstream(err) (FailureClass, string)` reads
+**structured signals first** — `*api.HTTPError.StatusCode` and the
+`*api.GraphQLError` item `Type` (NOT_FOUND/FORBIDDEN/RATE_LIMITED), reachable via
+`errors.As` even through `fmt.Errorf("...: %w", ...)` wrapping — then falls back
+to the migrated substring table for transport errors that carry no status. The
+ordered switch preserves the CLI's historical first-match precedence
+(rate-limit → auth → not-found → forbidden → network) so ambiguous messages
+resolve to the same hint. Core functions wrap upstream failures at the source
+(`Search`, `Explore`, `Repos`, `fetchTree`, `Read`) as `ClassUpstream`;
+`ParseRepo` and `Inspect`'s empty-query are `ClassBadInput`. The auth hint reuses
+the sidecar preflight's `gh auth login` / GH_TOKEN remediation wording. Table-
+driven classifier tests live in `internal/ghx/failure_test.go`.
+
+**Phase 2 — CLI maps class → idiom** (`internal/cli/errors.go`, `ghx.go`,
+`tier2.go`). `CodeForError`/`ExitError`/`WithExitCode` stay; a single
+`coreError(err)` reads the class + hint from the `ghx.Error` (via `errors.As`)
+and wraps with the matching exit code and the `→` affordance line. The
+duplicated `upstreamRules`/`upstreamAffordance`/`upstreamError`/`ghxCoreError`
+substring machinery is **deleted** — the CLI no longer re-classifies English
+strings; an error without a `ghx.Error` (e.g. a local tier-2 git/tool failure)
+is classified once through the shared core classifier and defaults to upstream,
+preserving the prior always-exit-3 behavior for those paths.
+
+**Three dogfood exit-code frictions fixed** (`docs/dogfood/FRICTION.md`,
+2026-07-07). F1 (`explore badslug` → exit 2) and F3 (live 401/403 affordance,
+exit 3) were already behaviorally correct on mainline (post-v2.6.0) and are now
+sourced from the core class with **byte-identical** output. F2 was the genuine
+remaining bug: core `Read` swallowed a repo/ref-level GraphQL failure to
+`NotFound` with a nil error, so `read nonexistent/repo README.md` exited 0. It
+now surfaces the classified upstream error (exit 3 on a 404); when the repo
+resolves but zero requested paths do, the CLI returns `ExitNoResults` (exit 1)
+after still printing the per-file `(not found)` lines. Byte-identical exit codes
++ stderr were proven for every already-correct case by diffing the pre-change
+binary against the new one; only the two F2 cases (exit 0 → 3, exit 0 → 1)
+change. No eval anomaly detector or scorer depends on ghx CLI exit codes
+(verified against `internal/sidecar/evals/`).
 
 ## Considered and rejected
 

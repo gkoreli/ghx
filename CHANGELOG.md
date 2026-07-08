@@ -21,6 +21,15 @@ dogfood.
   saw (the [ADR-0036](docs/adr/0036-target-architecture-runner-port-and-boundaries.md)
   B2 `Snapshot` was computed but not surfaced); `ghx.Repo` JSON keys are
   lowercased for consistent serialization.
+- **Failure classification moved into core** — `internal/ghx` now owns a
+  `FailureClass` taxonomy and a typed `ghx.Error{Class,Err,Hint}`; the upstream
+  GitHub/gh sub-classification (rate-limit vs auth vs not-found) is derived once,
+  at the source, from the structured HTTP status / GraphQL error type rather than
+  re-parsed English error strings. The CLI maps class → exit code + affordance
+  and the duplicated substring table is deleted; exit codes and stderr stay
+  byte-identical for every already-correct case
+  ([ADR-0034](docs/adr/0034-failure-class-model.md); the MCP and sidecar
+  mappings are phases 3–4, not yet built).
 
 ### Fixed
 
@@ -29,6 +38,15 @@ dogfood.
 - **`ghx sidecar ask --depth <invalid>` is rejected with exit 2** naming the
   valid set (`cheap|normal|deep`) before any daemon call, instead of silently
   coercing — matching the MCP recon path.
+- **CLI exit codes now match the documented taxonomy on three dogfooded edges**
+  (`docs/dogfood/FRICTION.md`, 2026-07-07): `ghx read owner/repo <path>` on a
+  nonexistent repo/ref returns exit 3 (was a silent exit 0), and returns exit 1
+  when the repo resolves but no requested path does — a scripting agent checking
+  `$?` can now tell an empty 404 from success (it still prints the per-file
+  `(not found)` lines). `explore`/`read`/`tree`/`grep` all classify a malformed
+  `owner/repo` slug as bad input (exit 2), and live 401/403 name the
+  `gh auth login` / GH_TOKEN fix
+  ([ADR-0034](docs/adr/0034-failure-class-model.md) phases 1–2).
 
 ## [2.8.0] — 2026-07-07
 
