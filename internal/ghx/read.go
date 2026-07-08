@@ -114,12 +114,13 @@ func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 	}
 
 	if err := gql.Do(query, nil, &resp); err != nil {
-		// Return NotFound for all files on error
-		var results []FileResult
-		for _, f := range files {
-			results = append(results, FileResult{Path: f, NotFound: true})
-		}
-		return results, nil
+		// A failed query is a repo/ref-level failure (404 not-found, 401 auth,
+		// rate-limit, network) — never a per-file miss, which surfaces as a null
+		// alias field below. Surface it as a classified upstream error so the
+		// frontend can distinguish "the repo/ref 404s" (exit 3) from "the repo
+		// resolved but these files don't" (exit 1); swallowing it to NotFound made
+		// a nonexistent repo look like a successful empty read (friction F2).
+		return nil, upstream(fmt.Errorf("read failed: %w", err))
 	}
 
 	snapshot := Snapshot{Repo: repo, SHA: readSnapshotSHA(resp.Repository)}

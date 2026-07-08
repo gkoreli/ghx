@@ -56,7 +56,7 @@ matched no repos; broaden it.`,
 		limit, _ := cmd.Flags().GetInt("limit")
 		results, total, err := ghxlib.Repos(args[0], ghxlib.ReposOpts{Limit: limit})
 		if err != nil {
-			return upstreamError(err)
+			return coreError(err)
 		}
 		fmt.Printf("%d repos found\n", total)
 		if len(results) == 0 {
@@ -97,11 +97,11 @@ complete tree and README.`,
 		fullMode, _ := cmd.Flags().GetBool("full")
 		repo, err := ghxlib.ParseRepo(args[0])
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 		result, err := ghxlib.Explore(repo, path)
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 		if !fullMode {
 			printCompactExplore(args[0], path, result, budget)
@@ -186,11 +186,11 @@ map plus a narrowing hint rather than flooding output.`,
 		}
 		repo, err := ghxlib.ParseRepo(args[0])
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 		results, err := ghxlib.Read(repo, args[1:], opts)
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 
 		// Show glob summary when matches were truncated
@@ -270,6 +270,21 @@ map plus a narrowing hint rather than flooding output.`,
 			}
 		}
 
+		// Exit-code contract (dogfood friction F2): a read where nothing resolved
+		// is not success. A repo/ref that 404s already returned an upstream error
+		// above (exit 3); reaching here means the repo resolved but zero requested
+		// paths did — every result NotFound, or a glob matched nothing — which is
+		// no-results (exit 1). A scripting agent checking $? must not read an empty
+		// 404 as OK. Directory listings and found files count as resolved.
+		resolved := 0
+		for _, r := range results {
+			if !r.NotFound {
+				resolved++
+			}
+		}
+		if resolved == 0 {
+			return WithExitCode(ExitNoResults, fmt.Errorf("no files resolved in %s for the requested path(s)", args[0]))
+		}
 		return nil
 	},
 }
@@ -297,9 +312,10 @@ func init() {
 
 // searchFn is the seam through which code-search commands reach the backend. It
 // exists so tests can drive command error paths (e.g. a live 401) and prove the
-// upstream error is surfaced through upstreamError — i.e. the fix-it affordance
-// wiring, not just the affordance table in errors.go, is what dogfood friction
-// F3 (docs/dogfood/FRICTION.md) is about. Production keeps ghxlib.Search.
+// upstream error is surfaced through coreError — i.e. the fix-it affordance
+// wiring that reads the class/hint from core, not just the classifier in
+// internal/ghx, is what dogfood friction F3 (docs/dogfood/FRICTION.md) is about.
+// Production keeps ghxlib.Search.
 var searchFn = ghxlib.Search
 
 // treeFn is the seam through which treeCmd reaches the repo tree backend.
@@ -333,7 +349,7 @@ topic use ` + "`ghx repos`" + ` instead. Exit code 1 means no code matched.`,
 			Budget:   budget,
 		})
 		if err != nil {
-			return upstreamError(err)
+			return coreError(err)
 		}
 
 		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
@@ -391,7 +407,7 @@ search does not support case-sensitive matching.`,
 			Budget: budget,
 		})
 		if err != nil {
-			return upstreamError(err)
+			return coreError(err)
 		}
 		fmt.Printf("%d results (showing %d)\n", result.Total, len(result.Matches))
 		if len(result.Matches) == 0 {
@@ -441,10 +457,7 @@ result. Exit code 1 means nothing ranked for the query.`,
 			Path:   path,
 		})
 		if err != nil {
-			if strings.Contains(err.Error(), "invalid repo") || strings.Contains(err.Error(), "query must not be empty") {
-				return WithExitCode(ExitBadInvocation, err)
-			}
-			return upstreamError(err)
+			return coreError(err)
 		}
 		fmt.Print(ghxlib.FormatInspectText(result))
 		if len(result.Files) == 0 {
@@ -488,11 +501,11 @@ fully recursive); directories are shown with a trailing slash.`,
 		}
 		repo, err := ghxlib.ParseRepo(args[0])
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 		results, err := treeFn(repo, path, ghxlib.TreeOpts{Depth: depth})
 		if err != nil {
-			return ghxCoreError(err)
+			return coreError(err)
 		}
 		for _, entry := range results {
 			fmt.Println(entry)
@@ -783,13 +796,6 @@ func buildSearchQuery(args []string, lang string, glob string) string {
 	}
 	query := fmt.Sprintf("%s repo:%s", quoteCodeSearchTerm(args[1]), args[0])
 	return appendSearchQualifiers(query, lang, glob)
-}
-
-func ghxCoreError(err error) error {
-	if err != nil && strings.Contains(err.Error(), "invalid repo") {
-		return WithExitCode(ExitBadInvocation, err)
-	}
-	return upstreamError(err)
 }
 
 func buildGrepQuery(repo string, pattern string, glob string, path string) string {

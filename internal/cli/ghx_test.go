@@ -95,8 +95,15 @@ func TestTeachingFlagErrorGolden(t *testing.T) {
 	}
 }
 
-func TestGhxCoreErrorInvalidRepoIsBadInvocation(t *testing.T) {
-	err := ghxCoreError(errors.New(`invalid repo "noslash": expected owner/repo, e.g. ghx explore gkoreli/ghx`))
+// TestCoreErrorInvalidRepoIsBadInvocation pins that a malformed slug maps to
+// exit 2 (dogfood friction F1) via the core FailureClass, not a CLI substring
+// guard: ParseRepo returns a ClassBadInput ghx.Error and coreError renders it.
+func TestCoreErrorInvalidRepoIsBadInvocation(t *testing.T) {
+	_, parseErr := ghxlib.ParseRepo("noslash")
+	if parseErr == nil {
+		t.Fatal("ParseRepo returned nil for a malformed slug")
+	}
+	err := coreError(parseErr)
 	if got := CodeForError(err); got != ExitBadInvocation {
 		t.Fatalf("exit code = %d, want %d", got, ExitBadInvocation)
 	}
