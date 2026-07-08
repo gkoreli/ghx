@@ -41,7 +41,7 @@ func Search(query string, opts SearchOpts) (*SearchResult, error) {
 		Headers: map[string]string{"Accept": "application/vnd.github.text-match+json"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create REST client: %w", err)
+		return nil, upstream(fmt.Errorf("failed to create REST client: %w", err))
 	}
 
 	var resp struct {
@@ -60,7 +60,7 @@ func Search(query string, opts SearchOpts) (*SearchResult, error) {
 
 	path := fmt.Sprintf("search/code?q=%s&per_page=%d", url.QueryEscape(query), limit)
 	if err := rest.Get(path, &resp); err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		return nil, upstream(fmt.Errorf("search failed: %w", err))
 	}
 
 	matches := make([]SearchMatch, 0, len(resp.Items))

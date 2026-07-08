@@ -17,7 +17,7 @@ type treeEntry struct {
 func fetchTree(repo Repo) ([]treeEntry, error) {
 	gql, err := githubClients.GraphQL()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
+		return nil, upstream(fmt.Errorf("failed to create GraphQL client: %w", err))
 	}
 
 	branchQuery := fmt.Sprintf(`{
@@ -35,17 +35,17 @@ func fetchTree(repo Repo) ([]treeEntry, error) {
 	}
 
 	if err := gql.Do(branchQuery, nil, &branchResp); err != nil {
-		return nil, fmt.Errorf("failed to get branch: %w", err)
+		return nil, upstream(fmt.Errorf("failed to get branch: %w", err))
 	}
 
 	branch := branchResp.Repository.DefaultBranchRef.Name
 	if branch == "" {
-		return nil, fmt.Errorf("could not determine default branch")
+		return nil, upstream(fmt.Errorf("could not determine default branch"))
 	}
 
 	rest, err := githubClients.REST()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create REST client: %w", err)
+		return nil, upstream(fmt.Errorf("failed to create REST client: %w", err))
 	}
 
 	endpoint := fmt.Sprintf("repos/%s/%s/git/trees/%s?recursive=1", repo.Owner, repo.Name, branch)
@@ -54,7 +54,7 @@ func fetchTree(repo Repo) ([]treeEntry, error) {
 	}
 
 	if err := rest.Get(endpoint, &resp); err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
+		return nil, upstream(fmt.Errorf("failed to get tree: %w", err))
 	}
 
 	return resp.Tree, nil

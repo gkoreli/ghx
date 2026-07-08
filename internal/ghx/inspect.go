@@ -247,7 +247,7 @@ func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, er
 	}
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("query must not be empty, e.g. ghx inspect gkoreli/ghx \"exit code\"")
+		return nil, badInput(fmt.Errorf("query must not be empty, e.g. ghx inspect gkoreli/ghx \"exit code\""))
 	}
 	opts = normalizeInspectOptions(opts)
 

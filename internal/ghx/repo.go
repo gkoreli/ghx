@@ -25,7 +25,7 @@ type Snapshot struct {
 func ParseRepo(s string) (Repo, error) {
 	parts := strings.Split(s, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Repo{}, fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx explore gkoreli/ghx", s)
+		return Repo{}, badInput(fmt.Errorf("invalid repo %q: expected owner/repo, e.g. ghx explore gkoreli/ghx", s))
 	}
 	return Repo{Owner: parts[0], Name: parts[1]}, nil
 }

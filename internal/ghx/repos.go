@@ -32,7 +32,7 @@ func Repos(query string, opts ReposOpts) ([]RepoResult, int, error) {
 
 	gql, err := githubClients.GraphQL()
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create GraphQL client: %w", err)
+		return nil, 0, upstream(fmt.Errorf("failed to create GraphQL client: %w", err))
 	}
 
 	graphqlQuery := fmt.Sprintf(`
@@ -71,7 +71,7 @@ func Repos(query string, opts ReposOpts) ([]RepoResult, int, error) {
 	}
 
 	if err := gql.Do(graphqlQuery, nil, &resp); err != nil {
-		return nil, 0, fmt.Errorf("graphql query failed: %w", err)
+		return nil, 0, upstream(fmt.Errorf("graphql query failed: %w", err))
 	}
 
 	if len(resp.Search.Nodes) == 0 {

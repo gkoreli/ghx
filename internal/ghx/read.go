@@ -88,7 +88,7 @@ func Read(repo Repo, files []string, opts *ReadOpts) ([]FileResult, error) {
 
 	gql, err := githubClients.GraphQL()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
+		return nil, upstream(fmt.Errorf("failed to create GraphQL client: %w", err))
 	}
 
 	// Build batched query with aliases (max 10 files per call)

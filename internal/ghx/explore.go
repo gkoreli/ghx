@@ -25,7 +25,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 
 	gql, err := githubClients.GraphQL()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
+		return nil, upstream(fmt.Errorf("failed to create GraphQL client: %w", err))
 	}
 
 	if path == "" {
@@ -76,7 +76,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 		}
 
 		if err := gql.Do(query, nil, &resp); err != nil {
-			return nil, fmt.Errorf("GraphQL query failed: %w", err)
+			return nil, upstream(fmt.Errorf("GraphQL query failed: %w", err))
 		}
 
 		files := make([]FileEntry, len(resp.Repository.Tree.Entries))
@@ -129,7 +129,7 @@ func Explore(repo Repo, path string) (*ExploreResult, error) {
 	}
 
 	if err := gql.Do(query, nil, &resp); err != nil {
-		return nil, fmt.Errorf("GraphQL query failed: %w", err)
+		return nil, upstream(fmt.Errorf("GraphQL query failed: %w", err))
 	}
 
 	files := make([]FileEntry, len(resp.Repository.Tree.Entries))
