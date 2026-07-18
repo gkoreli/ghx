@@ -19,7 +19,6 @@ exploration CLI. The durable vision lives in
 > README's lead), and the **classic exploration CLI** it drives under the hood
 > (documented in full further down). Use whichever fits; they share one core.
 
-
 ## Engineering record
 
 ghx has been developed in public through a sequence of maintainer field notes:
