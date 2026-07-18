@@ -19,6 +19,24 @@ exploration CLI. The durable vision lives in
 > README's lead), and the **classic exploration CLI** it drives under the hood
 > (documented in full further down). Use whichever fits; they share one core.
 
+
+## Engineering record
+
+ghx has been developed in public through a sequence of maintainer field notes:
+
+- [Build the GitHub Exploration Tool, No Mistakes](https://gkoreli.com/how-ghx-was-born)
+  is the origin story: 23 agent sessions, three rewrites, and the constraints that
+  shaped the original CLI.
+- [You Don't Always Need Codemap](https://gkoreli.com/you-dont-need-codemap)
+  places ghx alongside Codemap, Aider, Gitingest, and Repomix, and explains the
+  boundary between mapping, packing, searching, and remote reconnaissance.
+- [What If the Agent Was Better Before We Helped?](https://gkoreli.com/what-if-the-agent-was-better-before-we-helped)
+  records the sidecar thesis, the evaluation design, and the unresolved question
+  of whether any of it actually beats plain `gh`.
+
+These are engineering records, including doubts and failed paths — not product
+documentation or independent reviews.
+
 ## Why a sidecar
 
 When a main agent stops mid-task to explore code, the real cost is not the API
