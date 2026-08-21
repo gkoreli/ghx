@@ -31,7 +31,7 @@ prose here.
 - CI: `actions/setup-go` v5 → v6 and `goreleaser/goreleaser-action` v6 → v7
   (GitHub's Node 20 deprecation forced the old versions onto Node 24).
 
-## [2.9.1] — 2026-08-21
+## [2.10.0] — 2026-08-21
 
 Three parallel capability tracks landed from evidence-grounded research
 (`docs/research/`) through ADR proposals to implementation — each branch built
@@ -64,6 +64,10 @@ and verified with `go test ./...` green.
   [0037](docs/adr/0037-persistent-evidence-shaped-session-memory.md),
   [0038](docs/adr/0038-cheap-backend-governance.md),
   [0039](docs/adr/0039-report-contract-validation.md).
+
+## [2.9.1] — 2026-08-21
+
+### Added
 
 - **Tier-2 runtime-owned escalation (ADR-0024.4)** — the sidecar-decided half
   of M7/B9 completes: `ghx tier2 observe --signal <id>` lets the agent declare
