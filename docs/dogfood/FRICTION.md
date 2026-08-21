@@ -270,8 +270,23 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Trace: `/tmp/ghx-dogfood-280 version`; `/tmp/ghx-dogfood-280 sidecar doctor`.
 - Disposition: open (minor).
 
+## 2026-08-21 kanban dispatcher spawns fail on unknown skill tag — breaking [ops]
+- Attempted: `hermes kanban dispatch` of the ghx-sidecar board's first swarm (4 tasks created with `--skill ghx`).
+- Ground: every spawn crashed twice and auto-blocked: `Error: Unknown skill(s): ghx`. The board CLI accepted an arbitrary skill tag at create-time, but the worker profile has no skill by that name — the embedded ghx skills ship as `ghx-project` (local) / recon surfaces, not a bare `ghx` skill. Two failure layers: (1) no create-time validation against the assignee profile's installed skills; (2) auto-block fired before the workspace error (no default_workdir) was even diagnosed, muddying the first triage.
+- Trace: `hermes kanban log t_408a9a77` (spawn_failed ×2, gave_up), dispatch output 21:53–21:54 UTC.
+- Disposition: fixed operationally — stripped the bogus tag via board DB (`UPDATE tasks SET skills='[]'`), set `boards set-default-workdir ghx-sidecar /root/ghx`, unblocked, re-dispatched: all 4 spawned and ran to completion. Product follow-up (Hermes-side, not ghx): validate `--skill` at task create; surface both errors in one diagnostics pass.
+
+---
+
+_2026-08-21 dogfood run (orchestrator): sidecar ask on modelcontextprotocol/typescript-sdk
+(spec/conformance prior-art question for ADR-0040 P2). Doctor preflight PASS; ask returned
+exit 0 with exact-path citations (scripts/fetch-spec-types.ts, schema-twins manifest,
+per-revision conformance tests) in ~3 min. Session: ~/.ghx/sessions/modelcontextprotocol-typescript-sdk/
+(15 tool-call spans, trace fb97251b…). The answer became the design input for
+docs/spec/evidence-contract/ — first end-to-end proof of "recon → artifact" flywheel._
+
 ## 2026-07-07 code-mode transpile error returns exit 0 — soft [minor]
-- Attempted: an early code-mode probe using top-level `await`: `ghx code '(async…)()'` and `ghx code 'const r = await explore(…)'`.
+- Attempted: an early code-mode probe using top-level `await`: `ghx code '(async…)'` and `ghx code 'const r = await explore(…)'`.
 - Ground: prints "transpile: transpile: Top-level await is not available in the configured target environment (\"es2015\")" but exits **0**. A snippet that failed to transpile/run is a bad invocation; exit 0 lets a scripting agent treat a non-executed script as success. (Doubled "transpile: transpile:" prefix is also a minor cosmetic nit.) The `--help` does document the sync `codemode.explore({…}); return …` contract, so this is a validation/exit-code gap, not a usability blocker.
 - Expected: a transpile/compile failure → exit 2.
 - Suggested fix: return ExitBadInvocation when the JS fails to transpile; de-dupe the error prefix.
