@@ -75,7 +75,7 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // nextReads concrete-paths contract).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "b529891c814dd39d9ac3be9fca49f3edaae64e235e4b00419a263a87f2771eff"
+	const wantSHA = "36dc291f789aa022950e998904b571e9024d9b1c54d4f5ade5a4469cbcb824e5"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}
