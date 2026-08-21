@@ -1,7 +1,7 @@
 ---
 title: "ADR-0039: Report Contract Validation — schemaVersion + Machine-Checked Persona Bounds"
 date: "2026-08-21"
-status: "proposed"
+status: "accepted-on-merge"
 parent: ADR-0016.2
 thread: "sidecar-runtime"
 author: "Goga Koreli"
@@ -11,7 +11,7 @@ author: "Goga Koreli"
 
 ## Status
 
-Proposed. Research grounding:
+Accepted on merge (Goga, 2026-08-21). Research grounding:
 `docs/research/003-report-contract-context-boundary.md`.
 
 ## Problem

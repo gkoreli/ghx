@@ -1,7 +1,7 @@
 ---
 title: "ADR-0038: Cheap Backend Governance — Backend Identity in Artifacts + Expensive-Quota Preflight Guardrail"
 date: "2026-08-21"
-status: "proposed"
+status: "accepted-on-merge"
 parent: ADR-0033
 thread: "sidecar-runtime"
 author: "Goga Koreli"
@@ -11,7 +11,7 @@ author: "Goga Koreli"
 
 ## Status
 
-Proposed. Research grounding: `docs/research/001-cheap-sidecar-backend.md`.
+Accepted on merge (Goga, 2026-08-21). Research grounding: `docs/research/001-cheap-sidecar-backend.md`.
 Complements ADR-0033 (out-of-box agent config) — that thread covers how agent
 settings/auth flow; this one covers which backend ran and what a formal run
 may spend.

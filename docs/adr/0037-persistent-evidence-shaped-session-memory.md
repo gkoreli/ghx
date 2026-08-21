@@ -1,7 +1,7 @@
 ---
 title: "ADR-0037: Persistent Evidence-Shaped Session Memory — Ledger Bounds, Snapshot Identity, Recall"
 date: "2026-08-21"
-status: "proposed"
+status: "accepted-on-merge"
 parent: ADR-0014.1
 thread: "sidecar-runtime"
 author: "Goga Koreli"
@@ -11,7 +11,7 @@ author: "Goga Koreli"
 
 ## Status
 
-Proposed. Research grounding: `docs/research/002-persistent-sidecar-session-memory.md`.
+Accepted on merge (Goga, 2026-08-21). Research grounding: `docs/research/002-persistent-sidecar-session-memory.md`.
 
 ## Problem
 
