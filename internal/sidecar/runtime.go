@@ -523,7 +523,8 @@ func recoverMaxTurns(ctx context.Context, session Session, state *askTurnState, 
 		}
 	}
 	return &Report{
-		Answer: "BLOCKED: the exploration hit the adapter's max-turns safety net and the one-shot wrap-up attempt also failed; partial artifacts were kept in the session directory.",
+		SchemaVersion: ReportSchemaVersion,
+		Answer:        "BLOCKED: the exploration hit the adapter's max-turns safety net and the one-shot wrap-up attempt also failed; partial artifacts were kept in the session directory.",
 		Uncertainty: []string{
 			"turn-cap error: " + turnCapErr.Error(),
 			"wrap-up failure: " + wrapUpErr.Error(),
@@ -563,7 +564,7 @@ func resolveReportWithRetry(ctx context.Context, session Session, state *askTurn
 		}
 		return report
 	}
-	return &Report{Answer: warnNoReportAnswer(state.stderrLog)}
+	return &Report{SchemaVersion: ReportSchemaVersion, Answer: warnNoReportAnswer(state.stderrLog)}
 }
 
 func persistTurn(state *askTurnState, report *Report) *TierDecisionRecord {
