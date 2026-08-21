@@ -1,6 +1,7 @@
 package ghx
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -295,6 +296,18 @@ func Inspect(repo string, query string, opts InspectOptions) (*InspectResult, er
 			Reason:  "no candidates",
 			Command: fmt.Sprintf("ghx search %s %q --lang LANG or --glob \"**/*\"", repo, query),
 		})
+		// ADR-0034.1 D3: an empty search result is ambiguous between "real
+		// repo, zero hits" (no-results) and "repo does not exist" (upstream
+		// 404 that GitHub code search silently swallows). Probe the repo
+		// itself so a nonexistent repo exits 3 like explore/read, not 1.
+		if _, treeErr := Tree(parsedRepo, "", TreeOpts{Depth: 1}); treeErr != nil {
+			if class, _ := ClassifyUpstream(treeErr); class == ClassUpstream {
+				var coreErr *Error
+				if errors.As(treeErr, &coreErr) && containsAny(strings.ToLower(coreErr.Error()), notFoundSignatures) {
+					return nil, treeErr
+				}
+			}
+		}
 		return result, nil
 	}
 

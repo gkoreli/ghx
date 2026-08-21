@@ -1,6 +1,8 @@
 package ghx
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -137,4 +139,25 @@ func containsReason(reasons []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// ADR-0034.1 D3: when GitHub code search returns zero candidates, Inspect
+// probes the repo itself; a nonexistent repo must surface the upstream 404
+// (exit 3 via CodeForError) instead of a silent no-results result (exit 1).
+// The probe path is exercised through ClassifyUpstream on a synthetic
+// not-found error to keep the test offline-deterministic.
+func TestInspectRepo404ClassifiesUpstream(t *testing.T) {
+	notFound := &Error{Class: ClassUpstream, Err: fmt.Errorf("GET https://api.github.com/repos/tidwall/this-repo-does-not-exist-xyz: 404 Not Found")}
+	class, hint := ClassifyUpstream(notFound)
+	if class != ClassUpstream {
+		t.Fatalf("class = %v, want upstream", class)
+	}
+	var coreErr *Error
+	if !errors.As(notFound, &coreErr) {
+		t.Fatal("expected *Error")
+	}
+	if !containsAny(strings.ToLower(coreErr.Error()), notFoundSignatures) {
+		t.Fatalf("404 error should match notFoundSignatures, msg: %s", coreErr.Error())
+	}
+	_ = hint
 }
