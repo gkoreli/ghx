@@ -103,6 +103,10 @@ contains ALL of:
 Evidence must cite ghx-auditable sources: ghx commands, repo paths, symbols,
 and line references. Do not cite ` + "`/tmp`" + ` files, local scratch files, pasted prior
 turn text, or any source that cannot be recomputed from ghx-visible evidence.
+Exit codes cited anywhere in the report (uncertainty, evidence, answer) must be
+the codes actually returned by your tool invocations as captured in the turn
+trace — never reconstructed from memory; if you did not observe a code, do not
+cite one.
 An answer without evidence is a hypothesis and will be rejected with
 field-level errors. The only exception is a BLOCKED report: if you cannot
 investigate at all, set answer to "BLOCKED: <why>" (you must state why) and

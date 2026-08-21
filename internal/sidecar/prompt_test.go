@@ -271,3 +271,13 @@ func TestBuildPromptEvidenceLedgerBoundedAndNewestFirst(t *testing.T) {
 		t.Fatalf("newest evidence missing:\n%s", block)
 	}
 }
+
+// ADR-0034.1 D2: the persona must instruct the agent to cite only exit codes
+// actually captured in the turn trace — never narrated from memory (dogfood
+// friction: a report cited "exit 3" when the tool returned 2).
+func TestBuildPromptRequiresCapturedExitCodes(t *testing.T) {
+	p := BuildPersonaSystemPrompt()
+	if !strings.Contains(p, "never reconstructed from memory") {
+		t.Fatalf("persona prompt missing captured-exit-code rule")
+	}
+}
