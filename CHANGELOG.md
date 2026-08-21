@@ -12,6 +12,12 @@ prose here.
 
 ### Added
 
+- **Closed-book canary runner for the R1–R4 corpus refresh (ADR-0016.13;
+  ADR-0040 P3)** — `TestClosedBookCanaryR1R4` runs the ADR-0016.9
+  memorization probe over only the four replacement fixtures at reduced
+  trials, reusing the frozen closed-book machinery; per-task acceptance bar
+  `< 0.40` before a fixture is citable. Skips honestly (no fabricated
+  numbers) when no live ACP backend passes preflight.
 - **Evidence-contract spec skeleton** (ADR-0040 P2) —
   `docs/spec/evidence-contract/SPEC.md` codifies the shipped
   `{report, route, artifacts}` envelope as a normative spec (18 clauses:

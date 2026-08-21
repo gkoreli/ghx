@@ -145,6 +145,27 @@ _(filled as slices land; first slice expected: L1/L2 latency work.)_
 - Open follow-ups (spec §9): JSON Schema twin publication, runnable
   conformance-suite packaging from the pinning tests (the remaining ADR-0040
   P2 deliverable), BLOCKED taxonomy, envelope-level versioning.
+- **Conformance inventory landed** (`docs/spec/evidence-contract/CONFORMANCE.md`,
+  commit `ebf10fe`): C1–C18 → pinning-test mapping (15 clauses pinned by
+  in-repo Go tests) plus the unpinned gap list — AskResponse wire golden test,
+  schemaVersion bump policy, RouteConfigFor override coverage, live.jsonl
+  event shapes, and the external conformance runner. Maintenance rule codified:
+  clause changes update pins in the same commit; new clauses land with a pin
+  or a gap entry.
+
+### H7 canary runner wired (2026-08-21, branch wt/h7-canaries)
+
+`TestClosedBookCanaryR1R4` (`internal/sidecar/evals/closedbook_canary_test.go`)
+runs the ADR-0016.9 closed-book probe over ONLY the four R1–R4 replacement
+fixtures at reduced trials (default 3), reusing the frozen probe machinery
+(`RunClosedBookEpisode`, `ClosedBookSessionMeta`, `ComputeClosedBookSummary`,
+`SaveClosedBookJSON`) — no forked protocol. Acceptance per task: closed-book
+mean < 0.40 before the fixture is citable; failures name the fixture as
+memorization-risk. Honest state: preflight fails on the current machine (no
+live ACP backend), so the test SKIPs rather than fabricates numbers — the
+runner is standing machinery, one command from citable canary artifacts when
+a backend is available. This discharges the "canary harness invocation path"
+commit condition from ADR-0016.13's implementation notes.
 
 ### L2 landed — ask progress stream (2026-08-21, branch wt/l2-streaming)
 
@@ -186,7 +207,7 @@ Shipped as three commits on `wt/l3-quota-ladder`, each unit-tested against the
 real dead-ask wire message preserved in `~/.ghx/sessions/badslugnoslash`
 (`acp prompt: {"code":-32603,...,"errorKind":"rate_limit"}`):
 
-1. **Trigger** (`29d1c11`, `internal/sidecar/acp.go`): `IsQuotaExhausted`
+1. **Trigger** (`0d43d86`, `internal/sidecar/acp.go`): `IsQuotaExhausted`
    dual detection mirroring `IsLoadSessionResourceNotFound` — structured
    `*acp.RequestError` with `errorKind=rate_limit`, or session-limit/rate-limit
    message text for the opaque-wrapped persisted form. `QuotaResetHint`
@@ -194,7 +215,7 @@ real dead-ask wire message preserved in `~/.ghx/sessions/badslugnoslash`
    `FailureClass` taxonomy (`QuotaExhausted`, `internal/sidecar/runner.go`) so
    the runtime switches on the class, never strings (ADR-0036 D4 posture).
 
-2. **Rung 1 — degraded:cache** (`25ebf45`, `internal/sidecar/quota.go`,
+2. **Rung 1 — degraded:cache** (`9c9b9ef`, `internal/sidecar/quota.go`,
    `runtime.go`, `session.go`): a quota-dead turn with ledger evidence ships a
    `DEGRADED (quota)` report built from the durable ledger (inspected paths,
    prior verified claims from the session's newest persisted report via the
@@ -261,23 +282,21 @@ Grounded in this machine's real state, not speculation:
 Each item maps to a P1/P2 slice; nothing on this list requires the parked
 eval machinery.
 
-## Implementation Notes
+### L3 — quota-degradation ladder (2026-08-21, wt/l3-quota-ladder)
 
-_(L3 slice, 2026-08-21 — wt/l3-quota-ladder):_
-
-- **Trigger** (`internal/sidecar/acp.go`, commit 29d1c11): `IsQuotaExhausted`
+- **Trigger** (`internal/sidecar/acp.go`, commit 0d43d86): `IsQuotaExhausted`
   dual-detects structured `errorKind: rate_limit` and message text
   ("session limit"/"rate limit"); `QuotaResetHint` extracts the reset time.
   Unit-tested against the real wire message from the badslugnoslash incident.
-- **Degradation** (commit 25ebf45): quota-dead turn + existing ledger →
+- **Degradation** (commit 9c9b9ef): quota-dead turn + existing ledger →
   DEGRADED report from cached evidence (`BackendsUsed=["ledger-cache"]`,
   `[cached]`-labeled claims, staleness uncertainty with Commit/Branch pin),
   returned with nil error; no usable ledger → typed `ErrQuotaExhausted` that
   never silently dies. `LoadLatestReport` added to session state.
-- **Validation honesty** (commit 7e49c29): `ValidateReportEvidence` accepts
+- **Validation honesty** (commit 23fe60a): `ValidateReportEvidence` accepts
   `DEGRADED (<cause>): …` answers parallel to BLOCKED — labeling IS the
   exemption; bare prefix rejected.
-- **CLI** (commit 8726f6d): degraded answers print a stderr ⚠ notice (never
+- **CLI** (commit 21f2415): degraded answers print a stderr ⚠ notice (never
   silent success); quota-dead asks exit 3 wrapped with the
   "try --depth cheap / ghx explore" affordance hint. Note: raw unclassified
   errors default to exit 2 in CodeForError, so the frontend's explicit wrap
