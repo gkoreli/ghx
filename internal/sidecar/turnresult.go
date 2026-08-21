@@ -44,6 +44,12 @@ type TurnResult struct {
 	// producer drift (Visibility and Truthfulness). Always false when the report
 	// came from the strict submit_report sink.
 	ReportCoerced bool
+	// ReportBoundViolations is a one-line summary of persona compactness
+	// bound breaches in the final report (ADR-0039: oversize chars,
+	// relevantFiles over 5, answer sentences over 2). Empty when within
+	// bounds. Flag-only — never alters the report; evals record it as a soft
+	// anomaly so contract drift stays visible.
+	ReportBoundViolations string
 	// WrapUpRecovered is true when the turn hit the adapter's max-turns safety
 	// net and the exploration was recovered by the one-shot LoadSession wrap-up
 	// prompt (ADR-0027 D1). Recorded on the eval turn record and counted as the
