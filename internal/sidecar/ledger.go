@@ -13,6 +13,12 @@ import (
 type Ledger struct {
 	Repo           string              `json:"repo"`
 	Scope          string              `json:"scope"`
+	// Commit/Branch pin the repo snapshot the evidence was gathered against
+	// (ADR-0037 M-2). Copied from SessionMeta when known; empty means the
+	// evidence floats on the remote default branch — consumers must treat
+	// line-level claims accordingly.
+	Commit         string              `json:"commit,omitempty"`
+	Branch         string              `json:"branch,omitempty"`
 	CommandsRun    []LedgerEntry       `json:"commands_run"`
 	InspectedPaths []LedgerEntry       `json:"inspected_paths"`
 	MappedGlobs    []LedgerEntry       `json:"mapped_globs"`
@@ -91,6 +97,14 @@ func UpdateLedgerFromTurn(ledger *Ledger, meta *SessionMeta, report *Report, tra
 		}
 		if ledger.Scope == "" {
 			ledger.Scope = meta.Scope
+		}
+		// Snapshot identity (ADR-0037 M-2): stamp the ref evidence was
+		// gathered against, when the session knows it.
+		if ledger.Commit == "" {
+			ledger.Commit = meta.Commit
+		}
+		if ledger.Branch == "" {
+			ledger.Branch = meta.Branch
 		}
 	}
 	if report != nil {

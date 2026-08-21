@@ -280,6 +280,10 @@ func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 	return sb.String()
 }
 
+// formatEvidenceLedger renders the ledger under the 1500-char prompt budget
+// (ADR-0037 M-1: eviction must be visible). When entries are trimmed to fit,
+// the returned note records exactly what was dropped so the agent knows the
+// ledger view is partial — silence would let it assume the ledger is complete.
 func formatEvidenceLedger(ledger *Ledger) string {
 	if ledger == nil {
 		return ""
@@ -300,6 +304,12 @@ func formatEvidenceLedger(ledger *Ledger) string {
 		if pathLimit > 0 {
 			pathLimit--
 		}
+	}
+	if commandLimit < len(ledger.CommandsRun) || pathLimit < len(ledger.InspectedPaths) {
+		droppedCommands := len(ledger.CommandsRun) - commandLimit
+		droppedPaths := len(ledger.InspectedPaths) - pathLimit
+		block += fmt.Sprintf("\nLedger truncated to fit prompt budget: %d older command(s) and %d older inspected path(s) not shown; the full ledger is in the session dir.\n",
+			droppedCommands, droppedPaths)
 	}
 	return block
 }
