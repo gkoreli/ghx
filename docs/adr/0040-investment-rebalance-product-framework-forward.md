@@ -206,3 +206,28 @@ Grounded in this machine's real state, not speculation:
 
 Each item maps to a P1/P2 slice; nothing on this list requires the parked
 eval machinery.
+
+## Implementation Notes
+
+_(L3 slice, 2026-08-21 — wt/l3-quota-ladder):_
+
+- **Trigger** (`internal/sidecar/acp.go`, commit 29d1c11): `IsQuotaExhausted`
+  dual-detects structured `errorKind: rate_limit` and message text
+  ("session limit"/"rate limit"); `QuotaResetHint` extracts the reset time.
+  Unit-tested against the real wire message from the badslugnoslash incident.
+- **Degradation** (commit 25ebf45): quota-dead turn + existing ledger →
+  DEGRADED report from cached evidence (`BackendsUsed=["ledger-cache"]`,
+  `[cached]`-labeled claims, staleness uncertainty with Commit/Branch pin),
+  returned with nil error; no usable ledger → typed `ErrQuotaExhausted` that
+  never silently dies. `LoadLatestReport` added to session state.
+- **Validation honesty** (commit 7e49c29): `ValidateReportEvidence` accepts
+  `DEGRADED (<cause>): …` answers parallel to BLOCKED — labeling IS the
+  exemption; bare prefix rejected.
+- **CLI** (commit 8726f6d): degraded answers print a stderr ⚠ notice (never
+  silent success); quota-dead asks exit 3 wrapped with the
+  "try --depth cheap / ghx explore" affordance hint. Note: raw unclassified
+  errors default to exit 2 in CodeForError, so the frontend's explicit wrap
+  is the semantic exit-3 mapping.
+- Open remainder: L3's "degrade to smaller models" tier (model downgrade
+  retry) not built — ledger fallback covers the never-die guarantee; model
+  downgrade needs backend selection plumbing (ADR-0038 adjacent).
