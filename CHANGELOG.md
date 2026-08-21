@@ -10,6 +10,13 @@ prose here.
 
 ## [Unreleased]
 
+### Changed
+
+- CI: `actions/setup-go` v5 → v6 and `goreleaser/goreleaser-action` v6 → v7
+  (GitHub's Node 20 deprecation forced the old versions onto Node 24).
+
+## [2.9.1] — 2026-08-21
+
 Three parallel capability tracks landed from evidence-grounded research
 (`docs/research/`) through ADR proposals to implementation — each branch built
 and verified with `go test ./...` green.
