@@ -55,8 +55,8 @@ func TestLoadTasksParsesJudgeBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load tasks: %v", err)
 	}
-	if len(tasks) != 6 {
-		t.Fatalf("expected 6 tasks, got %d", len(tasks))
+	if len(tasks) != 10 {
+		t.Fatalf("expected 10 tasks, got %d", len(tasks))
 	}
 	for _, task := range tasks {
 		if task.Judge == nil {

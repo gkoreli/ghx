@@ -2,7 +2,9 @@ package evals
 
 import (
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +110,59 @@ func TestValidateRejectsLeakedChecks(t *testing.T) {
 	}
 	if err := discoverable.Validate(); err != nil {
 		t.Errorf("discoverable checks rejected: %v", err)
+	}
+}
+
+// TestADR0016_13TaskFixturesValid pins the ADR-0016.13 R1–R4 corpus-refresh
+// fixtures: each new task must load, validate, keep its ground-truth facts
+// discoverable (never named in the question — H2 lesson), and carry judge
+// criteria. R4's engine-selection task must stay non-self-referential
+// (repo != gkoreli/ghx), unlike ghx-mapengine.
+func TestADR0016_13TaskFixturesValid(t *testing.T) {
+	ids := map[string]string{
+		"werkzeug-delegation":       "pallets/werkzeug",
+		"gin-route-conflict":        "gin-gonic/gin",
+		"hono-smartrouter-fallback": "honojs/hono",
+		"gjson-engine-selection":    "tidwall/gjson",
+	}
+	tasks, err := LoadTasks("testdata/tasks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Task{}
+	for _, task := range tasks {
+		byID[task.ID] = task
+	}
+	for id, repo := range ids {
+		task, ok := byID[id]
+		if !ok {
+			t.Errorf("fixture %s missing from testdata/tasks", id)
+			continue
+		}
+		if err := task.Validate(); err != nil {
+			t.Errorf("task %s invalid: %v", id, err)
+		}
+		if task.Repo != repo {
+			t.Errorf("task %s repo = %q, want %q", id, task.Repo, repo)
+		}
+		// H2: the question must never name the repo under test.
+		repoName := strings.TrimSuffix(repo, "/"+path.Base(repo))
+		for i, turn := range task.Turns {
+			if strings.Contains(strings.ToLower(turn), strings.ToLower(repo)) ||
+				strings.Contains(strings.ToLower(turn), strings.ToLower(path.Base(repo))) ||
+				strings.Contains(strings.ToLower(turn), strings.ToLower(repoName)) {
+				t.Errorf("task %s turn %d names its repo %q (leak)", id, i, repo)
+			}
+		}
+		if len(task.Checks.ExpectedFiles)+len(task.Checks.ExpectedSymbols)+len(task.Checks.RequiredClaims) == 0 {
+			t.Errorf("task %s has no pre-registered ground-truth facts", id)
+		}
+		if task.Judge == nil || len(task.Judge.Criteria) == 0 {
+			t.Errorf("task %s missing judge criteria", id)
+		}
+	}
+	// R4 non-self-referential: the engine-selection task must not target ghx.
+	if task, ok := byID["gjson-engine-selection"]; !ok || task.Repo == "gkoreli/ghx" {
+		t.Errorf("gjson-engine-selection must be non-self-referential, repo = %q", task.Repo)
 	}
 }
