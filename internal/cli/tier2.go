@@ -36,7 +36,18 @@ var (
 // tier2Snapshot materializes the snapshot for a tier2 subcommand and emits
 // the visibility-contract stderr lines: eviction events (runtime log, not a
 // report claim), then provenance — always before any structural tool output.
+//
+// Pre-hoc gating (ADR-0024.4 D2): when running inside a sidecar ask turn,
+// GHX_TIER2_ALLOWED_BACKENDS carries the ask's grant; without a local grant
+// the escalation is refused before any clone/tool work with an affordance
+// error naming the correct next invocation. Unset env (direct human/agent
+// CLI use outside an ask) is unchanged.
 func tier2Snapshot(cmd *cobra.Command, svc *tier2.Service, repo string) (tier2.Snapshot, error) {
+	if grant := os.Getenv(sidecar.Tier2GrantEnv); grant != "" && !sidecar.Tier2GrantAllowed(grant) {
+		return tier2.Snapshot{}, WithExitCode(ExitBadInvocation, fmt.Errorf(
+			"tier-2 local analysis is not granted for this ask (GHX_TIER2_ALLOWED_BACKENDS=%s)\n→ re-ask with --local to grant tier-2, or answer from remote evidence (`ghx explore %s`, `ghx inspect %s \"<concern>\"`)",
+			grant, repo, repo))
+	}
 	ref, _ := cmd.Flags().GetString("ref")
 	sparse, _ := cmd.Flags().GetStringSlice("sparse")
 	snap, err := svc.Snapshot(cmd.Context(), tier2.SnapshotRequest{

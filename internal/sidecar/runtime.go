@@ -400,6 +400,11 @@ func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnS
 	if spawnEnv == nil {
 		spawnEnv = MergeAgentEnv(nil, req.AgentAuthEnv)
 	}
+	// Tier-2 grant propagation (ADR-0024.4 D2): the ask's AllowedBackends
+	// decision rides into the agent's shell environment so the `ghx tier2`
+	// CLI can enforce the same grant pre-hoc on both ask paths (daemonless
+	// and daemon share this one code path via prepareSession).
+	spawnEnv = append(spawnEnv, Tier2GrantEnv+"="+Tier2GrantValue(req.AllowedBackends))
 	recordAgentProvenance(sessionsDir, meta, workspace, cfg.AgentCmd, spawnEnv)
 	ledger, err := LoadLedger(sessionsDir, req.Session)
 	if err != nil {

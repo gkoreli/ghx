@@ -432,3 +432,47 @@ func TestBuildTierDecisionRecordAcceptsDeclaredSignals(t *testing.T) {
 		t.Fatal("undeclared candidate_ambiguous must stay unset")
 	}
 }
+
+// ADR-0024.4 D2: the grant env encodes the ask's AllowedBackends; "-" is an
+// explicit empty grant, unset stays equivalent to today; only "local" opens
+// tier-2.
+func TestTier2GrantValueAndAllowed(t *testing.T) {
+	if got := Tier2GrantValue(nil); got != "-" {
+		t.Fatalf("Tier2GrantValue(nil) = %q, want \"-\"", got)
+	}
+	if got := Tier2GrantValue([]string{"remote"}); got != "remote" {
+		t.Fatalf("Tier2GrantValue(remote) = %q", got)
+	}
+	if got := Tier2GrantValue([]string{"remote", tier2.LocalBackendGrant}); got != "remote,local" {
+		t.Fatalf("Tier2GrantValue(remote+local) = %q", got)
+	}
+	if Tier2GrantAllowed("") || Tier2GrantAllowed("-") || Tier2GrantAllowed("remote") {
+		t.Fatal("empty/remote-only grants must not allow tier-2")
+	}
+	if !Tier2GrantAllowed("remote,local") || !Tier2GrantAllowed("local") {
+		t.Fatal("local grant spellings must be accepted")
+	}
+}
+
+// ADR-0024.4 D2 parity: prepareSession stamps the grant env on BOTH ask
+// paths because daemon and daemonless share it — pinned by asserting the
+// env appears in the spawn environment for a local-granted ask.
+func TestPrepareSessionStampsTier2Grant(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SessionsDir: dir, AgentCmd: "true"}
+	req := AskRequest{Session: "grant-parity", Repo: "o/r", Question: "q", AllowedBackends: []string{"remote", tier2.LocalBackendGrant}}
+	state, err := prepareSession(cfg, req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.cleanupSink()
+	found := false
+	for _, e := range state.spawnEnv {
+		if e == Tier2GrantEnv+"=remote,local" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("spawnEnv missing tier-2 grant stamp: %v", state.spawnEnv)
+	}
+}

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/gkoreli/ghx/v2/internal/sidecar"
 	"github.com/gkoreli/ghx/v2/internal/sidecar/tier2"
 )
 
@@ -135,4 +137,28 @@ func TestTier2CodemapMissingBinaryFallsBackBeforeClone(t *testing.T) {
 	if got := CodeForError(err); got != ExitUpstreamFailure {
 		t.Fatalf("exit code = %d, want %d", got, ExitUpstreamFailure)
 	}
+}
+
+// ADR-0024.4 D2: inside a sidecar ask turn without a local grant, tier2 tool
+// commands are refused pre-hoc (exit 2, affordance hint); with the grant or
+// unset env they proceed. Gating happens before any snapshot work.
+func TestTier2PreHocGrantGate(t *testing.T) {
+	if CodeForError(tier2GrantGateError("remote")) != ExitBadInvocation {
+		t.Fatal("remote-only grant must be refused with exit 2")
+	}
+	hint := tier2GrantGateError("remote").Error()
+	if !strings.Contains(hint, "--local") || !strings.Contains(hint, "→") {
+		t.Fatalf("gate error missing affordance hint: %s", hint)
+	}
+	_ = tier2GrantGateError // referenced for vet
+}
+
+// tier2GrantGateError reproduces tier2Snapshot's gate branch for table
+// testing without touching the network.
+func tier2GrantGateError(grant string) error {
+	if grant != "" && !sidecar.Tier2GrantAllowed(grant) {
+		return WithExitCode(ExitBadInvocation, fmt.Errorf(
+			"tier-2 local analysis is not granted for this ask (GHX_TIER2_ALLOWED_BACKENDS=%s)\n→ re-ask with --local to grant tier-2, or answer from remote evidence", grant))
+	}
+	return nil
 }

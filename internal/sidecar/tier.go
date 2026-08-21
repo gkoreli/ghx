@@ -179,6 +179,37 @@ func declaredSignal(commands []string, signal string) bool {
 	return false
 }
 
+// Tier2GrantEnv carries the ask's tier-2 grant into the agent's shell so the
+// `ghx tier2` CLI enforces the same allowlist pre-hoc (ADR-0024.4 D2). The
+// value is a comma-separated backend list ("remote", "local") or "-" when no
+// backends were granted at all (unset env must stay equivalent to today).
+const Tier2GrantEnv = "GHX_TIER2_ALLOWED_BACKENDS"
+
+// Tier2GrantValue renders the grant for Tier2GrantEnv: "-" encodes an empty
+// allowlist so an explicit remote-only ask is distinguishable from an unset
+// variable (backward compatibility for direct CLI use outside an ask).
+func Tier2GrantValue(allowed []string) string {
+	if len(allowed) == 0 {
+		return "-"
+	}
+	return strings.Join(allowed, ",")
+}
+
+// Tier2GrantAllowed reports whether the recorded grant permits local tier-2
+// analysis. The local grant is accepted in its canonical spellings ("local",
+// tier2.LocalBackendGrant) exactly as the policy engine accepts them.
+func Tier2GrantAllowed(grant string) bool {
+	if grant == "" || grant == "-" {
+		return false
+	}
+	for _, b := range strings.Split(grant, ",") {
+		if strings.TrimSpace(b) == tier2.LocalBackendGrant {
+			return true
+		}
+	}
+	return false
+}
+
 // deriveTierUsed maps observed commands to the highest tier used
 // (ADR-0024.2 D4): tier2 when a `ghx tier2` command ran, tier1 when any other
 // ghx command ran, tier0 when the turn answered from session memory alone.
