@@ -133,8 +133,42 @@ and reports under ~/.ghx that back the report.`,
 				fmt.Printf("\n%s\n", footer)
 			}
 		}
-		return nil
+		return askExitCode(report)
 	},
+}
+
+// askExitCode maps a delivered sidecar report's outcome class onto the CLI's
+// semantic exit codes (ADR-0034.1 D1): a BLOCKED report caused by invalid
+// caller input is a bad invocation (2); a BLOCKED report from an upstream
+// failure (agent/auth/daemon) is an upstream failure (3); an answered report
+// that found no evidence carries no results (1); a normal answer is OK (0).
+// The ask itself succeeded in every case — the code describes the
+// investigation's outcome so scripting agents can branch on it.
+func askExitCode(report *sidecar.Report) error {
+	if report == nil {
+		return WithExitCode(ExitUpstreamFailure, fmt.Errorf("sidecar returned no report"))
+	}
+	answer := report.Answer
+	if !strings.HasPrefix(answer, "BLOCKED") {
+		if len(report.Verified) == 0 && len(report.Inferred) == 0 {
+			return WithExitCode(ExitNoResults, fmt.Errorf("report answered without verifiable or inferred evidence"))
+		}
+		return nil
+	}
+	why := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(answer, "BLOCKED"), ":")))
+	for _, frag := range []string{"invalid", "bad ", "unknown", "unrecognized", "missing repo", "invalid slug", "invalid --depth"} {
+		if strings.Contains(why, frag) {
+			return WithExitCode(ExitBadInvocation, fmt.Errorf("%s", answer))
+		}
+	}
+	for _, frag := range []string{"unavailable", "auth", "daemon", "network", "github", "rate limit", "timeout"} {
+		if strings.Contains(why, frag) {
+			return WithExitCode(ExitUpstreamFailure, fmt.Errorf("%s", answer))
+		}
+	}
+	// Blocked for an unstated-class reason: the agent could not investigate;
+	// treat conservatively as no results rather than masking a real answer.
+	return WithExitCode(ExitNoResults, fmt.Errorf("%s", answer))
 }
 
 // sidecarDaemonCmd runs or controls the per-user sidecar daemon.

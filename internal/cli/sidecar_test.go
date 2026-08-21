@@ -534,3 +534,29 @@ func TestAskAllowedBackends(t *testing.T) {
 		t.Fatalf("askAllowedBackends(true) = %v, want %v", got, want)
 	}
 }
+
+// askExitCode (ADR-0034.1 D1): the sidecar ask frontend maps the delivered
+// report's outcome class onto the shared semantic exit codes — bad-input
+// BLOCKED → 2, upstream BLOCKED → 3, evidence-free answer → 1, answered → 0.
+func TestAskExitCode(t *testing.T) {
+	cases := []struct {
+		name   string
+		report *sidecar.Report
+		want   int
+	}{
+		{"answered", &sidecar.Report{Answer: "X is in internal/foo", Verified: []sidecar.Claim{{Summary: "s", Evidence: "file:1"}}}, 0},
+		{"no evidence", &sidecar.Report{Answer: "Could not determine", Verified: nil, Inferred: nil}, 1},
+		{"blocked bad input", &sidecar.Report{Answer: "BLOCKED: invalid repo slug 'badslug'"}, 2},
+		{"blocked unknown depth", &sidecar.Report{Answer: "BLOCKED: unrecognized --depth value"}, 2},
+		{"blocked upstream", &sidecar.Report{Answer: "BLOCKED: ghx is unavailable in this sidecar session"}, 3},
+		{"blocked rate limit", &sidecar.Report{Answer: "BLOCKED: GitHub API rate limit exceeded"}, 3},
+		{"blocked unstated", &sidecar.Report{Answer: "BLOCKED: investigation did not converge"}, 1},
+		{"nil report", nil, 3},
+	}
+	for _, tc := range cases {
+		err := askExitCode(tc.report)
+		if got := CodeForError(err); got != tc.want {
+			t.Errorf("%s: CodeForError(askExitCode) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
