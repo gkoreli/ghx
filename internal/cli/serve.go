@@ -52,31 +52,78 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start MCP server (stdio)",
 	Long: `Run ghx as an MCP server so an agent can call its tools over the protocol.
-Default (stdio) exposes the direct ghx tools plus the ` + "`code`" + ` meta-tool for
-composed exploration. ` + "`--recon`" + ` instead serves exactly one ` + "`recon`" + ` tool that
-takes a whole English repo question and returns an auditable evidence report —
-the recommended surface for a main agent that should delegate reconnaissance
-rather than step-drive it. ` + "`--http :PORT`" + ` switches from stdio to a streamable
-HTTP server on that address.`,
+Default (stdio) serves exactly one ` + "`recon`" + ` tool that takes a whole English repo
+question and returns a machine-parseable JSON object — the auditable evidence
+report plus route and artifacts provenance inside the payload — so a main agent
+delegates reconnaissance instead of step-driving it (ADR-0019.3 D1/D2).
+` + "`--direct`" + ` instead exposes the seven direct ghx tools plus the ` + "`code`" + ` meta-tool
+for composed exploration (the pre-0019.3 default). ` + "`--recon`" + ` is still accepted
+as a no-op synonym of the new default (deprecated; remove it from your config).
+` + "`--http :PORT`" + ` switches from stdio to a streamable HTTP server on that address.`,
 	Example: `  ghx serve
   ghx serve --http :8080
+  ghx serve --direct
   ghx serve --recon`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if printCfg, _ := cmd.Flags().GetBool("print-mcp-config"); printCfg {
+			return printMCPConfig()
+		}
 		return serveMCP(cmd)
 	},
 }
 
+// printMCPConfig writes a ready-to-paste mcpServers JSON block (ADR-0019.3
+// D4) so the install step for any MCP client is: paste this, run doctor.
+func printMCPConfig() error {
+	block := map[string]any{
+		"mcpServers": map[string]any{
+			"ghx": map[string]any{
+				"command": "npx",
+				"args":    []string{"-y", "@gkoreli/ghx", "serve"},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(block, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
 func serveMCP(cmd *cobra.Command) error {
+	direct, _ := cmd.Flags().GetBool("direct")
+	s := newServeServer(direct)
+	return selectAndServe(cmd, s)
+}
+
+// selectAndServe picks the transport from the command's flags and blocks
+// serving the server over it.
+func selectAndServe(cmd *cobra.Command, s *server.MCPServer) error {
+	transport := selectTransport(cmd)
+	return transport.Serve(s)
+}
+
+// newServeServer builds the MCP server for the given mode: direct=true
+// registers the seven direct ghx tools plus the code meta-tool; direct=false
+// is the recon-first default (ADR-0019.3 D1) serving exactly the single
+// recon sidecar tool.
+func newServeServer(direct bool) *server.MCPServer {
 	s := server.NewMCPServer("ghx", VERSION,
 		server.WithToolCapabilities(true),
 	)
-	reconMode, _ := cmd.Flags().GetBool("recon")
-	if reconMode {
+	if !direct {
 		registerReconTool(s)
-		transport := selectTransport(cmd)
-		return transport.Serve(s)
+		return s
 	}
+	registerDirectTools(s)
+	return s
+}
 
+// registerDirectTools registers the seven direct exploration tools plus the
+// code meta-tool — the P1 standalone surface behind `ghx serve --direct`
+// (ADR-0019.3 D1) and the eval baseline profile.
+func registerDirectTools(s *server.MCPServer) {
 	// Define tools
 	exploreTool := mcp.NewTool("explore",
 		mcp.WithDescription("Explore a GitHub repo — branch, file tree, README"),
@@ -150,10 +197,6 @@ Example: var r = codemode.explore({ repo: "vercel/next.js" }); return r.files;`,
 	s.AddTool(treeTool, handleTree)
 	s.AddTool(searchToolsMeta, handleSearchTools)
 	s.AddTool(codeTool, handleCode)
-
-	// Select and use transport
-	transport := selectTransport(cmd)
-	return transport.Serve(s)
 }
 
 // registerReconTool serves the single recon tool. Its definition lives in
@@ -205,20 +248,16 @@ func handleRecon(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	data, _ := json.Marshal(report)
-	text := string(data)
-	// Route provenance (ADR-0030.1 D5.2/D7) plus the artifacts pointer: the
-	// parent agent sees which session answered and why before building on
-	// it, and gets the audit-trail location with every answer.
-	if turn != nil {
-		if turn.Route != nil {
-			text += "\n" + turn.Route.Line()
-		}
-		if footer := turn.Artifacts.FooterLine(); footer != "" {
-			text += "\n" + footer
-		}
+	// Contract purity (ADR-0019.3 D2): the result text is exactly one JSON
+	// object — {report, route, artifacts} — with the provenance that used to
+	// be glued on as prose lines (route.Line() + artifacts footer) now inside
+	// the payload as structured fields. No prose outside the JSON, ever;
+	// humans keep rich text on `ghx sidecar ask`.
+	text, merr := json.Marshal(sidecar.NewReconResult(report, turn))
+	if merr != nil {
+		return mcp.NewToolResultError(merr.Error()), nil
 	}
-	return mcp.NewToolResultText(text), nil
+	return mcp.NewToolResultText(string(text)), nil
 }
 
 // isValidReconDepth reports whether depth is one of the recon budget dials
@@ -413,6 +452,11 @@ func handleCode(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallTool
 
 func init() {
 	serveCmd.Flags().String("http", "", "Start streamable HTTP server on address (e.g., :8080)")
-	serveCmd.Flags().Bool("recon", false, "Serve one recon sidecar tool instead of direct ghx tools")
+	// ADR-0019.3 D1: recon-first is the default; --direct restores the seven
+	// direct ghx tools plus code. --recon stays accepted as a deprecated
+	// no-op synonym of the default through one release cycle.
+	serveCmd.Flags().Bool("direct", false, "Serve the seven direct ghx tools plus code instead of the default single recon tool")
+	serveCmd.Flags().Bool("recon", false, "Deprecated: no-op synonym of the default (recon-first) mode")
+	serveCmd.Flags().Bool("print-mcp-config", false, "Print a ready-to-paste mcpServers JSON block and exit")
 	RootCmd.AddCommand(serveCmd)
 }

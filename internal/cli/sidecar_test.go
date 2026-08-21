@@ -487,14 +487,19 @@ func TestAskEnvelopeJSONShape(t *testing.T) {
 	}
 }
 
-// TestHandleReconAppendsArtifactsFooter pins the MCP recon surface: the tool
-// response text is the report JSON followed by the same artifacts line the
-// CLI prints, so a parent agent never guesses where the audit trail lives.
-func TestHandleReconAppendsArtifactsFooter(t *testing.T) {
+// TestHandleReconResultIsPureJSON pins the D2 contract (ADR-0019.3): the MCP
+// recon result text is exactly one machine-parseable JSON object — no prose
+// suffix, ever. Route provenance and the artifacts pointer live inside the
+// payload as structured fields; humans keep rich text on `ghx sidecar ask`.
+// The full three-shape matrix lives in serve_test.go
+// (TestHandleReconResultIsPureJSON); this test pins only that a routed,
+// artifacts-carrying turn produces zero bytes outside the JSON object.
+func TestHandleReconProvenanceRidesInsidePayload(t *testing.T) {
 	orig := askSidecar
 	defer func() { askSidecar = orig }()
 	askSidecar = func(_ context.Context, _ sidecar.Config, _ sidecar.AskRequest) (*sidecar.Report, *sidecar.TurnResult, error) {
 		return &sidecar.Report{Answer: "ok"}, &sidecar.TurnResult{
+			Route: &sidecar.RouteDecision{Session: "ownerx-repoy", Source: sidecar.RouteSourceRepo},
 			Artifacts: sidecar.ArtifactsRef{
 				SessionDir: "/home/u/.ghx/sessions/ownerx-repoy",
 				TraceID:    "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -512,12 +517,24 @@ func TestHandleReconAppendsArtifactsFooter(t *testing.T) {
 	if !ok {
 		t.Fatalf("content[0] is %T, want TextContent", res.Content[0])
 	}
-	want := "\nartifacts: /home/u/.ghx/sessions/ownerx-repoy (trace 4bf92f3577b34da6a3ce929d0e0e4736)"
-	if !strings.HasSuffix(text.Text, want) {
-		t.Fatalf("recon text does not end with the artifacts line:\n%s", text.Text)
+	var decoded struct {
+		Route *struct {
+			Session string `json:"session"`
+		} `json:"route"`
+		Artifacts *struct {
+			SessionDir string `json:"sessionDir"`
+			TraceID    string `json:"traceId"`
+		} `json:"artifacts"`
 	}
-	if !strings.HasPrefix(text.Text, "{") {
-		t.Fatalf("recon text no longer starts with the report JSON:\n%s", text.Text)
+	if err := json.Unmarshal([]byte(text.Text), &decoded); err != nil {
+		t.Fatalf("recon text is not pure JSON (ADR-0019.3 D2):\n%q\nerror: %v", text.Text, err)
+	}
+	if decoded.Route == nil || decoded.Route.Session != "ownerx-repoy" {
+		t.Fatalf("route provenance missing from payload:\n%s", text.Text)
+	}
+	if decoded.Artifacts == nil || decoded.Artifacts.SessionDir != "/home/u/.ghx/sessions/ownerx-repoy" ||
+		decoded.Artifacts.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("artifacts pointer missing from payload:\n%s", text.Text)
 	}
 }
 

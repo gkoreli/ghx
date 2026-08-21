@@ -10,8 +10,24 @@ prose here.
 
 ## [Unreleased]
 
+### Added
+
+- **`ghx serve --print-mcp-config`** (ADR-0019.3 D4) — prints a ready-to-paste
+  `mcpServers` JSON block for one-line wiring into any MCP client; the README
+  MCP section gains the matching install rail plus a doctor-first verification
+  step.
+
 ### Changed
 
+- **Breaking: `ghx serve` default is recon-first (ADR-0019.3 D1/D2).** Bare
+  `serve` exposes exactly one MCP tool — `recon(question, repo?, session?,
+  depth?)` — whose result is now a machine-parseable JSON envelope
+  `{report, route, artifacts}`; the route/artifacts provenance moved inside
+  the payload and the appended prose suffix is gone. The seven direct tools
+  plus `code` move behind `--direct`; `--recon` remains a deprecated no-op
+  synonym through one release cycle. `skills/ghx-recon/SKILL.md` is trimmed
+  back under its 30-body-line budget with sentence parity to the recon tool
+  description (D3).
 - CI: `actions/setup-go` v5 → v6 and `goreleaser/goreleaser-action` v6 → v7
   (GitHub's Node 20 deprecation forced the old versions onto Node 24).
 

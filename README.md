@@ -344,16 +344,40 @@ If an `ask` returns nothing useful, the failure is recorded, not lost
 ### Delegating from a main agent (MCP)
 
 A main agent talks to the sidecar through a single MCP tool — one tool it cannot
-be tempted into step-driving:
+be tempted into step-driving. Bare `ghx serve` **is** that surface:
 
 ```bash
-ghx serve --recon     # exposes exactly one MCP tool: recon(question, repo?, session?)
+ghx serve             # default: exactly one MCP tool — recon(question, repo?, session?, depth?)
+ghx serve --direct    # the seven direct ghx tools + code meta-tool (the pre-2.11 default)
+```
+
+Every answer is a machine-parseable JSON object: `{ report, route, artifacts }` —
+the evidence contract plus route provenance and audit-trail pointers *inside* the
+payload, never appended as prose
+([ADR-0019.3](docs/adr/0019.3-adoption-surface-flip.md)).
+
+**Install rails** — paste this block into your client's MCP config (or run
+`ghx serve --print-mcp-config` to print it):
+
+```json
+{
+  "mcpServers": {
+    "ghx": { "command": "npx", "args": ["-y", "@gkoreli/ghx", "serve"] }
+  }
+}
+```
+
+Then verify wiring before first use — auth/env failures are the real tax, and
+`doctor` surfaces them with remediation instead of a mid-question hang:
+
+```bash
+npx @gkoreli/ghx sidecar doctor
 ```
 
 The recommended skill for agents is the concise recon skill (`ghx skill --recon`,
-≤ 30 lines: what the service is, how to phrase questions, what the report fields
-mean). The main agent needs **zero** knowledge of the ghx CLI grammar — that is
-the whole point ([ADR-0019](docs/adr/0019-sidecar-adoption-zero-cli-surface.md)).
+≤ 30 body lines: what the service is, how to phrase questions, what the report
+fields mean). The main agent needs **zero** knowledge of the ghx CLI grammar —
+that is the whole point ([ADR-0019](docs/adr/0019-sidecar-adoption-zero-cli-surface.md)).
 
 ---
 
