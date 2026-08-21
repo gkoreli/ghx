@@ -12,6 +12,12 @@ prose here.
 
 ### Added
 
+- **Evidence-contract spec skeleton** (ADR-0040 P2) —
+  `docs/spec/evidence-contract/SPEC.md` codifies the shipped
+  `{report, route, artifacts}` envelope as a normative spec (18 clauses:
+  schema, versioning policy, conformance levels), MCP-spec-style;
+  `docs/spec/evidence-contract/README.md` maps every clause to the
+  enforcing Go code path and pinning test.
 - **`ghx serve --print-mcp-config`** (ADR-0019.3 D4) — prints a ready-to-paste
   `mcpServers` JSON block for one-line wiring into any MCP client; the README
   MCP section gains the matching install rail plus a doctor-first verification

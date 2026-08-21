@@ -120,7 +120,31 @@ smokes per change, TRUST ledger hygiene, eval-mining of production traces
 
 ## Implementation Notes
 
-_(to be filled as slices land; first slice expected: L1/L2 latency work.)_
+_(filled as slices land; first slice expected: L1/L2 latency work.)_
+
+### 2026-08-21 — P2 first slice: evidence-contract spec skeleton
+
+- `docs/spec/evidence-contract/SPEC.md` — normative skeleton of the
+  `{report, route, artifacts}` envelope: 18 clauses (`C1`–`C18`) in RFC 2119
+  form covering envelope shape, report schema, evidence requirement
+  (ADR-0027 D4), BLOCKED escape hatch, tier visibility, flag-only bounds
+  (ADR-0039), strict/lenient ingestion (ADR-0021 D1/D3), route record
+  (ADR-0030.1 D7), artifacts pointer (ADR-0018/0026), MCP transport binding
+  (ADR-0019.3 D2), failure semantics, session-directory audit set,
+  `schemaVersion` semantics (ADR-0039), consumer rules, and three
+  conformance levels (envelope-parseable / report-validating /
+  audit-preserving). Structure deliberately modeled on the MCP spec layout
+  our sidecar recon documented (`modelcontextprotocol/modelcontextprotocol`
+  `schema/<revision>/`; prior art cited by session-report path in §7 of the
+  spec). Codifies shipped behavior only; proposes nothing normative beyond
+  it — deviations found while writing are recorded as spec §9 open
+  questions instead.
+- `docs/spec/evidence-contract/README.md` — clause-to-code map: every
+  clause → enforcing Go symbol (file:line) → pinning test. All citations
+  verified against the tree at commit time.
+- Open follow-ups (spec §9): JSON Schema twin publication, runnable
+  conformance-suite packaging from the pinning tests (the remaining ADR-0040
+  P2 deliverable), BLOCKED taxonomy, envelope-level versioning.
 
 ## What actually stops heavy use — the honest list (2026-08-21 audit)
 
