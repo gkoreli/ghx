@@ -59,6 +59,14 @@ type SessionMeta struct {
 	CreatedAt string `json:"createdAt"`
 	// UpdatedAt is the ISO-8601 timestamp of the most recent turn.
 	UpdatedAt string `json:"updatedAt"`
+	// Commit pins the repo snapshot this session's evidence was gathered
+	// against (ADR-0037 M-2). Remote-first recon otherwise floats on a moving
+	// default branch; recorded when known (e.g. from ghx output or caller).
+	// Empty means unknown — never fabricated.
+	Commit string `json:"commit,omitempty"`
+	// Branch records the ref evidence was gathered against (e.g. "mainline").
+	// Empty means unknown/default.
+	Branch string `json:"branch,omitempty"`
 }
 
 // sessionDir returns the directory for a named session.

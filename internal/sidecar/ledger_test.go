@@ -125,3 +125,26 @@ func assertStrings(t *testing.T, got, want []string) {
 		}
 	}
 }
+
+func TestUpdateLedgerStampsSnapshotIdentity(t *testing.T) {
+	ledger := &Ledger{}
+	meta := &SessionMeta{Repo: "o/r", Scope: "s", Commit: "abc1234", Branch: "mainline"}
+	UpdateLedgerFromTurn(ledger, meta, nil, nil, 1)
+	if ledger.Commit != "abc1234" || ledger.Branch != "mainline" {
+		t.Fatalf("Commit/Branch = %q/%q, want abc1234/mainline", ledger.Commit, ledger.Branch)
+	}
+	// Existing stamps are never overwritten by later turns.
+	meta2 := &SessionMeta{Repo: "o/r", Commit: "def5678", Branch: "other"}
+	UpdateLedgerFromTurn(ledger, meta2, nil, nil, 2)
+	if ledger.Commit != "abc1234" || ledger.Branch != "mainline" {
+		t.Fatalf("snapshot identity was overwritten: %q/%q", ledger.Commit, ledger.Branch)
+	}
+}
+
+func TestUpdateLedgerSnapshotIdentityUnknownStaysEmpty(t *testing.T) {
+	ledger := &Ledger{}
+	UpdateLedgerFromTurn(ledger, &SessionMeta{Repo: "o/r"}, nil, nil, 1)
+	if ledger.Commit != "" || ledger.Branch != "" {
+		t.Fatalf("unknown identity must stay empty, got %q/%q", ledger.Commit, ledger.Branch)
+	}
+}
