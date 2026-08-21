@@ -2,6 +2,8 @@ package sidecar
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -232,6 +234,64 @@ func TestWriteAndTerminalStayRefused(t *testing.T) {
 	}
 	if _, err := c.CreateTerminal(context.Background(), acp.CreateTerminalRequest{}); err == nil {
 		t.Error("CreateTerminal must remain refused")
+	}
+}
+
+// TestIsQuotaExhausted pins the ADR-0040 L3 quota classifier against the real
+// dead-ask wire message (ground truth: ~/.ghx/sessions/badslugnoslash
+// sidecar.turn.error, "acp prompt: {\"code\":-32603,...errorKind rate_limit}").
+// Dual detection mirrors IsLoadSessionResourceNotFound: structured
+// *acp.RequestError with errorKind rate_limit, or message text ("session
+// limit"/"rate limit") for the opaque-wrapped persisted form.
+func TestIsQuotaExhausted(t *testing.T) {
+	// The exact wire error from the badslugnoslash dead-ask log.
+	realWireErr := fmt.Errorf("acp prompt: %s", `{"code":-32603,"message":"Internal error: You've hit your session limit · resets 8:30am (UTC)","data":{"errorKind":"rate_limit"}}`)
+	structuredErr := &acp.RequestError{
+		Code:    -32603,
+		Message: "Internal error: You've hit your session limit · resets 8:30am (UTC)",
+		Data:    map[string]any{"errorKind": "rate_limit"},
+	}
+	wrappedStructuredErr := fmt.Errorf("run turn: %w", structuredErr)
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"real wire message", realWireErr, true},
+		{"structured errorKind rate_limit", structuredErr, true},
+		{"wrapped structured", wrappedStructuredErr, true},
+		{"session limit text", errors.New("You've hit your session limit · resets 8:30am (UTC)"), true},
+		{"rate limit text", errors.New("Error: rate limit exceeded"), true},
+		{"structured non-quota kind", &acp.RequestError{Code: -32603, Message: "Internal error", Data: map[string]any{"errorKind": "auth"}}, false},
+		{"resource not found is not quota", &acp.RequestError{Code: -32002, Message: "Resource not found"}, false},
+		{"unrelated error", errors.New("acp prompt: connection refused"), false},
+	}
+	for _, tc := range cases {
+		if got := IsQuotaExhausted(tc.err); got != tc.want {
+			t.Errorf("%s: IsQuotaExhausted = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestQuotaResetHint pins the reset-time extraction used in the DEGRADED
+// answer affordance ("resets 8:30am (UTC)" → "8:30am (UTC)").
+func TestQuotaResetHint(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil", nil, ""},
+		{"no reset info", errors.New("rate limit exceeded"), ""},
+		{"plain text", errors.New("You've hit your session limit · resets 8:30am (UTC)"), "8:30am (UTC)"},
+		{"wire form", fmt.Errorf("acp prompt: %s", `{"code":-32603,"message":"Internal error: You've hit your session limit · resets 8:30am (UTC)","data":{"errorKind":"rate_limit"}}`), "8:30am (UTC)"},
+	}
+	for _, tc := range cases {
+		if got := QuotaResetHint(tc.err); got != tc.want {
+			t.Errorf("%s: QuotaResetHint = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 

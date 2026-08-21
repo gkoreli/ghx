@@ -65,6 +65,10 @@ const (
 	// resourceNotFoundCode is the JSON-RPC/ACP code adapters use when
 	// LoadSession cannot find the persisted transport session ID.
 	resourceNotFoundCode = -32002
+	// quotaErrorKindMarker is the errorKind value adapters put in the
+	// JSON-RPC error data on backend quota exhaustion (claude-agent-acp:
+	// {"errorKind":"rate_limit"}); the ADR-0040 L3 trigger.
+	quotaErrorKindMarker = "rate_limit"
 )
 
 // ErrLivenessTimeout is the sentinel for a turn cancelled by the D2 liveness
@@ -103,6 +107,63 @@ func IsLoadSessionResourceNotFound(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, fmt.Sprintf("%d", resourceNotFoundCode)) && strings.Contains(msg, "resource not found")
+}
+
+var quotaResetHintMarker = "resets "
+
+// IsQuotaExhausted reports whether err is backend quota exhaustion — the
+// ADR-0040 L3 degrade-don't-die trigger. Detection mirrors
+// IsLoadSessionResourceNotFound's dual style, because the failure arrives in
+// two real shapes: structured (an *acp.RequestError whose data carries
+// errorKind "rate_limit") and baked into opaque wrapper text ("acp prompt:
+// {\"code\":-32603,...}") on the persisted turn-error strings.
+func IsQuotaExhausted(err error) bool {
+	if err == nil {
+		return false
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		if requestErrorKind(reqErr.Data) == quotaErrorKindMarker {
+			return true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "session limit") || strings.Contains(msg, "rate limit")
+}
+
+// QuotaResetHint extracts the human-readable reset time from a quota
+// exhaustion error ("8:30am (UTC)" from "You've hit your session limit ·
+// resets 8:30am (UTC)"). Empty when the error carries none. The cut-at-quote
+// handles the wire form, where the message sits inside a JSON string ahead
+// of the data object.
+func QuotaResetHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	idx := strings.Index(msg, quotaResetHintMarker)
+	if idx < 0 {
+		return ""
+	}
+	rest := msg[idx+len(quotaResetHintMarker):]
+	if i := strings.IndexByte(rest, '"'); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), ","))
+}
+
+// requestErrorKind extracts the "errorKind" string from a JSON-RPC error
+// data payload without assuming one concrete map shape.
+func requestErrorKind(data any) string {
+	switch v := data.(type) {
+	case map[string]any:
+		if s, ok := v["errorKind"].(string); ok {
+			return s
+		}
+	case map[string]string:
+		return v["errorKind"]
+	}
+	return ""
 }
 
 // resolveLivenessTimeout resolves the D2 watchdog window: an explicit option
