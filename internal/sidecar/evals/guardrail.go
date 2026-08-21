@@ -45,15 +45,17 @@ func CheckExpensiveBackend(agentCmd string) GuardrailCheck {
 	if strings.TrimSpace(list) == "" {
 		list = defaultExpensiveBackends
 	}
-	base := filepath.Base(strings.TrimSpace(agentCmd))
-	lowerBase := strings.ToLower(base)
-	lowerFull := strings.ToLower(agentCmd)
+	// Match on the command's base name only — never the full path. A path
+	// substring rule ("claude") would false-positive on unrelated tools that
+	// merely live under a matching directory (e.g. /opt/claudeless/agent).
+	// Wrapper scripts are caught separately by content inspection below.
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(agentCmd)))
 	for _, entry := range strings.Split(list, ",") {
 		entry = strings.ToLower(strings.TrimSpace(entry))
 		if entry == "" {
 			continue
 		}
-		if strings.Contains(lowerFull, entry) || lowerBase == entry {
+		if base == entry || strings.Contains(base, entry) && looksLikeBackendName(base, entry) {
 			g.MatchedRule = entry
 			break
 		}
@@ -90,4 +92,33 @@ func (g GuardrailCheck) GuardrailError() error {
 			"Fix: point GHX_EVAL_AGENT at a cheap/dedicated ACP backend, or set\n"+
 			"%s=formal-run to record a deliberate override.",
 		g.AgentCmd, g.MatchedRule, EnvAllowExpensiveBackend)
+}
+
+// looksLikeBackendName guards the base-name substring rule against innocent
+// matches: the entry must appear as a distinct token in the base name
+// (prefix/suffix/separator-bounded), so "myclaude-tools.sh" does not match
+// "claude" but "claude-agent-acp" and "claude-acp-wrapper" do.
+func looksLikeBackendName(base, entry string) bool {
+	i := strings.Index(base, entry)
+	for i >= 0 {
+		before := byte(0)
+		if i > 0 {
+			before = base[i-1]
+		}
+		j := i + len(entry)
+		after := byte(0)
+		if j < len(base) {
+			after = base[j]
+		}
+		tokenBoundary := func(b byte) bool { return b == 0 || b == '-' || b == '_' || b == '.' || b == '/' }
+		if tokenBoundary(before) && tokenBoundary(after) {
+			return true
+		}
+		next := strings.Index(base[j:], entry)
+		if next < 0 {
+			return false
+		}
+		i = j + next
+	}
+	return false
 }
