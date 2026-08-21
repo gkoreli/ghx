@@ -8,7 +8,11 @@ Where a change carries proof, the entry links the ADR that decided it or the
 committed eval verdict that measured it — the artifacts are the evidence, not the
 prose here.
 
-## [Unreleased]
+## [2.10.1] — 2026-08-21
+
+Follow-through release: ADR-0040's L2/L3 slices (live ask progress stream,
+quota-degradation ladder), the evidence-contract conformance inventory, the
+H7 canary runner, and Research 007 (A2 usage mining).
 
 ### Added
 
@@ -69,6 +73,12 @@ prose here.
   description (D3).
 - CI: `actions/setup-go` v5 → v6 and `goreleaser/goreleaser-action` v6 → v7
   (GitHub's Node 20 deprecation forced the old versions onto Node 24).
+
+### Fixed
+
+- Stale pre-rebase commit hashes in ADR-0040/0016.13 implementation notes;
+  duplicate Implementation Notes sections consolidated; NORTH_STAR B4/C7 rows
+  updated to reflect the landed quota ladder and canary machinery.
 
 ## [2.10.0] — 2026-08-21
 
