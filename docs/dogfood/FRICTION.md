@@ -292,3 +292,20 @@ docs/spec/evidence-contract/ — first end-to-end proof of "recon → artifact" 
 - Suggested fix: return ExitBadInvocation when the JS fails to transpile; de-dupe the error prefix.
 - Trace: `ghx code 'const r = await explore("x/y"); return r;'; echo $?` → 0.
 - Disposition: open (minor).
+
+## 2026-08-21 ask progress stream (ADR-0040 L2) — first evidence at [4s], no pending wall — soft [L2-dogfood]
+- Attempted: `ghx sidecar ask --repo tidwall/gjson "How does the parse function handle escaped characters?"` with stderr redirected, on the wt/l2-streaming build.
+- Ground: first signal at **[0s]** (dispatch line), first derived state `thinking…` at **[4s]** — inside the ADR-0040 L2 <5s budget; then one line per tool call with resolved status and output size (`tool Terminal · completed (1843 chars)`), derived `synthesizing… (5 sources so far)` quiet-states, one text excerpt, and a truthful completion line (`report ready — 3 verified claims, 4 citations` matching the delivered report). The 2026-07-05 pathology (≈48 identical `execute (pending)` lines) cannot recur: pending updates render nothing and identical consecutive lines collapse.
+- Trace: ~/.ghx/sessions/tidwall-gjson/ (turn trace 114f275bc2e6bd59d6eacfb446861a0c); progress stream captured in the run log; replay-pinned by TestAskProgressFirstEvidenceUnderFiveSeconds (measured 0.31s to first evidence on the fixture).
+- Disposition: fixed on wt/l2-streaming pending merge — criteria 1–5 of docs/research/006-l2-streaming-ux-states.md verified in this dogfood; criterion 7 closes when a human confirms the TTY rendering reads well live.
+
+## TEMPLATE — L2 streaming dogfood entry (copy, fill, keep evidence honest)
+```
+## YYYY-MM-DD L2 stream during <repo/session> ask — soft [L2-dogfood]
+- Attempted: ghx sidecar ask --repo <owner/repo> "<question>" (TTY or redirected?)
+- Ground: t of first signal (dispatch/thinking/tool); worst spam moment (if any);
+  did the completion line counts match the delivered report (yes/no)?
+- Trace: ~/.ghx/sessions/<session>/ (turn trace <id>); progress stream capture.
+- Disposition: open | confirms criteria 1–5 | regression found: <what>.
+```
+

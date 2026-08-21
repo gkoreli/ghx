@@ -18,6 +18,18 @@ prose here.
   schema, versioning policy, conformance levels), MCP-spec-style;
   `docs/spec/evidence-contract/README.md` maps every clause to the
   enforcing Go code path and pinning test.
+- **`ghx sidecar ask` live progress stream (ADR-0040 L2)** — while a turn
+  runs, stderr now carries compact, timestamped activity lines tailed from
+  the session's live.jsonl (ADR-0022.1): tool calls with resolved status
+  and output size, text excerpts, derived `thinking…`/`synthesizing…`
+  quiet-states, and a completion line with truthful claim/citation counts.
+  First signal lands in seconds (budget: <5s; fixture-measured ~0.3s,
+  dogfood first derived state at 4s). Identical consecutive lines collapse —
+  the FRICTION.md 2026-07-05 ~48×`(pending)` wall cannot recur. Non-TTY
+  stderr gets `# `-prefixed ASCII lines; stdout and the `--json` envelope
+  are byte-identical to before (ADR-0019.3 D2). `--quiet` restores the old
+  silent behavior. Acceptance criteria:
+  docs/research/006-l2-streaming-ux-states.md.
 - **`ghx serve --print-mcp-config`** (ADR-0019.3 D4) — prints a ready-to-paste
   `mcpServers` JSON block for one-line wiring into any MCP client; the README
   MCP section gains the matching install rail plus a doctor-first verification

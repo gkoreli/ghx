@@ -146,6 +146,40 @@ _(filled as slices land; first slice expected: L1/L2 latency work.)_
   conformance-suite packaging from the pinning tests (the remaining ADR-0040
   P2 deliverable), BLOCKED taxonomy, envelope-level versioning.
 
+### L2 landed — ask progress stream (2026-08-21, branch wt/l2-streaming)
+
+The first P1 slice is implemented against the acceptance criteria pre-registered
+in `docs/research/006-l2-streaming-ux-states.md` (7 criteria; that document
+also fixes the UX target states). Shape:
+
+- `internal/cli/askprogress.go` — a poller tails the session's live.jsonl
+  (ADR-0022.1 producer, unchanged) and renders one compact stderr line per
+  event: tool calls as `tool: <title>` with resolved status + output size,
+  text excerpts, derived `thinking…`/`synthesizing… (N sources so far)`
+  quiet-states (from a >3s event gap, never fabricated names), and a final
+  completion line with truthful claim/citation counts read off the delivered
+  report. Identical consecutive lines collapse regardless of their elapsed
+  stamp (the FRICTION.md ~48×pending pathology cannot recur); pending tool
+  updates render nothing.
+- TTY stderr gets glyph-prefixed lines; non-TTY gets `# `-prefixed ASCII —
+  no ANSI, no spinners (research 006 criterion 4). stdout and the `--json`
+  envelope are untouched: ADR-0019.3 D2 contract purity holds, and no
+  existing contract test needed edits.
+- Daemon-routed asks (flagless) don't know their session until routing
+  completes inside the runtime, so the poller discovers the right live.jsonl
+  by matching `turn.started` events on exact question (+repo when given),
+  most-recent wins. Explicit `--session` tails directly (R1 guarantee).
+  `--quiet` suppresses streaming entirely (criterion 6).
+
+Evidence at implementation time: `go test ./...` green including race
+detector over `internal/cli`; criterion 1 pinned as a measurement
+(`TestAskProgressFirstEvidenceUnderFiveSeconds`, ~0.31s to first evidence);
+live dogfood run (`tidwall/gjson`, redirected stderr) showed dispatch [0s],
+first derived state [4s], per-tool completions, and a completion line whose
+counts matched the report — recorded in FRICTION.md 2026-08-21 with trace
+pointer. Remaining for full L2 closure: human confirmation of TTY legibility
+in daily use (L4 dogfood), and L1 cheap-depth latency work underneath it.
+
 ## What actually stops heavy use — the honest list (2026-08-21 audit)
 
 Grounded in this machine's real state, not speculation:
