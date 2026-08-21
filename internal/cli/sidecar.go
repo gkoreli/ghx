@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -135,6 +136,9 @@ and reports under ~/.ghx that back the report.`,
 		progress.stop()
 		progress.completed(report)
 		if err != nil {
+			if errors.Is(err, sidecar.ErrQuotaExhausted) {
+				return WithExitCode(ExitUpstreamFailure, fmt.Errorf("%w\n→ %s", err, sidecar.QuotaAffordanceHint))
+			}
 			return err
 		}
 
@@ -153,6 +157,9 @@ and reports under ~/.ghx that back the report.`,
 			return enc.Encode(askEnvelope{Report: report, Artifacts: artifacts, Route: route})
 		}
 		printHumanReport(report)
+		if turn != nil && turn.QuotaDegraded {
+			fmt.Fprintf(os.Stderr, "⚠ degraded: backend quota exhausted — this answer came from the session's cached evidence ledger, not fresh investigation\n")
+		}
 		if route != nil {
 			fmt.Printf("\n%s\n", route.Line())
 		}

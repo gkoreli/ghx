@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -575,5 +577,40 @@ func TestAskExitCode(t *testing.T) {
 		if got := CodeForError(err); got != tc.want {
 			t.Errorf("%s: CodeForError(askExitCode) = %d, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+// ADR-0040 L3: quota exhaustion with no ledger evidence must reach the CLI
+// as a wrapped ExitUpstreamFailure with the affordance hint — the ask
+// frontend wraps it (raw unclassified errors default to exit 2, so the wrap
+// is the deliberate mapping, not decoration).
+func TestAskQuotaExitMapping(t *testing.T) {
+	quotaErr := sidecar.NewQuotaExhaustedError(fmt.Errorf(`acp prompt: {"code":-32603,"message":"Internal error: You've hit your session limit · resets 8:30am (UTC)","data":{"errorKind":"rate_limit"}}`))
+	if !errors.Is(quotaErr, sidecar.ErrQuotaExhausted) {
+		t.Fatal("quota wire error must unwrap to ErrQuotaExhausted")
+	}
+	// Raw unclassified errors default to bad invocation (CodeForError
+	// contract) — the ask frontend's explicit wrap is the semantic mapping.
+	wrapped := WithExitCode(ExitUpstreamFailure, fmt.Errorf("%w\n→ %s", quotaErr, sidecar.QuotaAffordanceHint))
+	if got := CodeForError(wrapped); got != ExitUpstreamFailure {
+		t.Fatalf("CodeForError(wrapped quota) = %d, want %d", got, ExitUpstreamFailure)
+	}
+	if !strings.Contains(sidecar.QuotaAffordanceHint, "--depth cheap") {
+		t.Fatalf("affordance hint missing the cheap-depth recovery move: %s", sidecar.QuotaAffordanceHint)
+	}
+}
+
+// ADR-0040 L3: an unclassified quota error reaching CodeForError directly is
+// a bad invocation by the default rule — which is why the ask frontend MUST
+// wrap it in WithExitCode(ExitUpstreamFailure) before returning (the D1
+// mapping). Pin that wrap behavior's shape here.
+func TestQuotaErrorNeedsExplicitWrap(t *testing.T) {
+	raw := sidecar.NewQuotaExhaustedError(fmt.Errorf("session limit"))
+	if got := CodeForError(raw); got != ExitBadInvocation {
+		t.Fatalf("raw unclassified quota error should default to bad invocation, got %d", got)
+	}
+	wrapped := WithExitCode(ExitUpstreamFailure, fmt.Errorf("%w\n→ %s", raw, sidecar.QuotaAffordanceHint))
+	if got := CodeForError(wrapped); got != ExitUpstreamFailure {
+		t.Fatalf("explicitly wrapped quota error = %d, want %d", got, ExitUpstreamFailure)
 	}
 }
