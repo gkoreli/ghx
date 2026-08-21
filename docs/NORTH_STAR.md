@@ -300,8 +300,8 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 |---|---|---|
 | A1 | Evidence engine: explore/read/search/map/codemode (= M1) | Shipped |
 | A2 | Agent-usage mining → CLI ergonomics batch: mine eval/production traces for failed invocations, wasteful outputs, missing flags; fix the top findings | ← frontier (two GPT-5.5 miners ran 2026-07-06; findings → pre-registered batch) |
-| A3 | Tier-2 structural tools absorbed under the CLI: codemap, ast-grep, repomap ranking (= M7 tooling half) | Future (ADR-0024 research done) |
-| A4 | Error messages as agent affordances: every CLI error tells the agent the correct next invocation | Future (feeds from A2 findings) |
+| A3 | Tier-2 structural tools absorbed under the CLI: codemap, ast-grep, repomap ranking (= M7 tooling half) | Shipped (ADR-0024.1/.2; cache surface + runtime-owned escalation per ADR-0024.4, 2026-08-21) |
+| A4 | Error messages as agent affordances: every CLI error tells the agent the correct next invocation | Mostly shipped 2026-08-21 (ADR-0034.1: sidecar ask exit mapping, inspect repo-404→3, captured-exit-code steering); open remainder: MCP structured error payloads (0034 phase 3), cobra hints + version provenance |
 
 **B. Sidecar Agent Framework (SAF)** — the runtime product.
 
@@ -327,7 +327,7 @@ profile above it, including baselines (honesty: CLI gains lift `ghx` and
 | C4 | Judge layer: offline machinery + cross-family client done; gold-set labeling + κ ≥ 0.6 calibration pending (ADR-0023.1) | ← frontier — founder labeling session unlocks it |
 | C5 | Discovery-class eval tasks (ADR-0019.1 D5) | Done 2026-07-06 — ADR-0019.2 accepted and implemented: separate discovery fixtures, D3 scorer, D-G gates, and discovery runner hooks under `internal/sidecar/evals`; citable discovery numbers still require a formal D-G run under `docs/evals/` |
 | C6 | Continuous evaluation: judged production sessions, self-reflective improvement loop (observability tenet) | Future (gated on C4 calibration) |
-| C7 | **Trust ledger driven to green** (`docs/evals/TRUST.md`): memorization-confound audit (H2, closed-book probe), trace-capture completeness (H3, raw-SDK diff), judge κ calibration (H1), real token accounting (H5), corpus ceiling refresh (H7) | ← standing frontier — every loop advances or re-verifies a row; audits for H2/H3 in flight 2026-07-06 |
+| C7 | **Trust ledger driven to green** (`docs/evals/TRUST.md`): memorization-confound audit (H2, closed-book probe), trace-capture completeness (H3, raw-SDK diff), judge κ calibration (H1), real token accounting (H5), corpus ceiling refresh (H7) | ← standing frontier — every loop advances or re-verifies a row; **H7 fixtures landed 2026-08-21** (ADR-0016.13: R1–R4 replacements, unit-validated; live closed-book canaries pending before citable claims) |
 | C8 | Combined-objective host-task evals: prove the NORTH_STAR "both, not one" rebuttal with two-agent episodes | Decided (ADR-0032.1): gates registered (success non-inferiority δ=0.10 + efficiency superiority + deterministic recon quality, vector verdict), 6 hand-authored tasks w/ memorization canary, 4 build slices (S1 provisioner/grader → S2 host client+attribution → S3 arm-B MCP wiring → S4 corpus); judge half deferred to κ unlock; run is Goga-triggered |
 
 The P4 training track (M9/M10) stays a single sequential ladder on top —

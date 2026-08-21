@@ -10,7 +10,44 @@ prose here.
 
 ## [Unreleased]
 
-Nothing staged yet.
+Three parallel capability tracks landed from evidence-grounded research
+(`docs/research/`) through ADR proposals to implementation — each branch built
+and verified with `go test ./...` green.
+
+### Added
+
+- **Tier-2 runtime-owned escalation (ADR-0024.4)** — the sidecar-decided half
+  of M7/B9 completes: `ghx tier2 observe --signal <id>` lets the agent declare
+  the three judgment-based escalation signals, accepted only when the observe
+  invocation is recorded in the turn's traces (policy stays recomputable);
+  pre-hoc grant gating via `GHX_TIER2_ALLOWED_BACKENDS` refuses ungranted
+  `local:*` commands before any clone work with an affordance hint; new G6
+  policy-precision eval gate (escalated correctness ≥ 0.90 × overall,
+  additive, never a thesis input); `ghx cache ls|clean` surfaces over the
+  existing TTL+LRU eviction.
+- **Eval corpus discrimination refresh R1–R4 (ADR-0016.13)** — four
+  replacement fixtures (werkzeug-delegation, gin-route-conflict,
+  hono-smartrouter-fallback, gjson-engine-selection) target the corpus's 2/6
+  discrimination ceiling (TRUST H7); unit-validated with
+  `TestADR0016_13TaskFixturesValid`; live closed-book canaries are PRELIMINARY
+  pending runs.
+- **Research artifacts** (`docs/research/`): a4-error-affordances,
+  m7-tier2-escalation, h7-corpus-discrimination — evidence-grounded with
+  cross-references and per-file evidence appendices.
+- **ADR proposals**: [0034.1](docs/adr/0034.1-failure-class-completion-across-frontends.md),
+  [0024.4](docs/adr/0024.4-runtime-owned-escalation.md),
+  [0016.13](docs/adr/0016.13-eval-corpus-discrimination-refresh.md).
+
+### Changed
+
+- **Failure-class completion across frontends (ADR-0034.1)** — `ghx sidecar
+  ask` maps the report outcome class to semantic exit codes (bad-input BLOCKED
+  → 2, upstream → 3, no-evidence → 1, answered → 0) instead of always exit 0;
+  `inspect` on a nonexistent repo now exits 3 like explore/read instead of a
+  silent 1; the persona requires cited exit codes to be trace-captured, never
+  narrated from memory (persona golden hash updated deliberately).
+- NORTH_STAR milestone rows updated: A3 shipped, A4 mostly shipped, C7 notes
+  H7 fixture landing.
 
 ## [2.9.0] — 2026-07-07
 
