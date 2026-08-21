@@ -72,6 +72,7 @@ and reports under ~/.ghx that back the report.`,
 		depth, _ := cmd.Flags().GetString("depth")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		local, _ := cmd.Flags().GetBool("local")
+		quiet, _ := cmd.Flags().GetBool("quiet")
 
 		// Reject an out-of-set --depth with exit 2 rather than silently running
 		// at an unintended budget (dogfood friction, FRICTION.md 2026-07-07
@@ -88,7 +89,32 @@ and reports under ~/.ghx that back the report.`,
 		// through the R3-R5 cascade and the decision is printed after the
 		// ask, with its provenance.
 		routedByDaemon := session == "" && repo == ""
-		if !routedByDaemon {
+		cfg := sidecar.LoadConfig()
+		// ADR-0040 L2: stream the session's live.jsonl activity as compact
+		// stderr progress lines while the turn runs, so first evidence lands
+		// in seconds instead of after the whole turn. --quiet opts out;
+		// non-TTY stderr degrades to "# "-prefixed ASCII lines (no ANSI,
+		// no spinners — research 006 criterion 4).
+		var progress *askProgress
+		if !quiet {
+			mode := askProgressPlain
+			if stderrIsTTY() {
+				mode = askProgressTTY
+			}
+			spec := askProgressSpec{
+				sessionsDir: cfg.SessionsDir,
+				session:     session,
+				repo:        repo,
+				question:    args[0],
+			}
+			if spec.session == "" && !routedByDaemon {
+				spec.session = defaultReconSession(repo)
+			}
+			progress = startAskProgress(spec, mode, os.Stderr)
+		}
+		if routedByDaemon {
+			fmt.Fprintln(os.Stderr, "session: routing on daemon…")
+		} else {
 			name := session
 			if name == "" {
 				name = defaultReconSession(repo)
@@ -96,7 +122,6 @@ and reports under ~/.ghx that back the report.`,
 			fmt.Fprintf(os.Stderr, "session: %s\n", name)
 		}
 
-		cfg := sidecar.LoadConfig()
 		report, turn, _, err := sidecar.AskViaDaemon(context.Background(), VERSION, cfg, sidecar.AskRequest{
 			Session:         session,
 			Repo:            repo,
@@ -104,6 +129,11 @@ and reports under ~/.ghx that back the report.`,
 			Depth:           depth,
 			AllowedBackends: askAllowedBackends(local),
 		})
+		// Ordered teardown: stop polling BEFORE anything else prints so a
+		// late progress line can never interleave with the route line or the
+		// report; the completion summary then renders first.
+		progress.stop()
+		progress.completed(report)
 		if err != nil {
 			return err
 		}
@@ -716,6 +746,7 @@ func init() {
 	sidecarAskCmd.Flags().String("depth", "normal", "Command budget: cheap|normal|deep")
 	sidecarAskCmd.Flags().Bool("json", false, "Output full report as JSON")
 	sidecarAskCmd.Flags().Bool("local", false, "Allow tier-2 local analysis (SHA-pinned clone, codemap, ast-grep, repomap) when remote evidence falls short")
+	sidecarAskCmd.Flags().Bool("quiet", false, "Suppress live stderr progress lines while the turn runs; only the final report is printed")
 
 	sidecarDoctorCmd.Flags().Bool("live", false, "Also run a real one-prompt turn through the agent (spawns it; diagnoses failures ACP initialize misses)")
 
@@ -751,6 +782,17 @@ func questionSession(question string) string {
 
 func defaultReconSession(repo string) string {
 	return sidecar.Slug(repo, "repo")
+}
+
+// stderrIsTTY reports whether stderr is an interactive terminal, choosing
+// the ask progress rendering mode (research 006 criterion 4): TTY gets the
+// compact glyph stream; redirected output gets "# "-prefixed ASCII lines.
+func stderrIsTTY() bool {
+	fi, err := os.Stderr.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // kebabSlug lowercases s and collapses every non-alphanumeric run into a
