@@ -16,6 +16,32 @@ and verified with `go test ./...` green.
 
 ### Added
 
+- **Cheap-backend guardrail for formal gate runs (ADR-0038)** — live eval
+  runs fail fast when the resolved ACP agent matches an expensive/shared-quota
+  backend (default `claude*`), including detection via wrapper-script content;
+  deliberate override via `GHX_EVAL_ALLOW_EXPENSIVE_BACKEND=formal-run`;
+  operators reclassify via `GHX_EVAL_EXPENSIVE_BACKENDS`. Exists because the
+  2026-07-03/04 formal run silently burned the main agent's Claude
+  subscription. Episode artifacts already recorded backend identity
+  (`AgentIdentity`); new `docs/evals/README.md` documents the convention.
+- **Visible ledger eviction + session snapshot identity (ADR-0037 M-1/M-2)** —
+  evidence-ledger truncation under the 1500-char prompt budget now emits a
+  visible note instead of silent loss; `SessionMeta`/`Ledger` gain
+  `Commit`/`Branch` snapshot stamps (first-write-wins, never fabricated) so
+  reconnaissance evidence states which repo ref it was gathered against.
+- **Report contract validation (ADR-0039)** — `Report.schemaVersion` (stamped
+  on all three report paths: resolved, BLOCKED wrap-up, warn fallback) keys
+  contract evolution; deterministic flag-only `CheckReportBounds` enforces the
+  persona compactness contract (>2000 chars, >5 files, >2-sentence answer)
+  with violations surfaced on `TurnResult.ReportBoundViolations` — never
+  altering or rejecting reports.
+- **Research artifacts** (`docs/research/`): 001-cheap-sidecar-backend,
+  002-persistent-sidecar-session-memory, 003-report-contract-context-boundary.
+- **ADR proposals accepted on merge**:
+  [0037](docs/adr/0037-persistent-evidence-shaped-session-memory.md),
+  [0038](docs/adr/0038-cheap-backend-governance.md),
+  [0039](docs/adr/0039-report-contract-validation.md).
+
 - **Tier-2 runtime-owned escalation (ADR-0024.4)** — the sidecar-decided half
   of M7/B9 completes: `ghx tier2 observe --signal <id>` lets the agent declare
   the three judgment-based escalation signals, accepted only when the observe
