@@ -85,6 +85,23 @@ func buildTierDecisionRecord(req AskRequest, turn int, result *TurnResult, repor
 		LowConfidenceRemoteOnly:     lowConfidenceRemoteOnly(report, escalationUsed),
 	}
 
+	// Agent-declared semantic signals (ADR-0024.4 D1): the agent may declare
+	// the three judgment-based signals mid-turn via `ghx tier2 observe
+	// --signal <id>`. A declaration is accepted only when an observe command
+	// for that signal is actually present in the turn's recorded traces; the
+	// accepted set is recorded on the decision so divergence stays auditable.
+	for _, sig := range []struct {
+		id    string
+		isSet *bool
+	}{
+		{tier2.SignalSymbolAbsentAfterMaps, &obs.SymbolAbsentAfterMaps},
+		{tier2.SignalCandidateAmbiguous, &obs.CandidateAmbiguous},
+		{tier2.SignalImportChainInvisible, &obs.ImportChainInvisible},
+	} {
+		if declaredSignal(commands, sig.id) {
+			*sig.isSet = true
+		}
+	}
 	rec := TierDecisionRecord{
 		Time:                   at,
 		Session:                req.Session,
@@ -131,6 +148,32 @@ func anyTier2Command(commands []string) bool {
 	for _, cmd := range commands {
 		if isGhxSubcommand(cmd, "tier2") {
 			return true
+		}
+	}
+	return false
+}
+
+// declaredSignal reports whether the turn's recorded commands contain a
+// `ghx tier2 observe --signal <id>` declaration for sig (ADR-0024.4 D1).
+// The trace is the only acceptance source: an agent claiming a signal in its
+// report without the recorded observe invocation is not accepted — the
+// policy stays recomputable from wire evidence alone.
+func declaredSignal(commands []string, signal string) bool {
+	for _, cmd := range commands {
+		if !isGhxSubcommand(cmd, "tier2") {
+			continue
+		}
+		fields := strings.Fields(cmd)
+		if len(fields) < 3 || fields[2] != "observe" {
+			continue
+		}
+		for i, f := range fields {
+			if f == "--signal" && i+1 < len(fields) && fields[i+1] == signal {
+				return true
+			}
+			if strings.HasPrefix(f, "--signal=") && strings.TrimPrefix(f, "--signal=") == signal {
+				return true
+			}
 		}
 	}
 	return false

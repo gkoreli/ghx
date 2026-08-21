@@ -245,6 +245,39 @@ func shortSHA(sha string) string {
 }
 
 func init() {
+	// tier2 observe (ADR-0024.4 D1): the sidecar agent's declaration surface
+	// for judgment-based escalation signals. The command validates the signal
+	// ID against the pre-registered policy set and prints a machine-readable
+	// receipt; acceptance happens at decision time, from the recorded traces.
+	var observeSignal string
+	observeCmd := &cobra.Command{
+		Use:   "observe",
+		Short: "Declare a judgment-based escalation signal for this turn (ADR-0024.4 D1)",
+		Long: `Declare one of the three semantic escalation signals the runtime cannot
+derive itself: remote.symbol_absent_after_maps, remote.candidate_ambiguous,
+remote.import_chain_invisible.
+
+The declaration only counts when the observe invocation itself is recorded in
+the turn's tool traces — acceptance is recomputed from wire evidence at
+decision time, never from the report.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			valid := map[string]bool{
+				tier2.SignalSymbolAbsentAfterMaps: true,
+				tier2.SignalCandidateAmbiguous:    true,
+				tier2.SignalImportChainInvisible:  true,
+			}
+			if !valid[observeSignal] {
+				return WithExitCode(ExitBadInvocation, fmt.Errorf("unknown --signal %q; valid: %s, %s, %s",
+					observeSignal, tier2.SignalSymbolAbsentAfterMaps, tier2.SignalCandidateAmbiguous, tier2.SignalImportChainInvisible))
+			}
+			fmt.Printf("observed	%s\n", observeSignal)
+			return nil
+		},
+	}
+	observeCmd.Flags().StringVar(&observeSignal, "signal", "", "Signal ID to declare (required)")
+	_ = observeCmd.MarkFlagRequired("signal")
+	tier2Cmd.AddCommand(observeCmd)
+
 	tier2SnapshotFlags(tier2CodemapCmd)
 	tier2CodemapCmd.Flags().Bool("context", false, "Emit the codemap JSON context envelope")
 	tier2CodemapCmd.Flags().Bool("compact", false, "Token-minimal context envelope (with --context)")

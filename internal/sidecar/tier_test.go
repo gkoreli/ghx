@@ -395,3 +395,40 @@ func containsString(list []string, want string) bool {
 	}
 	return false
 }
+
+// ADR-0024.4 D1: agent-declared signals are accepted only from recorded
+// `ghx tier2 observe --signal <id>` invocations in the turn traces — never
+// from report claims alone.
+func TestBuildTierDecisionRecordAcceptsDeclaredSignals(t *testing.T) {
+	mk := func(cmds ...string) *TurnResult {
+		tr := &TurnResult{}
+		for _, c := range cmds {
+			tr.ToolTraces = append(tr.ToolTraces, ToolCallTrace{RawInput: map[string]any{"command": c}})
+		}
+		return tr
+	}
+	req := AskRequest{Session: "s", Repo: "o/r", Question: "who calls X", AllowedBackends: []string{"remote", "local"}}
+
+	// No declaration: judgment signals stay unset.
+	rec := buildTierDecisionRecord(req, 1, mk("ghx search o/r foo"), nil, time.Now())
+	if rec.Decision.Observations.SymbolAbsentAfterMaps || rec.Decision.Observations.CandidateAmbiguous || rec.Decision.Observations.ImportChainInvisible {
+		t.Fatal("judgment signals set without observe declarations")
+	}
+
+	// Declared via trace: accepted and visible in fired observations.
+	tr := mk(
+		"ghx search o/r foo",
+		"ghx tier2 observe --signal "+tier2.SignalSymbolAbsentAfterMaps,
+		"ghx tier2 observe --signal="+tier2.SignalImportChainInvisible,
+	)
+	rec = buildTierDecisionRecord(req, 1, tr, nil, time.Now())
+	if !rec.Decision.Observations.SymbolAbsentAfterMaps {
+		t.Fatal("declared symbol_absent_after_maps not accepted")
+	}
+	if !rec.Decision.Observations.ImportChainInvisible {
+		t.Fatal("declared import_chain_invisible not accepted")
+	}
+	if rec.Decision.Observations.CandidateAmbiguous {
+		t.Fatal("undeclared candidate_ambiguous must stay unset")
+	}
+}
