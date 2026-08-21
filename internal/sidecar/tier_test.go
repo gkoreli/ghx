@@ -459,7 +459,10 @@ func TestTier2GrantValueAndAllowed(t *testing.T) {
 // env appears in the spawn environment for a local-granted ask.
 func TestPrepareSessionStampsTier2Grant(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{SessionsDir: dir, AgentCmd: "true"}
+	// cfg.Env pinned (the daemon/eval shape): the grant must ride the pinned
+	// spawn environment.
+	pinned := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+	cfg := Config{SessionsDir: dir, AgentCmd: "true", Env: pinned}
 	req := AskRequest{Session: "grant-parity", Repo: "o/r", Question: "q", AllowedBackends: []string{"remote", tier2.LocalBackendGrant}}
 	state, err := prepareSession(cfg, req, nil)
 	if err != nil {
@@ -473,6 +476,22 @@ func TestPrepareSessionStampsTier2Grant(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("spawnEnv missing tier-2 grant stamp: %v", state.spawnEnv)
+		t.Fatalf("pinned spawnEnv missing tier-2 grant stamp: %v", state.spawnEnv)
+	}
+	state.cleanupSink()
+
+	// Inherit-everything shape (cfg.Env nil, no auth env): spawnEnv stays nil
+	// per the MergeAgentEnv contract — the grant rides process inheritance
+	// from the asking ghx's own environment; pinning a one-variable env here
+	// would break the agent.
+	cfg2 := Config{SessionsDir: dir + "-2", AgentCmd: "true"}
+	req2 := AskRequest{Session: "grant-parity-inherit", Repo: "o/r", Question: "q", AllowedBackends: []string{"remote", tier2.LocalBackendGrant}}
+	state2, err := prepareSession(cfg2, req2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state2.cleanupSink()
+	if state2.spawnEnv != nil {
+		t.Fatalf("nil cfg.Env must keep spawnEnv nil (inherit-everything), got %d entries", len(state2.spawnEnv))
 	}
 }
