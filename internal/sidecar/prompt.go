@@ -284,6 +284,7 @@ func BuildPrompt(req Request, meta *SessionMeta, ledgers ...*Ledger) string {
 // (ADR-0037 M-1: eviction must be visible). When entries are trimmed to fit,
 // the returned note records exactly what was dropped so the agent knows the
 // ledger view is partial — silence would let it assume the ledger is complete.
+// The note is part of the budget: trimming reserves room for it.
 func formatEvidenceLedger(ledger *Ledger) string {
 	if ledger == nil {
 		return ""
@@ -293,7 +294,7 @@ func formatEvidenceLedger(ledger *Ledger) string {
 	pathLimit := len(ledger.InspectedPaths)
 	var block string
 	for {
-		block = buildEvidenceLedgerBlock(ledger, commandLimit, pathLimit)
+		block = buildEvidenceLedgerBlock(ledger, commandLimit, pathLimit) + ledgerTruncationNote(ledger, commandLimit, pathLimit)
 		if len(block) <= max || commandLimit == 0 && pathLimit == 0 {
 			break
 		}
@@ -305,13 +306,19 @@ func formatEvidenceLedger(ledger *Ledger) string {
 			pathLimit--
 		}
 	}
-	if commandLimit < len(ledger.CommandsRun) || pathLimit < len(ledger.InspectedPaths) {
-		droppedCommands := len(ledger.CommandsRun) - commandLimit
-		droppedPaths := len(ledger.InspectedPaths) - pathLimit
-		block += fmt.Sprintf("\nLedger truncated to fit prompt budget: %d older command(s) and %d older inspected path(s) not shown; the full ledger is in the session dir.\n",
-			droppedCommands, droppedPaths)
-	}
 	return block
+}
+
+// ledgerTruncationNote renders the visibility note for entries trimmed to fit
+// the prompt budget. Empty when nothing was dropped.
+func ledgerTruncationNote(ledger *Ledger, commandLimit, pathLimit int) string {
+	droppedCommands := len(ledger.CommandsRun) - commandLimit
+	droppedPaths := len(ledger.InspectedPaths) - pathLimit
+	if droppedCommands <= 0 && droppedPaths <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nLedger truncated to fit prompt budget: %d older command(s) and %d older inspected path(s) not shown; the full ledger is in the session dir.\n",
+		droppedCommands, droppedPaths)
 }
 
 func buildEvidenceLedgerBlock(ledger *Ledger, commandLimit, pathLimit int) string {
