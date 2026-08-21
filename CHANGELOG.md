@@ -17,7 +17,9 @@ prose here.
   `{report, route, artifacts}` envelope as a normative spec (18 clauses:
   schema, versioning policy, conformance levels), MCP-spec-style;
   `docs/spec/evidence-contract/README.md` maps every clause to the
-  enforcing Go code path and pinning test.
+  enforcing Go code path and pinning test;
+  `docs/spec/evidence-contract/CONFORMANCE.md` is the clause→test
+  inventory with the unpinned gap list.
 - **`ghx sidecar ask` live progress stream (ADR-0040 L2)** — while a turn
   runs, stderr now carries compact, timestamped activity lines tailed from
   the session's live.jsonl (ADR-0022.1): tool calls with resolved status
@@ -30,6 +32,19 @@ prose here.
   are byte-identical to before (ADR-0019.3 D2). `--quiet` restores the old
   silent behavior. Acceptance criteria:
   docs/research/006-l2-streaming-ux-states.md.
+- **Quota-degradation ladder — degrade, never die (ADR-0040 L3).** When the
+  sidecar's backend dies of quota exhaustion (`You've hit your session limit`,
+  seen live in daemon logs), the ask no longer exits dead: (1) with cached
+  session evidence it answers from the durable ledger, labeled
+  `DEGRADED (quota)` in the answer, `ledger-cache` in `backendsUsed`, and a
+  staleness note pinning the ledger snapshot; (2) with
+  `fallbackAgent`/`fallbackModel` configured (`~/.ghx/config.json`), it first
+  retries once on the cheaper backend, labeled `DEGRADED (degraded:model)`
+  with both backends recorded; (3) with neither available it fails as typed
+  `ErrQuotaExhausted` — exit 3 plus a recovery affordance — only after the
+  turn's artifacts are flushed. TurnResult gains `quotaDegraded`/
+  `fallbackBackend`; the CLI prints an explicit degraded warning on the human
+  path.
 - **`ghx serve --print-mcp-config`** (ADR-0019.3 D4) — prints a ready-to-paste
   `mcpServers` JSON block for one-line wiring into any MCP client; the README
   MCP section gains the matching install rail plus a doctor-first verification

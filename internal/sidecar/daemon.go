@@ -388,6 +388,11 @@ func ConfigDigest(cfg Config) string {
 		Cwd      string   `json:"cwd,omitempty"`
 		Env      []string `json:"env,omitempty"`
 		Model    string   `json:"model,omitempty"`
+		// FallbackAgentCmd/FallbackModel shape the ADR-0040 L3
+		// quota-degradation ladder: a warm daemon must not keep skipping (or
+		// serving) the fallback backend on stale ladder config.
+		FallbackAgentCmd string `json:"fallbackAgent,omitempty"`
+		FallbackModel    string `json:"fallbackModel,omitempty"`
 		// ReportSinkExe is the caller-resolved submit_report server binary.
 		// Without it a warm daemon keeps serving a previously overridden
 		// GHX_REPORT_SINK_EXE until idle restart (integration audit
@@ -412,7 +417,7 @@ func ConfigDigest(cfg Config) string {
 	// which the version handshake already validates, and full resolution is
 	// process-dependent (a spawned daemon and a go-test client resolve
 	// differently, which would force restart loops).
-	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route, AgentSettingSources: cfg.AgentSettingSources, DaemonWorkerIdleTTLMinutes: cfg.DaemonWorkerIdleTTLMinutes, DaemonMaxConcurrent: cfg.DaemonMaxConcurrent})
+	data, _ := json.Marshal(digestConfig{AgentCmd: cfg.AgentCmd, Cwd: cfg.Cwd, Env: cfg.Env, Model: cfg.Model, FallbackAgentCmd: cfg.FallbackAgentCmd, FallbackModel: cfg.FallbackModel, ReportSinkExe: os.Getenv("GHX_REPORT_SINK_EXE"), Route: cfg.Route, AgentSettingSources: cfg.AgentSettingSources, DaemonWorkerIdleTTLMinutes: cfg.DaemonWorkerIdleTTLMinutes, DaemonMaxConcurrent: cfg.DaemonMaxConcurrent})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

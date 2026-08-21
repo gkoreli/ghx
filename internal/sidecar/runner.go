@@ -234,6 +234,10 @@ const (
 	PeerDied
 	// StaleSession is a resume token no longer valid -> recreate a fresh session.
 	StaleSession
+	// QuotaExhausted is the backend out of quota/session budget (ADR-0040 L3
+	// trigger) -> the runtime's degrade-don't-die ladder: cheaper-backend
+	// retry, cached-ledger report, else typed failure with artifacts kept.
+	QuotaExhausted
 	// Other is anything else -> fail the turn with the underlying Err.
 	Other
 )

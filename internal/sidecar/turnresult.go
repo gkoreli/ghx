@@ -64,6 +64,11 @@ type TurnResult struct {
 	// cached ledger evidence instead of failing the ask. Recorded so callers
 	// (CLI notice, evals) can see the answer was NOT fresh exploration.
 	QuotaDegraded bool
+	// QuotaFallbackUsed names the fallback backend command line that served a
+	// quota-recovered ask (ADR-0040 L3 rung 2). Empty unless Config.
+	// FallbackAgentCmd was configured AND the primary backend died of quota
+	// exhaustion AND the fallback turn answered — the degraded:model rung.
+	FallbackBackend string
 	// Artifacts points at the session's persisted audit trail for the ask this
 	// turn belongs to (session dir + root trace ID). Populated by Ask after
 	// artifact emission; zero for a bare RunTurnWithOptions result.

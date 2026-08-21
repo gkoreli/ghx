@@ -54,6 +54,17 @@ type Config struct {
 	// claudeCode.options.model. Takes precedence over GHX_EVAL_SUBJECT_MODEL
 	// for session creation but does NOT override the eval identity label.
 	Model string `json:"model,omitempty"`
+	// FallbackAgentCmd is an optional cheaper second backend (ACP agent
+	// command line, same format as AgentCmd) tried when the primary backend
+	// dies of quota exhaustion (ADR-0040 L3 rung 2, degraded:model). Empty
+	// disables the rung — the ladder then goes straight to the cached-ledger
+	// answer. The fallback serves at most ONE turn per ask; a fallback turn
+	// is labeled degraded:model in the report and TurnResult.
+	FallbackAgentCmd string `json:"fallbackAgent,omitempty"`
+	// FallbackModel pins the model for the fallback backend's turn. Empty
+	// means the fallback adapter's own default (the usual point of a cheaper
+	// backend).
+	FallbackModel string `json:"fallbackModel,omitempty"`
 	// Visibility controls the shared telemetry/visibility runtime (ADR-0022).
 	Visibility VisibilityConfig `json:"visibility,omitempty"`
 	// Route overrides the session-routing knobs (ADR-0030.1 D3). Nil means

@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,6 +47,105 @@ func (e *QuotaExhaustedError) Unwrap() []error {
 // QuotaAffordanceHint is the fix-it line appended when a quota-dead ask has no
 // ledger to degrade to.
 const QuotaAffordanceHint = "try --depth cheap later or use ghx explore directly"
+
+// DegradedModelCause is the cause clause stamped into a fallback-backend
+// report's answer: "DEGRADED (degraded:model): …" — the rung-2 label. Rung 1's
+// cached-ledger answers carry "(quota)" and BackendsUsed=[ledger-cache]
+// instead, so the two rungs are machine-distinguishable on every surface.
+const DegradedModelCause = "degraded:model"
+
+// retryTurnOnFallbackBackend is ladder rung 2 (ADR-0040 L3): when configured,
+// the ask gets exactly one more turn on the cheaper fallback backend before
+// the cached-ledger rung. The fallback session starts FRESH (no ACP resume —
+// the primary backend's transport session belongs to the dead backend) with
+// the same prompt, whose ledger context makes it repo-aware. A successful turn
+// resolves its report through the same sink/retry path as a primary turn; the
+// report is relabeled DEGRADED (degraded:model) with the degradation recorded,
+// and TurnResult.FallbackBackend names the backend. quotaErr is the primary
+// backend's failure — it rides into the degraded report's uncertainty note.
+// Returns nil (leaving state untouched except the already-set QuotaDegraded
+// flag) whenever the rung cannot produce an answer: unconfigured, or the
+// fallback turn itself failed — the caller then falls through to rung 1.
+func retryTurnOnFallbackBackend(ctx context.Context, portRunner *claudeACPRunner, state *askTurnState, sink EventSink, quotaErr error) *Report {
+	cfg := state.cfg
+	if cfg.FallbackAgentCmd == "" {
+		return nil
+	}
+	// The fallback runner serves THIS turn under the cheaper backend: its
+	// AgentCmd must be FallbackAgentCmd (claudeACPSession.Turn reads the
+	// command from cfg.AgentCmd) and its steering model FallbackModel —
+	// otherwise rung 2 would silently respawn the backend that just died.
+	fbCfg := cfg
+	fbCfg.AgentCmd = cfg.FallbackAgentCmd
+	fbRunner := &claudeACPRunner{
+		cfg:       fbCfg,
+		turnRun:   portRunner.turnRun,
+		workspace: state.workspace,
+		spawnEnv:  state.spawnEnv,
+		stderrLog: state.stderrLog,
+		livePath:  state.livePath,
+	}
+	fbSession, err := fbRunner.Open(ctx, SessionID(state.req.Session), "")
+	if err != nil {
+		return nil
+	}
+	req := state.turnRequest(state.prompt)
+	req.Steering.Model = cfg.FallbackModel
+	result, resume, outcome := fbSession.Turn(ctx, req, sink)
+	if outcome.Class != Success {
+		return nil
+	}
+	state.turnResult = result
+	// The assignment above replaces the flag set by the caller before the
+	// fallback attempt — restore it so every degraded surface stays labeled.
+	state.turnResult.QuotaDegraded = true
+	if string(resume) != "" {
+		state.newSessionID = string(resume)
+	} else {
+		// A fresh fallback session with no adapter-assigned id must not
+		// inherit the dead backend's transport id for later persistence.
+		state.newSessionID = ""
+	}
+	report := resolveReportWithRetry(ctx, fbSession, state, nil, sink)
+	if !isAnsweredDegradableReport(report) {
+		return nil
+	}
+	state.turnResult.FallbackBackend = cfg.FallbackAgentCmd
+	return labelDegradedModelReport(report, cfg.FallbackAgentCmd, quotaErr)
+}
+
+// isAnsweredDegradableReport reports whether report is a real answered turn
+// worth relabeling: non-nil, not BLOCKED, not the loud WARN emitted when no
+// structured report was found at all. Those shapes mean the fallback produced
+// nothing usable and the ladder must fall through to the cached-ledger rung.
+func isAnsweredDegradableReport(report *Report) bool {
+	if report == nil {
+		return false
+	}
+	a := strings.TrimSpace(report.Answer)
+	return a != "" &&
+		!strings.HasPrefix(a, blockedAnswerPrefix) &&
+		!strings.HasPrefix(a, warnNoReportBase)
+}
+
+// labelDegradedModelReport relabels a fallback-backend answer as an honestly
+// degraded one: the answer gains the DEGRADED (degraded:model) prefix, an
+// uncertainty line names the fallback backend and the primary quota failure,
+// and BackendsUsed records both backends so no consumer mistakes the answer
+// for a normal primary run. Mutates and returns report.
+func labelDegradedModelReport(report *Report, fbCmd string, quotaErr error) *Report {
+	report.Answer = fmt.Sprintf("%s (%s): served by the fallback backend after the primary backend hit its quota limit; %s",
+		DegradedAnswerPrefix, DegradedModelCause, strings.TrimSpace(report.Answer))
+	report.SchemaVersion = ReportSchemaVersion
+	note := fmt.Sprintf("answer served by FALLBACK BACKEND %q after the primary backend hit quota exhaustion; treat depth/quality as degraded", fbCmd)
+	if hint := QuotaResetHint(quotaErr); hint != "" {
+		note += " (" + hint + " reset)"
+	}
+	report.Uncertainty = append(report.Uncertainty, note)
+	report.BackendsUsed = append([]string{fbCmd, LedgerCacheBackend}, report.BackendsUsed...)
+	return report
+}
+
 
 // NewQuotaExhaustedError builds the typed no-ledger quota failure.
 func NewQuotaExhaustedError(cause error) error {

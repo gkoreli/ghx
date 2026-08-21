@@ -307,12 +307,18 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, turnRunn
 
 	if turnErr != nil && IsQuotaExhausted(turnErr) {
 		// ADR-0040 L3 quota-degradation ladder: a quota-dead turn must not
-		// die silently. With cached session evidence, ship an explicitly
-		// labeled DEGRADED report instead; without any, fail as the typed
-		// ErrQuotaExhausted error the CLI maps to exit 3 + affordance.
+		// die silently. Rung 2: retry once on the configured cheaper fallback
+		// backend (degraded:model). Rung 1: with cached session evidence,
+		// ship an explicitly labeled DEGRADED report (degraded:cache). No
+		// ledger either way: fail as the typed ErrQuotaExhausted error the
+		// CLI maps to exit 3 + affordance — but only after artifacts are
+		// flushed, so the ask never dies without an audit trail.
 		completedErr = turnErr
+		state.turnResult.QuotaDegraded = true
+		if fb := retryTurnOnFallbackBackend(ctx, portRunner, state, sink, turnErr); fb != nil {
+			return fb, &state.turnResult, nil
+		}
 		if degraded := buildDegradedQuotaReport(state, turnErr); degraded != nil {
-			state.turnResult.QuotaDegraded = true
 			tierDecision := persistTurn(state, degraded)
 			emitArtifacts(ctx, state, degraded, tierDecision)
 			return degraded, &state.turnResult, nil

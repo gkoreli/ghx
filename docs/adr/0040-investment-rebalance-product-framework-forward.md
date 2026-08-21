@@ -180,6 +180,60 @@ counts matched the report — recorded in FRICTION.md 2026-08-21 with trace
 pointer. Remaining for full L2 closure: human confirmation of TTY legibility
 in daily use (L4 dogfood), and L1 cheap-depth latency work underneath it.
 
+### L3 — quota-degradation ladder (2026-08-21)
+
+Shipped as three commits on `wt/l3-quota-ladder`, each unit-tested against the
+real dead-ask wire message preserved in `~/.ghx/sessions/badslugnoslash`
+(`acp prompt: {"code":-32603,...,"errorKind":"rate_limit"}`):
+
+1. **Trigger** (`29d1c11`, `internal/sidecar/acp.go`): `IsQuotaExhausted`
+   dual detection mirroring `IsLoadSessionResourceNotFound` — structured
+   `*acp.RequestError` with `errorKind=rate_limit`, or session-limit/rate-limit
+   message text for the opaque-wrapped persisted form. `QuotaResetHint`
+   extracts the resets-at affordance. The failure also entered the neutral
+   `FailureClass` taxonomy (`QuotaExhausted`, `internal/sidecar/runner.go`) so
+   the runtime switches on the class, never strings (ADR-0036 D4 posture).
+
+2. **Rung 1 — degraded:cache** (`25ebf45`, `internal/sidecar/quota.go`,
+   `runtime.go`, `session.go`): a quota-dead turn with ledger evidence ships a
+   `DEGRADED (quota)` report built from the durable ledger (inspected paths,
+   prior verified claims from the session's newest persisted report via the
+   new `LoadLatestReport`), with `backendsUsed: ["ledger-cache"]` and an
+   uncertainty note carrying the ledger's snapshot pin (commit/branch) and age.
+   `ValidateReportEvidence` exempts the `DEGRADED` prefix the same way as
+   `BLOCKED` — the labeling is the honesty guarantee, and the prefix must state
+   its cause.
+
+3. **Rung 2 — degraded:model + never-die tail** (this worktree):
+   `Config.FallbackAgentCmd`/`Config.FallbackModel` (`fallbackAgent`/
+   `fallbackModel` in `~/.ghx/config.json`, part of the daemon config digest
+   per ADR-0030 D6) configure ONE cheaper-backend retry before the cache rung
+   (`retryTurnOnFallbackBackend`). The fallback session starts fresh (the dead
+   primary's ACP session id is not resumed; an id-less fallback clears
+   `newSessionID` so the dead id is never persisted), runs the same
+   ledger-carrying prompt under `FallbackAgentCmd`+`FallbackModel`, and its
+   answer is relabeled `DEGRADED (degraded:model)` with an uncertainty line
+   naming the fallback backend and the primary's reset hint;
+   `backendsUsed` records both the fallback and `ledger-cache`.
+   `TurnResult` gained `QuotaDegraded` + `FallbackBackend`; the CLI prints a
+   stderr degraded warning on the human path. When no ledger exists either
+   way, the ask returns typed `ErrQuotaExhausted` (exit 3 +
+   `QuotaAffordanceHint` via the CLI's explicit `WithExitCode` wrap) — but
+   only after `emitFailedTurnArtifacts` flushes the OTel bundle, extending the
+   ADR-0027 D3 artifacts-on-every-path rule to quota death.
+
+Ladder order and rung isolation are pinned by
+`internal/sidecar/quota_ladder_test.go` (fallback serves, falls through to
+cache, fallback-failure falls to cache, no-evidence typed failure with
+artifacts kept). Tests caught one real bug during the build: the fallback
+turn's `TurnResult` assignment silently dropped the `QuotaDegraded` flag —
+exactly the kind of unlabeled degradation L3 exists to prevent.
+
+Not done here (deliberate): no automatic model downgrade within one adapter
+(the rung is whole-backend, matching how ACP agents are configured); no
+cross-SESSION ledger reuse (rung 1 serves from the routed session's own
+ledger — routing already co-locates same-repo questions, ADR-0030.1).
+
 ## What actually stops heavy use — the honest list (2026-08-21 audit)
 
 Grounded in this machine's real state, not speculation:

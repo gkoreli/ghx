@@ -70,6 +70,8 @@ func classifyOutcome(err error) Outcome {
 		return Outcome{Class: Success}
 	case IsLoadSessionResourceNotFound(err):
 		return Outcome{Class: StaleSession, Err: err}
+	case IsQuotaExhausted(err):
+		return Outcome{Class: QuotaExhausted, Err: err}
 	case IsMaxTurnsError(err):
 		return Outcome{Class: TurnCapReached, Err: err}
 	case errors.Is(err, ErrLivenessTimeout):
