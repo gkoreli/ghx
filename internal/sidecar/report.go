@@ -36,6 +36,11 @@ type Evidence struct {
 // Report is the structured output emitted inside the <ghx-report> XML block.
 // The main coding agent receives this instead of the raw exploration transcript.
 type Report struct {
+	// SchemaVersion keys contract evolution (ADR-0039). Bump on semantic
+	// change to any field's meaning (precedent: ADR-0031.2 nextReads
+	// revision). "1" is the contract as of 2026-08; empty means the report
+	// predates versioning and consumers apply current semantics.
+	SchemaVersion string         `json:"schemaVersion,omitempty"`
 	Answer        string         `json:"answer"`
 	Verified      []Claim        `json:"verified"`
 	Inferred      []Claim        `json:"inferred"`
@@ -302,4 +307,95 @@ func compactJSON(val any) string {
 		return ""
 	}
 	return string(b)
+}
+
+// Report bound constants from the persona contract
+// (internal/sidecar/prompt.go Constraints section; ADR-0039).
+const (
+	// ReportSchemaVersion is the current contract version stamped into
+	// reports produced by this build.
+	ReportSchemaVersion = "1"
+	// MaxReportChars bounds the whole report JSON (compactness contract).
+	MaxReportChars = 2000
+	// MaxRelevantFiles bounds the relevantFiles list.
+	MaxRelevantFiles = 5
+	// MaxAnswerSentences bounds the direct answer.
+	MaxAnswerSentences = 2
+)
+
+// ReportBoundViolations lists persona-contract bound breaches for a report.
+// Bounds are flag-only (ADR-0039): callers record them in artifacts and
+// classify via the ADR-0034 failure classes; they do not by themselves fail
+// a report, because the compactness contract is a quality signal, not a
+// semantic minimum (that remains ValidateReport's non-empty answer).
+type ReportBoundViolations struct {
+	// OversizeChars is the report's rendered JSON length when it exceeds
+	// MaxReportChars; 0 when within bounds.
+	OversizeChars int `json:"oversizeChars,omitempty"`
+	// ExtraRelevantFiles counts files beyond MaxRelevantFiles.
+	ExtraRelevantFiles int `json:"extraRelevantFiles,omitempty"`
+	// AnswerSentences is the detected sentence count when it exceeds
+	// MaxAnswerSentences; 0 when within bounds.
+	AnswerSentences int `json:"answerSentences,omitempty"`
+}
+
+// Violated reports whether any bound was breached.
+func (v ReportBoundViolations) Violated() bool {
+	return v.OversizeChars > 0 || v.ExtraRelevantFiles > 0 || v.AnswerSentences > 0
+}
+
+// String renders a stable, artifact-friendly one-line summary.
+func (v ReportBoundViolations) String() string {
+	if !v.Violated() {
+		return "none"
+	}
+	parts := make([]string, 0, 3)
+	if v.OversizeChars > 0 {
+		parts = append(parts, fmt.Sprintf("oversize(%d chars)", v.OversizeChars))
+	}
+	if v.ExtraRelevantFiles > 0 {
+		parts = append(parts, fmt.Sprintf("relevantFiles>%d (+%d)", MaxRelevantFiles, v.ExtraRelevantFiles))
+	}
+	if v.AnswerSentences > 0 {
+		parts = append(parts, fmt.Sprintf("answerSentences>%d (%d)", MaxAnswerSentences, v.AnswerSentences))
+	}
+	return strings.Join(parts, ",")
+}
+
+// CheckReportBounds evaluates the persona compactness bounds against r.
+// Deterministic and side-effect free; the eval kernel and runtime both call
+// it so the same rule produces the same artifact data everywhere.
+func CheckReportBounds(r *Report) ReportBoundViolations {
+	var v ReportBoundViolations
+	if r == nil {
+		return v
+	}
+	if n := reportJSONLen(r); n > MaxReportChars {
+		v.OversizeChars = n
+	}
+	if n := len(r.RelevantFiles); n > MaxRelevantFiles {
+		v.ExtraRelevantFiles = n - MaxRelevantFiles
+	}
+	if n := countSentences(r.Answer); n > MaxAnswerSentences {
+		v.AnswerSentences = n
+	}
+	return v
+}
+
+// reportJSONLen measures the rendered JSON size of the report — the same
+// bytes a consumer would read. Marshal of the fixed struct cannot fail in
+// practice; on the impossible error path return 0 (no violation claimed).
+func reportJSONLen(r *Report) int {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+// countSentences counts sentence-ending punctuation as a cheap deterministic
+// proxy. Abbreviations may overcount; the flag is advisory and the raw answer
+// is always in the artifact for recomputation (Visibility tenet).
+func countSentences(s string) int {
+	return strings.Count(s, ".") + strings.Count(s, "!") + strings.Count(s, "?")
 }

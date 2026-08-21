@@ -554,6 +554,13 @@ func resolveReportWithRetry(ctx context.Context, session Session, state *askTurn
 	}
 	if report != nil {
 		state.turnResult.ReportCoerced = coerced
+		// Stamp the contract version this build produces (ADR-0039) and
+		// record persona-bound violations for artifact visibility. Bounds
+		// are flag-only: they never alter or reject the report.
+		report.SchemaVersion = ReportSchemaVersion
+		if v := CheckReportBounds(report); v.Violated() {
+			state.turnResult.ReportBoundViolations = v.String()
+		}
 		return report
 	}
 	return &Report{Answer: warnNoReportAnswer(state.stderrLog)}
