@@ -533,3 +533,65 @@ func TestSaveVerdictAndLoadRunEpisodes(t *testing.T) {
 		t.Errorf("loaded %d episodes, want %d (verdict files must be excluded)", len(loaded), len(eps))
 	}
 }
+
+// ADR-0024.4 D3: G6 measures escalated-episode correctness against the
+// pre-registered floor; existing gates stay byte-identical (G6 is additive
+// and never a thesis input).
+func TestG6PolicyPrecisionGate(t *testing.T) {
+	mkEp := func(profile Profile, tier string, correctness float64, cmds ...string) *Episode {
+		ep := &Episode{Profile: profile, Rewards: RewardBreakdown{Correctness: correctness}}
+		if tier != "" {
+			ep.Report = &sidecar.Report{TierUsed: tier}
+		}
+		for _, c := range cmds {
+			ep.Actions = append(ep.Actions, Action{Input: c})
+		}
+		return ep
+	}
+
+	// No escalation: NOT-EXERCISED vacuous pass.
+	v := EvaluateGates([]*Episode{
+		mkEp(ProfileSidecar, "tier1", 0.9),
+		mkEp(ProfileGhx, "", 0.9),
+	})
+	var g6 *GateResult
+	for i := range v.Gates {
+		if v.Gates[i].ID == "G6" {
+			g6 = &v.Gates[i]
+		}
+	}
+	if g6 == nil || !g6.Pass || !strings.Contains(g6.Detail, "NOT-EXERCISED") {
+		t.Fatalf("zero-escalation run: want G6 NOT-EXERCISED pass, got %+v", g6)
+	}
+
+	// Escalated episodes at/above floor: pass.
+	sc := mkEp(ProfileSidecar, "tier2", 1.0, "ghx tier2 codemap o/r")
+	sc2 := mkEp(ProfileSidecar, "tier1", 0.8)
+	gx := mkEp(ProfileGhx, "", 0.9)
+	v = EvaluateGates([]*Episode{sc, sc2, gx})
+	for i := range v.Gates {
+		if v.Gates[i].ID == "G6" {
+			g6 = &v.Gates[i]
+		}
+	}
+	if !g6.Pass {
+		t.Fatalf("escalated mean 1.0 vs overall 0.9 should pass: %+v", g6)
+	}
+
+	// Escalated episode far below floor: fail.
+	bad := mkEp(ProfileSidecar, "tier2", 0.3, "ghx tier2 repomap o/r")
+	ok := mkEp(ProfileSidecar, "tier1", 1.0)
+	gx2 := mkEp(ProfileGhx, "", 0.9)
+	v = EvaluateGates([]*Episode{bad, ok, gx2})
+	for i := range v.Gates {
+		if v.Gates[i].ID == "G6" {
+			g6 = &v.Gates[i]
+		}
+	}
+	if g6.Pass {
+		t.Fatalf("escalated mean 0.65 vs floor 0.9 should fail: %+v", g6)
+	}
+	if len(v.Notes) == 0 || !strings.Contains(v.Notes[len(v.Notes)-1], "over-triggered") {
+		t.Fatalf("expected G6 failure note, notes: %v", v.Notes)
+	}
+}

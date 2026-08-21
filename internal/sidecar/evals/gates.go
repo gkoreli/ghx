@@ -278,8 +278,9 @@ func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	g3 := buildG3(sc, gx, scEps, gxEps, effectiveAtLeastSpec(opts, "G3"))
 	g4 := buildG4(sc, gx, scEps, effectiveAtLeastSpec(opts, "G4"))
 	g5 := buildG5(sc, scEps)
+	g6 := buildG6(sc, scEps)
 
-	v.Gates = []GateResult{g1, g2, g3, g4, g5}
+	v.Gates = []GateResult{g1, g2, g3, g4, g5, g6}
 
 	// Verdict rules from ADR-0016.1: thesis supported iff G1, G2, G3, G5 pass.
 	// G4 does not overturn the thesis but blocks ADR-0017 until the evidence
@@ -297,6 +298,12 @@ func EvaluateGatesWithOptions(episodes []*Episode, opts GateOptions) Verdict {
 	if !g5.Pass && sc.Episodes > 0 {
 		v.Notes = append(v.Notes,
 			"G5 failed: safety violation on a sidecar episode is a contract bug that invalidates the run")
+	}
+	if strings.Contains(g6.Detail, "NOT-EXERCISED") {
+		v.Notes = append(v.Notes, "G6 not exercised: no escalated sidecar episodes — the escalation policy was not measured by this run (ADR-0024.4 D3)")
+	} else if !g6.Pass {
+		v.Notes = append(v.Notes,
+			"G6 failed: escalated episodes lost more than the pre-registered correctness floor — the escalation policy over-triggered or mis-targeted (ADR-0024.4 D3)")
 	}
 	return v
 }
@@ -455,6 +462,78 @@ func buildG5(sc *ProfileAggregate, scEps []*Episode) GateResult {
 	}
 	g.Fragile, g.FragileDetail = meanFloorFragile(safetyValues(scEps), 1.0, pass)
 	return g
+}
+
+// g6EscalatedFloor is the pre-registered G6 floor (ADR-0024.4 D3): escalated
+// episodes must retain at least this fraction of the sidecar profile's
+// overall correctness mean. Escalation buys structural depth; it must not
+// cost correctness. The floor is deliberately conservative — a precision
+// recall of the fired-signal set against a no-escalation counterfactual
+// requires paired escalated/no-escalation runs that do not exist yet, so v1
+// measures only the non-regression half and self-labels its scope.
+const g6EscalatedFloor = 0.90
+
+// buildG6 computes the policy-precision gate over escalated sidecar episodes
+// (ADR-0024.4 D3). An episode counts as escalated when its report declares
+// tier2 or its observed actions include a tier2 command. Pass requires at
+// least one escalated episode AND escalated mean correctness
+// ≥ g6EscalatedFloor × the sidecar profile's overall mean — escalation must
+// never cost more than the floor. With zero escalated episodes the gate
+// passes vacuously with an explicit NOT-EXERCISED note (a run without
+// escalation neither proves nor refutes the policy).
+func buildG6(sc *ProfileAggregate, scEps []*Episode) GateResult {
+	g := GateResult{
+		ID:      "G6",
+		Desc:    fmt.Sprintf("policy precision: escalated-episode correctness ≥ %.2f × sidecar overall (ADR-0024.4 D3)", g6EscalatedFloor),
+		Reducer: ReducerMean,
+	}
+	var escalated []*Episode
+	for _, ep := range scEps {
+		if episodeEscalated(ep) {
+			escalated = append(escalated, ep)
+		}
+	}
+	if len(escalated) == 0 {
+		g.Pass = true
+		g.Detail = "NOT-EXERCISED: no escalated sidecar episodes in this run — G6 neither passes on evidence nor fails; a run with tier-2 grants is required to measure the policy"
+		return g
+	}
+	var sum float64
+	for _, ep := range escalated {
+		sum += ep.Rewards.Correctness
+	}
+	mean := sum / float64(len(escalated))
+	floor := g6EscalatedFloor * sc.MeanCorrectness
+	g.Pass = sc.MeanCorrectness > 0 && mean >= floor
+	g.Detail = fmt.Sprintf("escalated correctness %.3f over %d/%d sidecar episodes vs floor %.3f (%.2f × overall %.3f)",
+		mean, len(escalated), len(scEps), floor, g6EscalatedFloor, sc.MeanCorrectness)
+	g.Fragile, g.FragileDetail = meanFloorFragile(escalatedCorrectness(escalated), floor, g.Pass)
+	return g
+}
+
+// episodeEscalated reports whether an episode used tier-2: the report's
+// declared tierUsed or any observed action input invoking tier2.
+func episodeEscalated(ep *Episode) bool {
+	if ep == nil {
+		return false
+	}
+	if ep.Report != nil && ep.Report.TierUsed == "tier2" {
+		return true
+	}
+	for _, a := range ep.Actions {
+		if strings.Contains(a.Input, "tier2") {
+			return true
+		}
+	}
+	return false
+}
+
+func escalatedCorrectness(eps []*Episode) []float64 {
+	vals := make([]float64, 0, len(eps))
+	for _, ep := range eps {
+		vals = append(vals, ep.Rewards.Correctness)
+	}
+	return vals
 }
 
 func validateEpisodesForVerdict(episodes []*Episode) ([]*Episode, []string, bool) {
