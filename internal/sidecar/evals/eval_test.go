@@ -32,6 +32,13 @@ func TestEpisodes(t *testing.T) {
 		agentCmd = sidecar.LoadConfig().AgentCmd
 	}
 
+	// Expensive-backend guardrail (ADR-0038): a formal gate run must not
+	// silently burn an expensive/shared quota pool. Fail fast unless the run
+	// explicitly opted in via GHX_EVAL_ALLOW_EXPENSIVE_BACKEND=formal-run.
+	if g := CheckExpensiveBackend(agentCmd); g.MatchedRule != "" && !g.ExplicitOptIn {
+		t.Fatalf("guardrail refused live episode run:\n%v", g.GuardrailError())
+	}
+
 	// Preflight must probe the agent this run will exec, not the host's
 	// configured agent — GHX_EVAL_AGENT usually points at the pinned
 	// eval wrapper (scripts/eval-agent-acp.sh).
