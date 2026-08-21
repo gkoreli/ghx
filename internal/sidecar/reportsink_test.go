@@ -560,3 +560,20 @@ func TestDecodeReportStrict_NormalizesNextReads(t *testing.T) {
 		}
 	}
 }
+
+// ADR-0040 L3: DEGRADED (quota) ledger-cache reports are exempt from the
+// fresh-evidence requirement — but must state their cause after the prefix.
+func TestValidateReportEvidenceDegraded(t *testing.T) {
+	if err := ValidateReportEvidence(&Report{Answer: "DEGRADED"}); err == nil {
+		t.Fatal("bare DEGRADED prefix without cause must be rejected")
+	}
+	degraded := &Report{
+		Answer:      "DEGRADED (quota): answered from cached session evidence; backend quota exhausted",
+		Verified:    []Claim{{Summary: "[cached] prior finding", Evidence: "prior turn report"}},
+		RelevantFiles: []RelevantFile{{Path: "a.go", Reason: "from cache"}},
+		Uncertainty: []string{"stale evidence"},
+	}
+	if err := ValidateReportEvidence(degraded); err != nil {
+		t.Fatalf("labeled DEGRADED report must be accepted: %v", err)
+	}
+}

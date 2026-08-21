@@ -117,6 +117,17 @@ func ValidateReportEvidence(r *Report) error {
 		}
 		return nil
 	}
+	// DEGRADED (ADR-0040 L3): quota-degraded ledger-cache answers carry the
+	// runtime's cached claims and an explicit staleness uncertainty; they are
+	// exempt from the fresh-evidence requirement by design — the labeling IS
+	// the honesty guarantee. The prefix must state the cause.
+	if strings.HasPrefix(answer, DegradedAnswerPrefix) {
+		why := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(answer, DegradedAnswerPrefix), ":"))
+		if why == "" {
+			return errors.New(`report failed validation: answer: a DEGRADED report must state why it is degraded ("DEGRADED (<cause>): …")`)
+		}
+		return nil
+	}
 	var missing []string
 	if markdownHeadingRE.MatchString(answer) {
 		missing = append(missing, `answer: Markdown headings are not allowed; put the direct answer first without headings`)
