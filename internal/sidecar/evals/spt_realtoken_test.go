@@ -164,9 +164,17 @@ func TestVerdictRendersBothSPTVariantsAndEconomics(t *testing.T) {
 	if v.SignalPerToken == nil || v.RealTokenSPT == nil || v.Economics == nil {
 		t.Fatal("verdict must carry both SPT variants and economics")
 	}
-	// Gate math is untouched by the informational fields (D3).
-	if len(v.Gates) != 5 {
-		t.Fatalf("gates = %d, want 5", len(v.Gates))
+	// Gate math is untouched by the informational fields (D3). G6
+	// (ADR-0024.4 D3) is additive and never a thesis input, so the count is
+	// now 6; the pinned property is that the informational fields don't
+	// change gate math, i.e. G1-G5 keep their IDs and order.
+	if len(v.Gates) != 6 {
+		t.Fatalf("gates = %d, want 6", len(v.Gates))
+	}
+	for i, id := range []string{"G1", "G2", "G3", "G4", "G5", "G6"} {
+		if v.Gates[i].ID != id {
+			t.Fatalf("gate[%d] = %s, want %s", i, v.Gates[i].ID, id)
+		}
 	}
 
 	md := FormatVerdict(v)
