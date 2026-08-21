@@ -189,3 +189,55 @@ func TestEvictEmptyCacheIsNoop(t *testing.T) {
 		t.Errorf("events = %+v, want none", events)
 	}
 }
+
+// ADR-0024.4 D4: ListSnapshots projects cached snapshots oldest-access first
+// (eviction order); Clean removes everything with manual-clean events.
+func TestCacheListAndClean(t *testing.T) {
+	root := t.TempDir()
+	c := NewCache(root)
+	if err := os.MkdirAll(filepath.Join(c.Root, "repos", "host", "o", "r1", "snapshots", "aaa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	metaA := SnapshotMetadata{Repo: "o/r1", ResolvedSHA: "aaa", CloneStrategy: "blobless", SizeBytes: 100, CreatedAt: time.Now().Add(-time.Hour), LastAccessedAt: time.Now().Add(-2 * time.Hour)}
+	if err := WriteMetadata(filepath.Join(c.Root, "repos", "host", "o", "r1", "snapshots", "aaa"), metaA); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(c.Root, "repos", "host", "o", "r2", "snapshots", "bbb"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	metaB := SnapshotMetadata{Repo: "o/r2", ResolvedSHA: "bbb", CloneStrategy: "blobless", SizeBytes: 200, CreatedAt: time.Now(), LastAccessedAt: time.Now()}
+	if err := WriteMetadata(filepath.Join(c.Root, "repos", "host", "o", "r2", "snapshots", "bbb"), metaB); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := c.ListSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("ListSnapshots = %d entries, want 2", len(infos))
+	}
+	if infos[0].Repo != "o/r1" || infos[1].Repo != "o/r2" {
+		t.Fatalf("oldest-access-first order violated: %s before %s", infos[0].Repo, infos[1].Repo)
+	}
+
+	events, err := c.Clean()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("Clean events = %d, want 2", len(events))
+	}
+	for _, e := range events {
+		if e.Reason != "manual-clean" {
+			t.Fatalf("event reason = %q, want manual-clean", e.Reason)
+		}
+	}
+	after, err := c.ListSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("cache not empty after Clean: %d entries", len(after))
+	}
+}

@@ -190,6 +190,63 @@ type snapshotEntry struct {
 	meta SnapshotMetadata
 }
 
+// SnapshotInfo is the user-visible projection of one cached snapshot for the
+// `ghx cache ls` surface (ADR-0024.4 D4).
+type SnapshotInfo struct {
+	Repo           string `json:"repo"`
+	SHA            string `json:"sha"`
+	Ref            string `json:"ref,omitempty"`
+	Strategy       string `json:"strategy"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	CreatedAt      time.Time `json:"createdAt"`
+	LastAccessedAt time.Time `json:"lastAccessedAt"`
+	Path           string `json:"path"`
+}
+
+// ListSnapshots returns every cached snapshot's user-visible metadata,
+// sorted oldest-access first (the eviction order). Empty when the cache
+// root does not exist yet.
+func (c *Cache) ListSnapshots() ([]SnapshotInfo, error) {
+	entries, err := c.listSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].meta.LastAccessedAt.Before(entries[j].meta.LastAccessedAt)
+	})
+	infos := make([]SnapshotInfo, 0, len(entries))
+	for _, e := range entries {
+		infos = append(infos, SnapshotInfo{
+			Repo: e.meta.Repo, SHA: e.meta.ResolvedSHA, Ref: e.meta.RequestedRef,
+			Strategy: e.meta.CloneStrategy, SizeBytes: e.meta.SizeBytes,
+			CreatedAt: e.meta.CreatedAt, LastAccessedAt: e.meta.LastAccessedAt,
+			Path: e.dir,
+		})
+	}
+	return infos, nil
+}
+
+// Clean removes every snapshot in the cache (all repos), returning the
+// per-snapshot removal events. Active-turn protection is the caller's
+// responsibility; the CLI refuses while a daemon ask is in flight.
+func (c *Cache) Clean() ([]EvictionEvent, error) {
+	entries, err := c.listSnapshots()
+	if err != nil {
+		return nil, err
+	}
+	var events []EvictionEvent
+	for _, e := range entries {
+		if err := os.RemoveAll(e.dir); err != nil {
+			return events, fmt.Errorf("clean %s: %w", e.dir, err)
+		}
+		events = append(events, EvictionEvent{
+			Repo: e.meta.Repo, SHA: e.meta.ResolvedSHA, Path: e.dir,
+			Reason: "manual-clean", FreedBytes: e.meta.SizeBytes,
+		})
+	}
+	return events, nil
+}
+
 // Evict applies the pre-registered eviction policy (ADR-0024.1): first remove
 // snapshots whose lastAccessedAt is older than the TTL, then remove
 // least-recently-accessed snapshots until total size fits BudgetBytes.
