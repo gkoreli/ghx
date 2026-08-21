@@ -14,6 +14,10 @@ func TestCheckExpensiveBackendMatches(t *testing.T) {
 	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec npx -y @agentclientprotocol/claude-agent-acp@0.55.0 \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	npmRunner := filepath.Join(t.TempDir(), "runner")
+	if err := os.WriteFile(npmRunner, []byte("#!/usr/bin/env node\n// claude-agent-acp entrypoint stub\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		cmd      string
 		wantRule string
@@ -21,8 +25,12 @@ func TestCheckExpensiveBackendMatches(t *testing.T) {
 		{"claude", "claude"},
 		{"claude-agent-acp", "claude-agent-acp"},
 		{"/tmp/x/claude-acp", "claude-acp"},
-		{"/home/u/.npm/claude-agent-acp/bin/runner", "claude-agent-acp"},
+		// Base name is "runner" — path substrings must NOT match (fixed
+		// false-positive class). Wrapper-content inspection catches this:
+		{"claude-acp-wrapper.sh", "claude-acp"},
+		{"claude-agent-acp", "claude-agent-acp"},
 		{wrapper, "claude-agent-acp (wrapper content)"},
+		{npmRunner, "claude-agent-acp (wrapper content)"},
 		{"codex", ""},
 		{"/usr/local/bin/codex", ""},
 		{"./my-echo-agent.sh", ""},
@@ -84,5 +92,18 @@ func TestGuardrailErrorMentionsADR(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ADR-0038") {
 		t.Errorf("error should cite ADR-0038, got: %v", err)
+	}
+}
+
+func TestCheckExpensiveBackendNoPathFalsePositives(t *testing.T) {
+	for _, cmd := range []string{
+		"myclaude-tools.sh",
+		"claudeforge",
+		"/opt/claudeless/agent",
+		"/home/u/tools/bin/claudequery",
+	} {
+		if g := CheckExpensiveBackend(cmd); g.MatchedRule != "" {
+			t.Errorf("false positive: %q matched rule %q", cmd, g.MatchedRule)
+		}
 	}
 }
