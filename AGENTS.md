@@ -84,6 +84,54 @@ follow-up remains. If the implementation disproves the original direction,
 state that directly and update `status` or add a superseding ADR instead of
 leaving stale guidance.
 
+## Research Artifacts
+
+`docs/research/` holds the project's research artifacts — evidence-grounded
+investigations that precede ADRs (capability candidates, adoption studies,
+audits, proof-ladder design, direction syntheses). Research requires real
+effort and stays useful long after authoring: proposals become ADR inputs,
+audits anchor future re-verification, syntheses record why a direction was
+chosen. They are first-class maintained documents, not disposable scratch.
+
+Rules:
+
+- **YAML frontmatter is required**, same discipline as ADRs:
+
+```markdown
+---
+title: "Research 001 — cheap configurable sidecar backend and quota governance"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-runtime"
+author: "Hermes engineer session (Goga Koreli)"
+scope: "read-only research artifact; proposes, does not implement"
+builds-on: "ADR-0038, internal/sidecar/config.go — grounded in the 2026-07-03/04 quota-burn incident"
+---
+```
+
+  `builds-on` names the ADRs, code paths, artifacts, or prior research the
+  work grounds itself in — a reader should be able to retrace the evidence
+  chain from the frontmatter alone.
+
+- **Ground claims in evidence** with `path:line` citations, committed eval
+  artifacts, or quoted command output. A research document that cannot cite
+  its sources is a hypothesis and must say so in `status`.
+- **Keep them current when reality moves.** If implementation lands,
+  pivots, or disproves a research artifact's proposal, update it (or its
+  `status`) and cross-link the ADR that consumed it — stale research that
+  looks authoritative is worse than none.
+- **Naming:** numbered (`001-*`, `002-*`, …) for pre-ADR capability research
+  in an investigation thread; descriptive slugs for standalone audits and
+  syntheses. Dated synthesis/audit documents carry the date in the name.
+- **Lifecycle statuses:** `research` (open investigation), `synthesis`
+  (decision-support summary), `audit` (point-in-time inventory — always
+  annotate the commit it audited), `superseded` (kept for history, pointer
+  to the replacement). Do not delete research; supersede it.
+- **Cross-reference both ways**: an ADR that grew out of a research artifact
+  cites it, and the artifact's `builds-on`/body points at the ADR that
+  consumed it. This keeps the research → decision chain navigable in both
+  directions.
+
 ## Evidence Contract
 
 Any completed task — delegated or direct — must report evidence, not vibes.

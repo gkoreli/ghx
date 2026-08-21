@@ -1,10 +1,18 @@
+---
+title: "M7/A3 research — tier-2 escalation: codemap CLI + local codemapping as sidecar-decided internal tools"
+date: "2026-08-21"
+status: "research"
+thread: "escalation-tiers"
+author: "background research worker"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "ADR-0024.1, ADR-0024.4, NORTH_STAR M7/B9"
+---
+
 # M7/A3 research artifact: Tier-2 escalation — codemap CLI + local-clone codemapping as sidecar-decided internal tools
 
-**Capability candidate:** M7/A3 "Tier-2 escalation" — absorb the codemap CLI
 and local-clone + codemapping as sidecar-decided internal tools, fully visible
 (NORTH_STAR M7, `docs/NORTH_STAR.md:282`; workstream A3, `docs/NORTH_STAR.md:303`;
 brain half B9, `docs/NORTH_STAR.md:318`).
-**Status:** research artifact / pre-proposal. Read-only analysis grounded in
 committed artifacts and live command output; proposes (does not implement) the
 remaining M7/A3+B9 moves. No existing file was modified; nothing committed.
 

@@ -1,12 +1,21 @@
+---
+title: "Research 001 — cheap configurable sidecar backend and quota governance"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-runtime"
+author: "Hermes engineer session (Goga Koreli)"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "ADR-0038, ADR-0033, internal/sidecar/config.go, internal/sidecar/evals/eval_test.go — grounded in the 2026-07-03/04 quota-burn incident"
+---
+
+> **Outcome:** consumed by ADR-0038 (implemented in PR #7 (guardrail) + docs/evals/README.md; backend identity was found already shipped as AgentIdentity). Status above reflects the investigation phase; see the ADR for the decision record.
+
 # Research 001: Cheap configurable sidecar backend and quota governance
 
-**Capability candidate:** cheap-configurable-backend — the sidecar worker runs
 on a deliberately cheap, explicitly configured ACP agent, and no formal eval
 can silently burn an expensive/shared quota pool.
 
-**Workstream:** NORTH_STAR cheap-specialist thesis; SAF "sidecar over ACP".
 
-**Status:** research artifact / pre-proposal. Read-only analysis grounded in
 committed code and the 2026-07-03/04 incident. Proposes, does not implement.
 
 ## 1. Problem statement

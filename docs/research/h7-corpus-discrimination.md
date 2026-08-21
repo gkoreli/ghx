@@ -1,11 +1,18 @@
+---
+title: "H7-refresh — eval corpus discrimination refresh R1–R4"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-agentic-eval"
+author: "background loop (corpus track)"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "ADR-0016.13, docs/evals/TRUST.md H7 row, docs/NORTH_STAR.md C7"
+---
+
 # H7-refresh: Eval corpus discrimination refresh R1–R4
 
-**Capability candidate:** H7-refresh — replace the four non-discriminating
 recon-eval tasks so correctness gates can detect real sidecar improvements.
-**Workstream:** NORTH_STAR C7 ("trust ledger driven to green — … corpus
 ceiling refresh (H7)", `docs/NORTH_STAR.md:330`); the corpus is shared design
 ground with C8's host-task evals (`docs/NORTH_STAR.md:331`).
-**Status:** research artifact / pre-proposal. Read-only analysis grounded in
 committed artifacts; proposes (does not implement) R1–R4 replacements and a
 pre-registration path. No existing file was modified; nothing committed.
 **Repo state at authoring:** branch `mainline`, HEAD `719cb29` ("docs:

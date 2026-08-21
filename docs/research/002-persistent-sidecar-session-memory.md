@@ -1,12 +1,21 @@
+---
+title: "Research 002 — persistent sidecar sessions and evidence-shaped memory"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-runtime"
+author: "delegated research worker (ox-alpha)"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "ADR-0014.1 memory contract, ADR-0016.1 G4 gate, internal/sidecar/ledger.go, internal/sidecar/session.go, docs/dogfood/FRICTION.md"
+---
+
+> **Outcome:** consumed by ADR-0037 (M-1 (visible eviction) and M-2 (Commit/Branch snapshot stamps) implemented in PR #8; M-3 recall tool and M-4 durability chaos test remain open). Status above reflects the investigation phase; see the ADR for the decision record.
+
 # Research 002: Persistent sidecar sessions and evidence-shaped memory
 
-**Capability candidate:** persistent-session/memory — the sidecar's session is a
 durable, recoverable, evidence-shaped working notebook that makes every
 follow-up question cheaper and better than the first.
-**Workstream:** NORTH_STAR P2 ("Sidecar over ACP … persistent evidence-shaped
 session memory", `docs/NORTH_STAR.md:72`) and capability §4 "Always-on runtime
 and session mastery" (`docs/NORTH_STAR.md:161-173`); SAF workstreams B6/B7.
-**Status:** research artifact / pre-proposal. Read-only analysis grounded in
 committed code, docs, and dogfood artifacts; proposes (does not implement)
 decisions D1–D4 and an ADR-0037 pre-registration path. No existing file was
 modified; nothing committed.

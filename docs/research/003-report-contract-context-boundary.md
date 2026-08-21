@@ -1,14 +1,23 @@
+---
+title: "Research 003 — compact report contract and context-boundary economics"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-runtime"
+author: "Hermes engineer session (Goga Koreli)"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "ADR-0016.1/.2 gates, ADR-0029.2, ADR-0031.2, ADR-0032.2, ADR-0034, docs/evals/2026-07-03-smoke-pair/, gate-run-2026-07 preliminary artifacts"
+---
+
+> **Outcome:** consumed by ADR-0039 (schemaVersion + flag-only CheckReportBounds implemented in PR #9 across all three report paths). Status above reflects the investigation phase; see the ADR for the decision record.
+
 # Research 003: Compact report contract and context-boundary economics
 
-**Capability candidate:** compact-report contract — the workflow boundary where
 internal exploration stays cheap/internal and only a structured evidence report
 crosses back to the expensive main agent.
 
-**Workstream:** NORTH_STAR workflow boundary; M4 verdict (THESIS SUPPORTED,
 2026-07-05) — per AGENTS.md, that verdict is a conservative floor, never
 quoted as a ceiling.
 
-**Status:** research artifact / pre-proposal. Read-only analysis grounded in
 committed code and eval artifacts. Proposes, does not implement. No existing
 file modified. Repo state at authoring: branch `mainline`.
 

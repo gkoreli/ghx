@@ -1,10 +1,18 @@
+---
+title: "A4 research — error messages as agent affordances"
+date: "2026-08-21"
+status: "research"
+thread: "sidecar-adoption"
+author: "background research worker"
+scope: "read-only research artifact; proposes, does not implement; maintained under docs/research/"
+builds-on: "NORTH_STAR workstream A4, docs/dogfood/FRICTION.md"
+---
+
 # A4 Research: Error Messages as Agent Affordances
 
-**Capability candidate:** NORTH_STAR workstream **A4** — "Error messages as agent
 affordances: every CLI error tells the agent the correct next invocation"
 (`docs/NORTH_STAR.md:304`, status "Future (feeds from A2 findings)").
 
-**Date:** 2026-08-21. **State under test:** `mainline` @ `719cb29` (clean tree,
 post-v2.9.0). **Binary under test:** source build of HEAD
 (`go build -o /tmp/ghx-a4 ./cmd/ghx`; self-reports `ghx dev` — itself a live
 reproduction of the provenance friction in §1.2 G6). Every behavioral claim below
