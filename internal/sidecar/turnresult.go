@@ -59,6 +59,11 @@ type TurnResult struct {
 	// LoadSession returned Resource not found; Ask created one fresh ACP session
 	// and continued the turn using the durable ledger context in the prompt.
 	SessionRecreated bool
+	// QuotaDegraded is true when the backend died of quota exhaustion and the
+	// ADR-0040 L3 ladder shipped a DEGRADED report built from the session's
+	// cached ledger evidence instead of failing the ask. Recorded so callers
+	// (CLI notice, evals) can see the answer was NOT fresh exploration.
+	QuotaDegraded bool
 	// Artifacts points at the session's persisted audit trail for the ask this
 	// turn belongs to (session dir + root trace ID). Populated by Ask after
 	// artifact emission; zero for a bare RunTurnWithOptions result.

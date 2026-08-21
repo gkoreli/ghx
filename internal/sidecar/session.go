@@ -290,6 +290,37 @@ func ListReports(sessionsDir, name string) ([]string, error) {
 	return paths, nil
 }
 
+// LoadLatestReport reads the newest persisted report artifact for a session
+// (ADR-0040 L3): the verified-claims source when a quota-degraded answer must
+// be built from cached session evidence. Returns (nil, nil) when the session
+// has no reports yet. Files are canonical ReportArtifact JSON written by
+// SaveTurnReportArtifact; a corrupt file is surfaced as an error.
+func LoadLatestReport(sessionsDir, name string) (*Report, error) {
+	paths, err := ListReports(sessionsDir, name)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var artifact ReportArtifact
+		if err := json.Unmarshal(data, &artifact); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", filepath.Base(path), err)
+		}
+		if artifact.Report != nil && artifact.Report.Answer != "" {
+			return artifact.Report, nil
+		}
+		// A report-less artifact (failed-turn record) is skipped: keep
+		// walking back to the newest one that actually answered.
+	}
+	return nil, nil
+}
+
 func writeMeta(dir string, meta SessionMeta) error {
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

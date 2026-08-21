@@ -305,6 +305,23 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, turnRunn
 		turnErr = nil
 	}
 
+	if turnErr != nil && IsQuotaExhausted(turnErr) {
+		// ADR-0040 L3 quota-degradation ladder: a quota-dead turn must not
+		// die silently. With cached session evidence, ship an explicitly
+		// labeled DEGRADED report instead; without any, fail as the typed
+		// ErrQuotaExhausted error the CLI maps to exit 3 + affordance.
+		completedErr = turnErr
+		if degraded := buildDegradedQuotaReport(state, turnErr); degraded != nil {
+			state.turnResult.QuotaDegraded = true
+			tierDecision := persistTurn(state, degraded)
+			emitArtifacts(ctx, state, degraded, tierDecision)
+			return degraded, &state.turnResult, nil
+		}
+		failErr := canonicalTurnError(outcome)
+		emitFailedTurnArtifacts(ctx, state, failErr)
+		return nil, &state.turnResult, NewQuotaExhaustedError(turnErr)
+	}
+
 	if turnErr != nil {
 		// Live-log records the RAW turn error (M1); artifacts + the caller error
 		// carry the runtime-owned canonical FailureClass marker (ADR-0036 D4).
@@ -345,6 +362,11 @@ type askTurnState struct {
 	startedAt    time.Time
 	turnResult   TurnResult
 	newSessionID string
+	// lastReport is this session's most recent persisted report, loaded at
+	// prepareSession. It is the verified-claims source for the ADR-0040 L3
+	// degraded answer (the ledger stores commands/paths; claims live in the
+	// per-turn reports). Nil on fresh sessions.
+	lastReport *Report
 }
 
 // resumeID is the ACP session id to resume for a follow-up turn: the id the last
@@ -416,6 +438,14 @@ func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnS
 	if err != nil {
 		return nil, fmt.Errorf("read ledger: %w", err)
 	}
+	// Most recent persisted report (ADR-0040 L3): the degraded-answer source
+	// for verified claims. Nil when the session has none; a load failure must
+	// not block the ask, so it degrades to nil with a stderr warning.
+	lastReport, err := LoadLatestReport(sessionsDir, req.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to load last report for quota degradation: %v\n", err)
+		lastReport = nil
+	}
 	prompt := BuildPrompt(Request{
 		Session:         req.Session,
 		Repo:            req.Repo,
@@ -447,6 +477,7 @@ func prepareSession(cfg Config, req AskRequest, route *RouteDecision) (*askTurnS
 		sinkPath:     sinkPath,
 		cleanupSink:  cleanupSink,
 		startedAt:    time.Now().UTC(),
+		lastReport:   lastReport,
 	}, nil
 }
 
