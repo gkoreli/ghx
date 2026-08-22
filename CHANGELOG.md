@@ -40,6 +40,16 @@ prose here.
 
 ### Fixed
 
+- **Ledger `inspected_paths` no longer polluted by multi-line or mimicked
+  tool-call strings (ADR-0030.1 D5)** — `DeriveCommandEvidence` now parses
+  raw tool-call blocks per invocation (newline/shell-operator segmentation,
+  ghx-leading lines only, CLI arity caps, path-token hygiene) instead of
+  shelling one string; echo/decoration tokens (`echo`, `=== ADD ===`),
+  annotation fragments (`(cached,`, `turn`, `1)`), and redirection debris
+  (`2>/dev/null`, `||`) no longer surface as garbage paths in ledgers and
+  cache-hit reports. Stored command strings unchanged; rebuild determinism
+  verified on a real session (17 → 2 inspected paths, commands verbatim).
+
 - **Cache-hit turns now reach latency rollups (ADR-0040.1 D1)** — the fast
   path's sub-millisecond turns emitted a truncated-to-zero duration histogram
   (sum=0, discarded by rollups as a non-observation), making every cache hit

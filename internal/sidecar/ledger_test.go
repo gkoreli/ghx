@@ -47,6 +47,80 @@ func TestDeriveCommandEvidenceReadGrepMapAndTree(t *testing.T) {
 	}
 }
 
+func TestDeriveCommandEvidenceRejectsMultiLineAndMimickedJunk(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  string
+		paths    []string
+		globs    []string
+		patterns []string
+	}{
+		{
+			name: "multi-line batch with echo markers",
+			command: "ghx read sindresorhus/p-queue source/index.ts --lines 185-201\n" +
+				"echo \"=== ADD ===\"\n" +
+				"ghx read sindresorhus/p-queue source/index.ts --lines 441-583",
+			paths: []string{"source/index.ts"},
+		},
+		{
+			name:    "mimicked cached annotation",
+			command: "ghx read sindresorhus/p-queue source/index.ts --lines 185-325 (cached, turn 1)",
+			paths:   []string{"source/index.ts"},
+		},
+		{
+			name:    "redirection and fallback chain",
+			command: "ghx read sindresorhus/p-queue source/options.ts --lines 55->96 2>/dev/null || ghx read sindresorhus/p-queue source/options.ts --lines 55-96",
+			paths:   []string{"source/options.ts"},
+		},
+		{
+			name:     "annotated search keeps one pattern",
+			command:  "ghx search repo:sindresorhus/p-queue carryoverConcurrencyCount (cached, turn 5)",
+			patterns: []string{"carryoverConcurrencyCount"},
+		},
+		{
+			name:    "JSON report blob yields nothing",
+			command: `{"answer":"Concurrency is enforced","commandsRun":["ghx read o/r p"]}`,
+		},
+		{
+			name:    "tree prose after its single path is dropped",
+			command: "ghx tree sindresorhus/p-queue src and then the queue directory",
+			paths:   []string{"src"},
+		},
+		{
+			name:    "read positional run capped at CLI max",
+			command: "ghx read o/r p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11",
+			paths:   []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"},
+		},
+		{
+			name:     "segmentation respects quoted separators",
+			command:  "ghx read honojs/hono --grep \"compose|middleware\" src/compose.ts",
+			paths:    []string{"src/compose.ts"},
+			patterns: []string{"compose|middleware"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DeriveCommandEvidence(tt.command)
+			assertStrings(t, got.InspectedPaths, tt.paths)
+			assertStrings(t, got.MappedGlobs, tt.globs)
+			assertStrings(t, got.GrepPatterns, tt.patterns)
+		})
+	}
+}
+
+func TestDeriveCommandEvidenceMultiLineBatchYieldsBothReads(t *testing.T) {
+	// A batched block must still yield evidence when replayed through the
+	// ledger path (ApplyTraceCommands → DeriveCommandEvidence), with the echo
+	// line contributing nothing.
+	ledger := &Ledger{}
+	ApplyTraceCommands(ledger, []string{
+		"ghx read sindresorhus/p-queue source/index.ts --lines 185-201\n" +
+			"echo \"=== ADD ===\"\n" +
+			"ghx read sindresorhus/p-queue source/index.ts --lines 441-583",
+	}, 1)
+	assertStrings(t, entryValues(ledger.InspectedPaths), []string{"source/index.ts"})
+}
+
 func TestUpdateLedgerFromReportAndToolTraces(t *testing.T) {
 	ledger := &Ledger{}
 	meta := &SessionMeta{Repo: "honojs/hono", Scope: "middleware"}

@@ -11,8 +11,8 @@ import (
 
 // Ledger is a durable evidence notebook for one sidecar session.
 type Ledger struct {
-	Repo           string              `json:"repo"`
-	Scope          string              `json:"scope"`
+	Repo  string `json:"repo"`
+	Scope string `json:"scope"`
 	// Commit/Branch pin the repo snapshot the evidence was gathered against
 	// (ADR-0037 M-2). Copied from SessionMeta when known; empty means the
 	// evidence floats on the remote default branch — consumers must treat
@@ -185,8 +185,86 @@ type CommandEvidence struct {
 
 // DeriveCommandEvidence extracts paths, globs, grep patterns, and backend hints
 // from common ghx read/tree/search command shapes.
+//
+// The input is a raw tool-call string as persisted in ReportArtifacts, not a
+// well-formed single command: models batch several ghx invocations separated by
+// newlines or shell operators, interleave echo markers, and copy ledger
+// annotations onto cached turns ("(cached, turn 1)", "2>/dev/null || …"). The
+// string is therefore segmented quote-aware on newlines and shell separators,
+// and only segments whose first token is `ghx` are parsed; everything else
+// (echo/decoration lines, prose, JSON blobs) contributes no evidence. Stored
+// command strings themselves are never rewritten — hygiene lives entirely in
+// this derivation (ADR-0030.1 D5 rebuild-determinism invariant).
 func DeriveCommandEvidence(command string) CommandEvidence {
-	fields := shellFields(command)
+	var out CommandEvidence
+	for _, segment := range ghxCommandSegments(command) {
+		mergeCommandEvidence(&out, deriveSegmentEvidence(segment))
+	}
+	return out
+}
+
+// ghxCommandSegments splits a raw tool-call string into candidate command
+// segments, cutting on newlines and shell separators (; | &) that sit outside
+// quotes so quoted arguments spanning those characters survive intact.
+func ghxCommandSegments(command string) []string {
+	var segments []string
+	var b strings.Builder
+	var quote rune
+	flush := func() {
+		if s := strings.TrimSpace(b.String()); s != "" {
+			segments = append(segments, s)
+		}
+		b.Reset()
+	}
+	for _, r := range command {
+		switch {
+		case quote != 0:
+			b.WriteRune(r)
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			b.WriteRune(r)
+			quote = r
+		case r == '\n' || r == '\r' || r == ';' || r == '|' || r == '&':
+			flush()
+		default:
+			b.WriteRune(r)
+		}
+	}
+	flush()
+	return segments
+}
+
+// mergeCommandEvidence unions src into dst per category, preserving order and
+// dropping duplicates across segments of one command string.
+func mergeCommandEvidence(dst *CommandEvidence, src CommandEvidence) {
+	dst.InspectedPaths = appendUnique(dst.InspectedPaths, src.InspectedPaths)
+	dst.MappedGlobs = appendUnique(dst.MappedGlobs, src.MappedGlobs)
+	dst.GrepPatterns = appendUnique(dst.GrepPatterns, src.GrepPatterns)
+	dst.Backends = appendUnique(dst.Backends, src.Backends)
+}
+
+func appendUnique(dst []string, vals []string) []string {
+	for _, v := range vals {
+		dup := false
+		for _, d := range dst {
+			if d == v {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			dst = append(dst, v)
+		}
+	}
+	return dst
+}
+
+// deriveSegmentEvidence parses one well-formed command segment (the output of
+// ghxCommandSegments) for a single ghx read/tree/search invocation.
+func deriveSegmentEvidence(segment string) CommandEvidence {
+	fields := shellFields(segment)
 	if len(fields) < 2 || fields[0] != "ghx" {
 		return CommandEvidence{}
 	}
@@ -201,6 +279,14 @@ func DeriveCommandEvidence(command string) CommandEvidence {
 	}
 	if looksRepo(args[0]) {
 		args = args[1:]
+	}
+	// Positional arity per the CLI contract (internal/cli/ghx.go): read takes
+	// 1-10 paths, tree at most one, search one free-form query. Capping the
+	// positional run keeps prose that follows the real arguments (echo
+	// markers, annotations, JSON debris) out of the evidence.
+	maxPaths := 10
+	if sub == "tree" {
+		maxPaths = 1
 	}
 	var paths []string
 	hasMap := false
@@ -239,12 +325,26 @@ func DeriveCommandEvidence(command string) CommandEvidence {
 			continue
 		}
 		if sub == "search" {
-			out.GrepPatterns = append(out.GrepPatterns, arg)
+			if len(out.GrepPatterns) == 0 {
+				out.GrepPatterns = append(out.GrepPatterns, arg)
+			}
+			continue
+		}
+		if !cleanPathToken(arg) {
+			// Path-invalid token: annotation or redirection debris inside
+			// the segment (e.g. "(cached," before "turn"). Nothing from
+			// here on is trusted positional input.
+			break
+		}
+		if len(paths) == maxPaths {
 			continue
 		}
 		paths = append(paths, arg)
 	}
 	for _, p := range paths {
+		if !cleanPathToken(p) {
+			continue
+		}
 		if hasGlob(p) && hasMap {
 			out.MappedGlobs = append(out.MappedGlobs, p)
 			continue
@@ -252,6 +352,14 @@ func DeriveCommandEvidence(command string) CommandEvidence {
 		out.InspectedPaths = append(out.InspectedPaths, p)
 	}
 	return out
+}
+
+// cleanPathToken reports whether a positional token can plausibly be a repo
+// path. Tokens containing whitespace, parentheses, or shell metacharacters are
+// annotation or redirection debris (e.g. "(cached,", "turn", "1)",
+// "2>/dev/null", "=== ADD ==="), never paths.
+func cleanPathToken(p string) bool {
+	return !strings.ContainsAny(p, " ()<>;&|")
 }
 
 func commandFromRawInput(raw any) string {
