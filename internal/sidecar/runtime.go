@@ -298,6 +298,23 @@ func askWithTurnRunner(ctx context.Context, cfg Config, req AskRequest, turnRunn
 	}()
 
 	liveLog.TurnStarted(state.req.Session, state.req.Repo, state.req.Question)
+
+	// ADR-0040.1 D1 ledger cache-hit fast path: a cheap ask whose question the
+	// session's ledger demonstrably covers is served from cached evidence
+	// without spawning a model turn. The report is labeled DEGRADED
+	// (cache-hit) with BackendsUsed=[ledger-cache] — the L3 labeling
+	// convention, so no consumer mistakes a cached answer for fresh
+	// exploration. The path runs the SAME bookkeeping as a real turn
+	// (persistTurn, emitArtifacts, live events): a cache hit is a measured
+	// turn, not a bypass of measurement.
+	if gate, ok := evaluateCacheHit(cfg, state.req, state.meta, state.ledger, state.lastReport); ok {
+		report := buildCacheHitReport(state, gate)
+		state.turnResult.CacheHit = true
+		tierDecision := persistTurn(state, report)
+		emitArtifacts(ctx, state, report, tierDecision)
+		return report, &state.turnResult, nil
+	}
+
 	session, outcome := runPrimaryTurn(ctx, portRunner, state, sink)
 	blockedReport, maxTurnsHandled := recoverMaxTurns(ctx, session, state, outcome, sink)
 	turnErr := outcome.Err

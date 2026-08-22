@@ -69,6 +69,12 @@ type TurnResult struct {
 	// FallbackAgentCmd was configured AND the primary backend died of quota
 	// exhaustion AND the fallback turn answered — the degraded:model rung.
 	FallbackBackend string
+	// CacheHit is true when the ask was served by the ADR-0040.1 L1 fast
+	// path: the session's ledger covered the cheap-depth question (overlap
+	// gate, recorded in the report's uncertainty), so no model turn ran and
+	// the answer is labeled DEGRADED (cache-hit) from cached evidence. Like
+	// QuotaDegraded it lets callers see the answer was NOT fresh exploration.
+	CacheHit bool
 	// Artifacts points at the session's persisted audit trail for the ask this
 	// turn belongs to (session dir + root trace ID). Populated by Ask after
 	// artifact emission; zero for a bare RunTurnWithOptions result.

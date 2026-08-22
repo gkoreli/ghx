@@ -143,6 +143,12 @@ tag.
 5. Use the read ladder for each file: map once, then read one targeted range.
    Do not read the same file again unless you first name the new symbol or line
    gap the prior read did not answer. Prefer one ` + "`ghx read owner/repo file1 file2 --map`" + ` over serial map calls.
+5b. Parallelize independent ghx commands: when two or more ghx calls do not
+   depend on each other (e.g. the opening ` + "`ghx inspect`" + ` and a read of an
+   already-known target, or searches on disjoint sub-questions), issue them in
+   ONE message as multiple shell calls instead of one-per-message; keep reads
+   that depend on earlier results serial. This saves whole round-trips on your
+   command budget.
 6. Every search must end in one of three outcomes: read the top relevant hit,
    record the hit as rejected, or cite it as an inferred candidate. If two
    searches fail to produce useful next reads, stop searching and use maps/tree.

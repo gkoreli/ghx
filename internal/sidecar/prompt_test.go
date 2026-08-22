@@ -20,6 +20,10 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 		"ghx search \"repo:owner/repo symbolName\"",
 		"Do not tool-search for submit_report.",
 		"Use the read ladder for each file",
+		// Parallel-tool doctrine (ADR-0040.1 D2): independent ghx calls go
+		// out in one message instead of serial one-per-message round-trips.
+		"Parallelize independent ghx commands",
+		"ONE message as multiple shell calls",
 		// Inspect-first doctrine (ADR-0029.1): inspect is the preferred
 		// first move for concern-shaped questions, and it appears in the
 		// canonical command example list.
@@ -79,11 +83,12 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
 // accidental drift is caught: discovery mode must not perturb the persona used
 // when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
-// the golden hash in the same commit as their ADR (current bytes: ADR-0029.3
-// failed-command discipline section).
+// the golden hash in the same commit as their ADR (current bytes: ADR-0040.1
+// D2 parallel-tool doctrine line 5b on top of ADR-0029.3 failed-command
+// discipline).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "20f05e72dc98f2d414aa0a7c4e0eb74867c59f7d9beb0c5d46883efd1d851601"
+	const wantSHA = "48cabace9fcdc46fc7cd7641c93ee2ee79a120e4225e7b6ffadd2ee5e9099823"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}

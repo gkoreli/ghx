@@ -160,6 +160,9 @@ and reports under ~/.ghx that back the report.`,
 		if turn != nil && turn.QuotaDegraded {
 			fmt.Fprintf(os.Stderr, "⚠ degraded: backend quota exhausted — this answer came from the session's cached evidence ledger, not fresh investigation\n")
 		}
+		if turn != nil && turn.CacheHit {
+			fmt.Fprintf(os.Stderr, "ℹ cache-hit: answered from the session's cached evidence ledger (ADR-0040.1 fast path) — for fresh exploration re-ask with --depth normal\n")
+		}
 		if route != nil {
 			fmt.Printf("\n%s\n", route.Line())
 		}

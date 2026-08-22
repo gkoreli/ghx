@@ -54,6 +54,14 @@ const QuotaAffordanceHint = "try --depth cheap later or use ghx explore directly
 // instead, so the two rungs are machine-distinguishable on every surface.
 const DegradedModelCause = "degraded:model"
 
+// CacheHitCause is the cause clause for the ADR-0040.1 L1 fast path:
+// "DEGRADED (cache-hit): …" — an ask answered from the session's ledger
+// because the ledger demonstrably covers the question, with no model turn
+// spawned at all. Like the quota causes it is machine-distinguishable on
+// every surface (answer prefix + BackendsUsed=[ledger-cache]), and unlike
+// them it is a deliberate latency choice, not a failure recovery.
+const CacheHitCause = "cache-hit"
+
 // retryTurnOnFallbackBackend is ladder rung 2 (ADR-0040 L3): when configured,
 // the ask gets exactly one more turn on the cheaper fallback backend before
 // the cached-ledger rung. The fallback session starts FRESH (no ACP resume —
@@ -275,4 +283,117 @@ func ledgerHasEvidence(l *Ledger) bool {
 	return l != nil && (len(l.InspectedPaths) > 0 ||
 		len(l.RelevantFiles) > 0 ||
 		len(l.CommandsRun) > 0)
+}
+
+// cacheHitGate is the ADR-0040.1 D1 fast-path decision for one ask: serve it
+// from the session's ledger instead of spawning a model turn. Every input is
+// recomputable from committed artifacts (match.go is deterministic, no model
+// calls), so a served-or-explored call is auditable after the fact.
+type cacheHitGate struct {
+	// Score is the weighted vocabulary overlap of the question against the
+	// session's ledger-derived vocabulary (ADR-0030.1 D3).
+	Score float64
+	// Threshold is the routing overlap threshold the ask was judged against
+	// — the same number that governs R4 session joining.
+	Threshold float64
+}
+
+// covered reports whether the gate admits the question to the fast path.
+func (g cacheHitGate) covered() bool { return g.Score >= g.Threshold }
+
+// evaluateCacheHit decides whether this ask must be served from the session's
+// cached evidence (ADR-0040.1 D1). All conditions are required; any miss
+// returns ok=false and the ask proceeds as a normal model turn:
+//   - depth == cheap (the L1 scope; normal/deep always explore);
+//   - warm session: at least one completed turn and durable ledger evidence
+//     (the L3 predicate ledgerHasEvidence);
+//   - a persisted prior report with an answer (the verified-claims source);
+//   - question coverage: overlap score >= the routing overlap threshold.
+func evaluateCacheHit(cfg Config, req AskRequest, meta *SessionMeta, ledger *Ledger, lastReport *Report) (cacheHitGate, bool) {
+	if req.Depth != string(DepthCheap) {
+		return cacheHitGate{}, false
+	}
+	if meta == nil || meta.TurnCount < 1 || !ledgerHasEvidence(ledger) {
+		return cacheHitGate{}, false
+	}
+	if lastReport == nil {
+		return cacheHitGate{}, false
+	}
+	a := strings.TrimSpace(lastReport.Answer)
+	// The claims source must be a real answered turn: a BLOCKED prior report
+	// carries no verified claims worth serving, and a DEGRADED prior's claims
+	// are themselves [cached] relabels — serving them through another cycle
+	// would compound provenance drift, so degradation chains are bounded at
+	// depth 1 from real exploration (the L3 ladder's
+	// isAnsweredDegradableReport rule, extended to this rung).
+	if a == "" ||
+		strings.HasPrefix(a, blockedAnswerPrefix) ||
+		strings.HasPrefix(a, DegradedAnswerPrefix) ||
+		strings.HasPrefix(a, warnNoReportBase) {
+		return cacheHitGate{}, false
+	}
+	gate := cacheHitGate{
+		Score:     OverlapScore(TokenizeQuestion(req.Question), BuildSessionVocabulary(meta, ledger)),
+		Threshold: RouteConfigFor(cfg).OverlapThreshold,
+	}
+	return gate, gate.covered()
+}
+
+// buildCacheHitReport renders the DEGRADED (cache-hit) report from the
+// session's durable evidence (ADR-0040.1 D1): the prior answer's substance
+// relabeled with the cache-hit cause, claims marked [cached], ledger paths
+// with turn provenance, and an uncertainty block that makes the gate decision
+// auditable (overlap score vs threshold, staleness pin, fresh-recon
+// affordance). BackendsUsed carries ONLY ledger-cache — no fresh evidence is
+// claimed.
+func buildCacheHitReport(state *askTurnState, gate cacheHitGate) *Report {
+	l := state.ledger
+	// Nested-label guard: when the prior answer is itself a DEGRADED report
+	// (e.g. a previous cache-hit turn became this session's lastReport), the
+	// substance must ride through WITHOUT stacking a second "DEGRADED (...)"
+	// prefix inside the new one — the outer label already says cached, and
+	// ValidateReportEvidence keys the exemption on the single leading prefix.
+	prior := strings.TrimSpace(state.lastReport.Answer)
+	if strings.HasPrefix(prior, DegradedAnswerPrefix) {
+		prior = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(prior, DegradedAnswerPrefix), ":"))
+	}
+	report := &Report{
+		SchemaVersion: ReportSchemaVersion,
+		Answer:        fmt.Sprintf("%s (%s): answered from cached session evidence; %s", DegradedAnswerPrefix, CacheHitCause, oneLine(prior)),
+		BackendsUsed:  []string{LedgerCacheBackend},
+		Uncertainty: []string{
+			fmt.Sprintf("cache-hit gate: question/ledger overlap %.2f >= threshold %.2f on a warmed session (last turn %d); for FRESH exploration re-ask with --depth normal", gate.Score, gate.Threshold, state.meta.TurnCount),
+			degradedStalenessNote(l),
+		},
+	}
+	for _, c := range state.lastReport.Verified {
+		if strings.TrimSpace(c.Summary) == "" {
+			continue
+		}
+		ev := c.Evidence
+		if strings.TrimSpace(ev) == "" {
+			ev = "(cached report entry; original evidence text not recorded)"
+		}
+		report.Verified = append(report.Verified, Claim{
+			Summary:  oneLine(c.Summary),
+			Evidence: "[cached] " + oneLine(ev),
+		})
+		if len(report.Verified) >= maxDegradedClaims {
+			break
+		}
+	}
+	for _, rf := range l.InspectedPaths {
+		if strings.TrimSpace(rf.Value) == "" {
+			continue
+		}
+		reason := "inspected in a prior turn"
+		if rf.Turn > 0 {
+			reason += fmt.Sprintf(" (turn %d)", rf.Turn)
+		}
+		report.RelevantFiles = append(report.RelevantFiles, RelevantFile{Path: rf.Value, Reason: reason})
+		if len(report.RelevantFiles) >= MaxRelevantFiles {
+			break
+		}
+	}
+	return report
 }
