@@ -8,6 +8,18 @@ Where a change carries proof, the entry links the ADR that decided it or the
 committed eval verdict that measured it — the artifacts are the evidence, not the
 prose here.
 
+## [Unreleased]
+
+### Changed
+
+- **Sidecar persona revision 4: failed-command discipline (ADR-0029.3)** —
+  new "When a ghx command fails" doctrine in the sidecar persona (read the
+  teaching error, fix the named cause once, never retry through shell
+  decorations, never re-run a recorded failure across turns), from Research
+  007 F5's production traces. Persona golden hash updated deliberately in the
+  same commit as the wording (`36dc291f…` → `20f05e72…`); pre-registered
+  before the next gate run.
+
 ## [2.10.1] — 2026-08-21
 
 Follow-through release: ADR-0040's L2/L3 slices (live ask progress stream,
