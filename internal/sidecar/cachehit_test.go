@@ -2,9 +2,52 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+// readJSONLLines reads every line of a .jsonl artifact as raw bytes for
+// per-line unmarshalling in tests.
+func readJSONLLines(t *testing.T, path string) [][]byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out [][]byte
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, []byte(line))
+		}
+	}
+	return out
+}
+
+// protojsonCount accepts an OTLP/protojson integer in either of its two wire
+// shapes: a JSON string ("count":"1" — protojson serializes int64 as string)
+// or a bare number. The 2026-07-05 protojson lesson: encoding/json rejects
+// string→int, silently zeroing parsed datapoints.
+type protojsonCount int64
+
+func (c *protojsonCount) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "null" || s == "" {
+		*c = 0
+		return nil
+	}
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*c = protojsonCount(v)
+	return nil
+}
+
+func (c protojsonCount) Int64() int64 { return int64(c) }
 
 // cacheHitSeedSession creates a warm session whose ledger + last report give
 // the D1 gate everything it needs: durable ledger evidence, TurnCount ≥ 1,
@@ -195,6 +238,48 @@ func TestAskCacheHitFastPathServes(t *testing.T) {
 	if meta.TurnCount != 2 { // seeded turn 1 + this cache-hit turn
 		t.Errorf("TurnCount must advance on the cache-hit turn, got %d", meta.TurnCount)
 	}
+	// The weekly p50 must see cache-hit turns (ADR-0040.1 D1): even a
+	// sub-millisecond fast-path turn emits its operation-duration datapoint.
+	// The file export is protojson: int64 fields serialize as strings
+	// ("count":"1"), so the parser must accept both shapes — encoding/json
+	// rejects string→int and would silently zero every datapoint.
+	datapoints := 0
+	for _, line := range readJSONLLines(t, filepath.Join(dir, "s", "metrics.jsonl")) {
+		var m struct {
+			ResourceMetrics []struct {
+				ScopeMetrics []struct {
+					Metrics []struct {
+						Name      string `json:"name"`
+						Histogram *struct {
+							DataPoints []struct {
+								Count protojsonCount `json:"count"`
+							} `json:"dataPoints"`
+						} `json:"histogram"`
+					} `json:"metrics"`
+				} `json:"scopeMetrics"`
+			} `json:"resourceMetrics"`
+		}
+		if json.Unmarshal(line, &m) != nil {
+			continue
+		}
+		for _, rm := range m.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				for _, met := range sm.Metrics {
+					if met.Name != "gen_ai.client.operation.duration" || met.Histogram == nil {
+						continue
+					}
+					for _, dp := range met.Histogram.DataPoints {
+						if dp.Count.Int64() > 0 {
+							datapoints++
+						}
+					}
+				}
+			}
+		}
+	}
+	if datapoints != 1 { // exactly this cache-hit turn; seeding writes no metrics line
+		t.Errorf("cache-hit turn must emit an operation-duration datapoint (weekly p50 must see it), got %d", datapoints)
+	}
 }
 
 // TestAskCacheHitMissExplores pins the conservative-miss side of D1: a fresh
@@ -250,9 +335,9 @@ func TestBuildCacheHitReportNestedDegradedLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := &askTurnState{
-		req:     AskRequest{Session: "s", Repo: "o/r", Question: "how is the middleware chain built?", Depth: "cheap"},
-		meta:    meta,
-		ledger:  ledger,
+		req:        AskRequest{Session: "s", Repo: "o/r", Question: "how is the middleware chain built?", Depth: "cheap"},
+		meta:       meta,
+		ledger:     ledger,
 		lastReport: &Report{Answer: "DEGRADED (cache-hit): answered from cached session evidence; the middleware chain is built in src/mw.go"},
 	}
 	gate := cacheHitGate{Score: 1.5, Threshold: 0.5}

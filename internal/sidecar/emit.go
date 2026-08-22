@@ -403,10 +403,18 @@ func (t turnTelemetry) emitMetrics(dir string) error {
 	)
 
 	var metrics []*metricspb.Metric
-	if durMs := end.Sub(start).Milliseconds(); durMs > 0 {
+	// Sub-millisecond turns still measure (ADR-0040.1 D1): the ledger
+	// cache-hit fast path completes in single-digit milliseconds (often
+	// under one), and its duration datapoint must reach the weekly rollup —
+	// the L1 target is only auditable if the fastest turns are counted, not
+	// silently dropped. end.Sub(start).Seconds() keeps sub-millisecond
+	// precision; truncating through Milliseconds()/1000 would emit sum=0,
+	// which latency rollups legitimately discard as a non-observation.
+	// Only a genuinely zero-length window skips emission.
+	if dur := end.Sub(start).Seconds(); end.After(start) {
 		metrics = append(metrics, telemetry.HistogramMetric(
 			genAIDurationMetric, "Duration of GenAI client operations.", "s",
-			[]*metricspb.HistogramDataPoint{telemetry.HistogramPoint(start, end, float64(durMs)/1000, turnAttrs)},
+			[]*metricspb.HistogramDataPoint{telemetry.HistogramPoint(start, end, dur, turnAttrs)},
 		))
 	}
 	tokenPoints := []*metricspb.NumberDataPoint{
