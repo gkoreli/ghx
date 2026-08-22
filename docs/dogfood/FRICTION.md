@@ -309,3 +309,26 @@ docs/spec/evidence-contract/ — first end-to-end proof of "recon → artifact" 
 - Disposition: open | confirms criteria 1–5 | regression found: <what>.
 ```
 
+---
+
+# L4 dogfood week 1 (2026-08-22 start) — ADR-0040 L4a instrumentation
+
+_Weekly measurement is scripted: `node scripts/dogfood-week.mjs [--since YYYY-MM-DD]`
+rolls `~/.ghx/sessions/*` into the one-liner (sessions / asks / answered /
+blocked / degraded / quotaFirings / p50 latency / degraded-rate). Measurement
+rules are pinned in the script header. The recon-MCP wiring check is
+`node scripts/mcp-recon-probe.mjs` (handshake + tools/list + one real ask over
+the exact `~/.claude.json` command line)._
+
+## 2026-08-22 recon MCP wiring verified end-to-end over the founder config — confirmation [L4a]
+- Attempted: `node scripts/mcp-recon-probe.mjs` — spawns `npx -y @gkoreli/ghx serve` exactly as the global `~/.claude.json` `mcpServers.ghx` entry does, performs the MCP initialize handshake, lists tools, and issues one real recon ask (`tidwall/gjson`, depth=cheap).
+- Ground (works as designed): initialize ok — server `ghx 2.10.1` (published npm version matches the wired config); `tools/list` = exactly `["recon"]` (ADR-0019.3 recon-first surface); ask returned a schema-valid report in ~34s citing `parseObjectPath` (gjson.go:982-1044) with per-claim evidence commands — correct on a known-answer question. The ask rode the warm daemon (session `tidwall-gjson` turnCount 1→2, `turn.completed ok:true` in live.jsonl).
+- Trace: ~/.ghx/sessions/tidwall-gjson/ (turn 2, 2026-08-22T00:10:18Z); probe output in the session log.
+- Disposition: confirmation — wiring flows; first ask answered with cited evidence.
+
+## 2026-08-22 `sidecar doctor` has no check for the served-MCP path the founder actually uses — soft [L4a]
+- Attempted: verify the daily-driver wiring (global `~/.claude.json` `mcpServers.ghx` → `npx -y @gkoreli/ghx serve`) using repo-provided tooling only.
+- Ground: `ghx sidecar doctor` validates token, ACP handshake, report sink, and the ask path — but nothing verifies the served-MCP surface: that the configured command line speaks MCP, serves the `recon` tool, and answers. Verifying the exact founder-daily path required a hand-rolled JSON-RPC probe (now `scripts/mcp-recon-probe.mjs`). The one surface L4 depends on is the one surface doctor does not check.
+- Expected: `sidecar doctor` gains an `mcp-serve` check (spawn the configured serve command, initialize, tools/list, assert `recon` present) — the probe script is the reference implementation.
+- Trace: scripts/mcp-recon-probe.mjs; `ghx sidecar doctor` output (no MCP check listed).
+- Disposition: open — candidate for the A2-fixbatch follow-up wave.

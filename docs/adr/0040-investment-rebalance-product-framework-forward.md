@@ -304,3 +304,27 @@ eval machinery.
 - Open remainder: L3's "degrade to smaller models" tier (model downgrade
   retry) not built — ledger fallback covers the never-die guarantee; model
   downgrade needs backend selection plumbing (ADR-0038 adjacent).
+
+### L4a — dogfood-week instrumentation (2026-08-22, mainline)
+
+- **Weekly rollup** (`scripts/dogfood-week.mjs`): one-liner from
+  `~/.ghx/sessions/*` artifacts only — sessions (in-window `meta.json.createdAt`),
+  asks (`turn.started` in live.jsonl), answered/blocked/degraded report labels,
+  quota firings (DEGRADED reports + quota-mentioning log lines), p50 latency
+  (per-turn `sum/count` of the OTel `gen_ai.client.operation.duration`
+  histogram, lower median). Measurement rules pinned in the script header;
+  changing them mid-bar needs a dated note in
+  `docs/research/l4-dogfood-week-1.md`. Verified against the four real
+  sessions (baseline line in the research artifact); `--json`, empty-window,
+  and exit-2 bad-invocation paths exercised.
+- **Wiring verification** (`scripts/mcp-recon-probe.mjs`): drives the exact
+  founder `~/.claude.json` serve command (`npx -y @gkoreli/ghx serve`,
+  published 2.10.1) through initialize → tools/list → one real recon ask.
+  First verified flow 2026-08-22: single `recon` tool, schema-valid cited
+  answer in ~34s over the warm daemon (session `tidwall-gjson`, turn 2).
+- **Friction log**: FRICTION.md gains the L4 week-1 section (one confirmation
+  entry for the wiring, one open soft item — `sidecar doctor` does not cover
+  the served-MCP surface L4 depends on; probe script is the reference fix).
+- **Week-end deliverable**: `docs/research/l4-dogfood-week-1.md` holds the
+  daily rollup lines and the week-end verdict slot against the falsifier
+  (did usage stick after L2+L3?).
