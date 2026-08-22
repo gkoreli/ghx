@@ -10,6 +10,16 @@ prose here.
 
 ## [Unreleased]
 
+### Added
+
+- **Served-MCP doctor check `mcp-serve` (ADR-0033.3)** — `ghx sidecar
+  doctor` now probes the served-MCP surface exactly as Claude Code launches
+  it (`GHX_MCP_SERVE_CMD` override, else the ~/.claude.json
+  `mcpServers.ghx` argv): spawns it over stdio, completes MCP initialize +
+  tools/list, and requires the `recon` tool, with command/source/server
+  attribution and remediation on failure. Closes the FRICTION 2026-08-22
+  gap — the founder-daily path no other check exercised.
+
 ### Changed
 
 - **Sidecar persona revision 4: failed-command discipline (ADR-0029.3)** —
