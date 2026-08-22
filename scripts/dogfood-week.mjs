@@ -107,6 +107,7 @@ for (const name of entries.sort()) {
     for (const rm of line.resourceMetrics || []) {
       for (const sm of rm.scopeMetrics || []) {
         for (const m of sm.metrics || []) {
+          if (m.name !== 'gen_ai.client.operation.duration') continue; // seconds; e.g. ghx.sidecar.report.size histograms are byte-valued
           const h = m.histogram;
           if (!h) continue;
           for (const dp of h.dataPoints || []) {
