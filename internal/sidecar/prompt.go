@@ -177,6 +177,25 @@ call submit_report with:
   answer: "BLOCKED: ghx is unavailable in this sidecar session."
   uncertainty: [the exact shell command you ran and the error it returned]
 `)
+
+	sb.WriteString(`## When a ghx command fails
+
+Most ghx failures are deterministic input errors whose message names the
+fix (e.g. invalid repo "name": expected owner/repo). When a ghx command
+fails:
+1. Read the error before reacting. Fix the named cause in one corrected
+   command. Never re-run the identical failed command unchanged.
+2. Never retry a failing command through shell decorations (2>&1 | head,
+   pipes, redirects, command separators). They change how output is
+   displayed, not whether the input is valid.
+3. If the corrected command fails with the same error, stop: record every
+   command tried and the exact errors in uncertainty, then either gather
+   the evidence another way or submit BLOCKED stating why. Do not probe
+   around a deterministic failure.
+4. Failures persist across turns via the evidence ledger: never re-run,
+   in a later turn, a command whose failure is already recorded there —
+   cite the recorded error instead.
+`)
 	return sb.String()
 }
 

@@ -36,6 +36,14 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 		"ghx tier2 repomap owner/repo --query concern    (backend local:repomap)",
 		"list the local:* backend in backendsUsed, and set tierUsed to \"tier2\"",
 		"`answer` must be the direct answer first and at most\n  2 sentences",
+		// Failed-command doctrine (ADR-0029.3 D1): read the teaching error,
+		// fix the named cause once, never retry decorated variants, never
+		// repeat a failed command across turns (Research 007 F5 persona half).
+		"## When a ghx command fails",
+		"command. Never re-run the identical failed command unchanged.",
+		"shell decorations (2>&1 | head,\n   pipes, redirects, command separators)",
+		"If the corrected command fails with the same error, stop:",
+		"a command whose failure is already recorded there —\n   cite the recorded error instead.",
 		// CLI-invocation contract (ADR-0016.7): the agent must know ghx is
 		// a shell command, not a registered tool, and must verify before
 		// ever reporting BLOCKED.
@@ -71,11 +79,11 @@ func TestBuildPersonaSystemPromptContract(t *testing.T) {
 // TestRepoScopedPersonaByteStable pins the repo-scoped persona bytes so
 // accidental drift is caught: discovery mode must not perturb the persona used
 // when a repo IS provided (ADR-0019.1 D4). Deliberate persona changes update
-// the golden hash in the same commit as their ADR (current bytes: ADR-0031.2
-// nextReads concrete-paths contract).
+// the golden hash in the same commit as their ADR (current bytes: ADR-0029.3
+// failed-command discipline section).
 func TestRepoScopedPersonaByteStable(t *testing.T) {
 	base := BuildPersonaSystemPrompt()
-	const wantSHA = "36dc291f789aa022950e998904b571e9024d9b1c54d4f5ade5a4469cbcb824e5"
+	const wantSHA = "20f05e72dc98f2d414aa0a7c4e0eb74867c59f7d9beb0c5d46883efd1d851601"
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(base))); got != wantSHA {
 		t.Fatalf("repo-scoped persona bytes changed: sha256 = %s, want %s (if the change is intentional, update the golden hash)", got, wantSHA)
 	}
