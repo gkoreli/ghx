@@ -332,3 +332,10 @@ the exact `~/.claude.json` command line)._
 - Expected: `sidecar doctor` gains an `mcp-serve` check (spawn the configured serve command, initialize, tools/list, assert `recon` present) — the probe script is the reference implementation.
 - Trace: scripts/mcp-recon-probe.mjs; `ghx sidecar doctor` output (no MCP check listed).
 - Disposition: open — candidate for the A2-fixbatch follow-up wave.
+
+## 2026-08-22 dogfood-week.mjs latency rollup counts report sizes as seconds — soft [L4a]
+- Attempted: `node scripts/dogfood-week.mjs --json` to baseline the L1 warm-latency card.
+- Ground: the script pushes every OTel histogram datapoint into `latenciesSeconds` without filtering by metric name (scripts/dogfood-week.mjs:110-117). `ghx.sidecar.report.size` histograms are byte-valued, so 745–5234 got mixed into a seconds array. This machine's true per-turn durations today: [1.2, 2.0, 2.4, 9.8, 13.4, 21.6, 33.9, 37.9, 64.7, 82.1] → true p50 = 17.5s; the script reports p50 = 51.3s (~3× inflated) and the L4a session report quotes that number.
+- Expected: filter histograms by metric name — only `gen_ai.client.operation.duration` feeds the latency array; add a regression test with a metrics fixture containing both metrics.
+- Trace: scripts/dogfood-week.mjs:104-122; ~/.ghx/sessions/*/metrics.jsonl.
+- Disposition: open — blocks honest L1 baselining; fix before the next weekly rollup.
