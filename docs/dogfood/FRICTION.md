@@ -331,7 +331,13 @@ the exact `~/.claude.json` command line)._
 - Ground: `ghx sidecar doctor` validates token, ACP handshake, report sink, and the ask path — but nothing verifies the served-MCP surface: that the configured command line speaks MCP, serves the `recon` tool, and answers. Verifying the exact founder-daily path required a hand-rolled JSON-RPC probe (now `scripts/mcp-recon-probe.mjs`). The one surface L4 depends on is the one surface doctor does not check.
 - Expected: `sidecar doctor` gains an `mcp-serve` check (spawn the configured serve command, initialize, tools/list, assert `recon` present) — the probe script is the reference implementation.
 - Trace: scripts/mcp-recon-probe.mjs; `ghx sidecar doctor` output (no MCP check listed).
-- Disposition: open — candidate for the A2-fixbatch follow-up wave.
+- Disposition: fixed on wt/mcp-serve-doctor-check — `sidecar doctor` gained an `mcp-serve` check (ADR-0033.3): it resolves the serve command exactly as an MCP client launches it (`GHX_MCP_SERVE_CMD` override, else ~/.claude.json `mcpServers.ghx`), spawns it over stdio via mcp-go, completes MCP initialize + tools/list, and requires the `recon` tool; pinned by binary-build stdio probes in internal/sidecar/preflight_mcpserve_test.go; verified against this machine's real founder wiring (`npx -y @gkoreli/ghx serve`, server ghx 2.10.1, tools: recon).
+
+## 2026-08-22 `npx @gkoreli/ghx` resolves the dev checkout when run from inside the ghx repo — info [L4a]
+- Attempted: verify the new mcp-serve doctor check end-to-end from the feature worktree.
+- Ground: from any cwd under a ghx checkout, `npx -y @gkoreli/ghx version` → `ghx dev` — npm resolves the package name against the checkout's own package.json before ever fetching, so the "published-binary" probe silently exercises the source build. From a neutral cwd (/tmp, ~) the same command serves the published binary (2.10.1). Doctor's mcp-serve check inherits this cwd sensitivity: probed from inside the repo it reported `server ghx dev`; from ~ it correctly reports `ghx 2.10.1`. Founder-daily Claude Code launches with ~ as cwd, so the real surface is the published one — but any repo-internal verification must account for it.
+- Expected: nothing broken in ghx — operational note: verify served-MCP surfaces from a neutral cwd, or pin `GHX_MCP_SERVE_CMD=/absolute/path/to/ghx serve` when probing a specific build.
+- Trace: `cd <checkout> && npx -y @gkoreli/ghx version` → ghx dev vs `cd /tmp && …` → ghx 2.10.1; both observed 2026-08-22 during t_550c269d verification.
 
 ## 2026-08-22 dogfood-week.mjs latency rollup counts report sizes as seconds — soft [L4a]
 - Attempted: `node scripts/dogfood-week.mjs --json` to baseline the L1 warm-latency card.

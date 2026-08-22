@@ -306,11 +306,13 @@ var sidecarEvalsExportCmd = &cobra.Command{
 // sidecarDoctorCmd runs preflight diagnostics.
 var sidecarDoctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Run preflight diagnostics (token, network, ghx binary, tier-2 tools, ACP agent, report sink)",
+	Short: "Run preflight diagnostics (token, network, ghx binary, tier-2 tools, ACP agent, report sink, served MCP)",
 	Long: `Verify the sidecar is ready to run: GitHub token, network reachability, the ghx
 binary, tier-2 structural tools (local:repomap is built into ghx; the optional
 codemap and ast-grep binaries are reported with install hints when absent),
-the configured ACP agent handshake, and the report sink. Run this right
+the configured ACP agent handshake, the report sink, and the served-MCP surface
+(spawns the serve command an MCP client launches — GHX_MCP_SERVE_CMD, else
+~/.claude.json mcpServers.ghx — and requires the recon tool). Run this right
 after ` + "`config init`" + ` and whenever an ` + "`ask`" + ` fails to set up — it prints the resolved
 agent command and config path first, so a failing check is immediately
 attributable, and ends with the ~/.ghx artifacts location. Exit code 3 if any
@@ -327,6 +329,15 @@ check fails.`,
 		result := sidecar.RunPreflight(context.Background(), VERSION)
 		fmt.Print(sidecar.FormatPreflight(result))
 		passed := result.Passed
+		// mcp-serve probes the served-MCP surface (ADR-0033 D4 style): it
+		// spawns the serve command an MCP client actually launches
+		// (GHX_MCP_SERVE_CMD, else ~/.claude.json mcpServers.ghx) and speaks
+		// real MCP JSON-RPC to it. Slow and side-effecting, hence doctor-only
+		// — the parallel preflight registry stays eval-shareable.
+		fmt.Println("\nProbing served-MCP surface (mcp-serve)…")
+		mcpCheck := sidecar.CheckMcpServe(context.Background())
+		fmt.Print(sidecar.FormatPreflight(sidecar.PreflightResult{Passed: mcpCheck.Passed, Checks: []sidecar.PreflightCheck{mcpCheck}}))
+		passed = passed && mcpCheck.Passed
 		// --live runs a real session/new + one-prompt turn through the
 		// configured agent (ADR-0033 D4): the deterministic diagnosis for
 		// setups where ACP initialize passes but a real turn dies (auth,

@@ -248,7 +248,7 @@ shell would forward.
 ### 3. Verify
 
 ```bash
-ghx sidecar doctor           # token, network, ghx binary, ACP handshake, report sink
+ghx sidecar doctor           # token, network, ghx binary, ACP handshake, report sink, served MCP
 ghx sidecar doctor --live    # also run a REAL one-prompt turn through the agent
 ```
 
@@ -458,7 +458,7 @@ ghx skill --mcp                             # Print the classic MCP skill
 ghx skill --recon                           # Print the concise recon skill
 ghx sidecar config init --claude-acp        # Write ~/.ghx/config.json for Claude ACP
 ghx sidecar config show                     # Show resolved sidecar config
-ghx sidecar doctor                          # Verify token, network, ghx binary, ACP, report sink
+ghx sidecar doctor                          # Verify token, network, ghx binary, ACP, report sink, served MCP
 ghx sidecar doctor --live                   # Run a real one-prompt ACP turn for diagnosis
 ghx sidecar ask --repo <owner/repo> "<q>"   # Delegate one repo question to the sidecar
 ghx sidecar ask "<q>"                       # Discovery question across GitHub
