@@ -1,0 +1,46 @@
+#!/bin/bash
+# ADR-0040.1 D3 measurement batch (L1 warm-path latency).
+# Pre-registered protocol: 3 sessions x (1 normal warmup + 4 cheap measured asks).
+# Measured population = the 12 cheap asks on WARMED sessions (6 covered, 6 fresh).
+# Warmup asks are NOT part of the measured population (they create the warmth
+# the L1 target presumes); they run at --depth normal like a real first ask.
+set -u
+cd /root/ghx/.worktrees/t_59326b32
+export GH_TOKEN=$(gh auth token)
+GHX=./ghx
+OUT=/tmp/l1-batch.tsv
+: > "$OUT"
+
+run_ask() { # session_label depth repo question
+  local label="$1" depth="$2" repo="$3" q="$4"
+  local t0 t1
+  t0=$(date +%s.%N)
+  "$GHX" sidecar ask --repo "$repo" --depth "$depth" "$q" >/dev/null 2>/tmp/l1-ask.err
+  local rc=$?
+  t1=$(date +%s.%N)
+  printf "%s\t%s\t%s\t%.1f\t%s\n" "$label" "$depth" "$rc" "$(echo "$t1 - $t0" | bc)" "$(head -c 60 /tmp/l1-ask.err | tr '\n\t' '  ')" >> "$OUT"
+}
+
+# ---- session 1: tidwall-gjson (already warm: turns 1-2 from L4a baseline) ----
+run_ask gjson-warmup  normal tidwall/gjson "How does the parse function handle escaped characters?"
+run_ask gjson-cov1    cheap  tidwall/gjson "Where does gjson handle escaped characters in a path key?"
+run_ask gjson-cov2    cheap  tidwall/gjson "Which function strips escape characters from a path part?"
+run_ask gjson-fresh1  cheap  tidwall/gjson "How do modifiers like @reverse work in a path?"
+run_ask gjson-fresh2  cheap  tidwall/gjson "How does gjson treat the # query selector on arrays?"
+
+# ---- session 2: sindresorhus-p-queue (new) ----
+run_ask pqueue-warmup  normal sindresorhus/p-queue "How is the concurrency limit enforced when tasks are queued?"
+run_ask pqueue-cov1    cheap  sindresorhus/p-queue "Where is the concurrency limit enforced?"
+run_ask pqueue-cov2    cheap  sindresorhus/p-queue "How does the queue enforce the concurrency limit across queued tasks?"
+run_ask pqueue-fresh1  cheap  sindresorhus/p-queue "How does pause and resume work?"
+run_ask pqueue-fresh2  cheap  sindresorhus/p-queue "How does the interval rate option carry over the concurrency count?"
+
+# ---- session 3: python-attrs-attrs (new) ----
+run_ask attrs-warmup  normal python-attrs/attrs "How are __init__ methods generated from attribute definitions?"
+run_ask attrs-cov1    cheap  python-attrs/attrs "Where is the __init__ method generated?"
+run_ask attrs-cov2    cheap  python-attrs/attrs "How does attrs generate an __init__ from attribute definitions?"
+run_ask attrs-fresh1  cheap  python-attrs/attrs "How do field validators run?"
+run_ask attrs-fresh2  cheap  python-attrs/attrs "How are slots classes created for attributed classes?"
+
+echo "BATCH DONE"
+cat "$OUT"

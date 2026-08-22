@@ -12,6 +12,14 @@ prose here.
 
 ### Added
 
+- **Ledger cache-hit fast path + parallel-tool doctrine (ADR-0040.1 D1/D2)** —
+  a cheap ask whose question the session's ledger already covers is served in
+  one model turn with no tool calls (`DEGRADED (cache-hit)` label, `[cached]`
+  claim prefixes, ledger paths with turn provenance, auditable overlap-score
+  gate line, `--depth normal` named as the fresh-recon affordance); the cheap
+  persona now instructs independent ghx calls in one message (parallel tool
+  calls). Measured (docs/evals/l4-latency-2026-08-22/): warm cheap-ask p50
+  0.0017s over the pre-registered 12-ask batch; fresh explores 15–20s.
 - **Served-MCP doctor check `mcp-serve` (ADR-0033.3)** — `ghx sidecar
   doctor` now probes the served-MCP surface exactly as Claude Code launches
   it (`GHX_MCP_SERVE_CMD` override, else the ~/.claude.json
@@ -29,6 +37,13 @@ prose here.
   007 F5's production traces. Persona golden hash updated deliberately in the
   same commit as the wording (`36dc291f…` → `20f05e72…`); pre-registered
   before the next gate run.
+
+### Fixed
+
+- **Cache-hit turns now reach latency rollups (ADR-0040.1 D1)** — the fast
+  path's sub-millisecond turns emitted a truncated-to-zero duration histogram
+  (sum=0, discarded by rollups as a non-observation), making every cache hit
+  invisible to the weekly p50; durations are now emitted at sub-ms precision.
 
 ## [2.10.1] — 2026-08-21
 
