@@ -66,7 +66,7 @@ Entry format:
 - Attempted: watching two `--depth deep` asks live (ADR-0026 second wave: letta-ai/letta ~95s, mastra-ai/mastra ~240s).
 - Ground: stdout during the run is almost entirely repeated `▶ execute: Terminal (pending)` lines — the mastra ask printed ~48 identical ones — with no command text, no completion status, and only the rare agent-thought line breaking the monotony. The operator (or a parent agent tailing the child) gets near-zero signal about what the delegate is doing until the final answer lands; auditing mid-flight means separately tailing `traces.jsonl`, which does have the per-tool detail. The visibility exists in the artifacts but not on the consumption surface while it matters.
 - Trace: ~/.ghx/sessions/letta-ai-letta/, ~/.ghx/sessions/mastra-ai-mastra/ (contrast stdout vs traces.jsonl richness).
-- Disposition: open — render tool-call titles (command text, resolved status) in the progress stream instead of the bare pending marker.
+- Disposition: resolved 2026-08-21 — ADR-0040 L2 landed: `ghx sidecar ask` streams compact stderr progress from live.jsonl (tool calls with resolved status + output size, derived quiet-states, completion line with truthful counts); identical-line collapse kills the pending wall. Remaining nuance (titles for pending markers) absorbed by the L2 implementation.
 
 ## 2026-07-05 SDK warning noise on every ask — soft
 - Attempted: every `sidecar ask` in the ADR-0026 second wave.
@@ -228,7 +228,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: BLOCKED-due-to-invalid-invocation → exit 2; genuinely-no-evidence → exit 1; answered → 0.
 - Suggested fix: map the report's outcome/failure-class to an exit code in the `sidecar ask` command wrapper, mirroring the core CLI's 0/1/2/3 contract.
 - Trace: ~/.ghx/sessions/badslugnoslash/ (trace 7043be2…); rerun `ghx sidecar ask --repo badslugnoslash "test"; echo $?` → 0.
-- Disposition: open.
+- Disposition: resolved 2026-08-21 — ADR-0034.1 D1: askExitCode maps BLOCKED-bad-input → 2, no-evidence → 1, upstream → 3, answered → 0.
 
 ## 2026-07-07 `--depth bogus` is silently accepted, not validated against cheap|normal|deep — soft
 - Attempted: `sidecar ask --repo tidwall/gjson --depth bogus "How is Get implemented?"`.
@@ -252,7 +252,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: cited exit codes in a report equal the codes the tool actually returned.
 - Suggested fix: capture and echo the real `$?` from the agent's tool invocations into the trace/report rather than letting the model narrate them from memory.
 - Trace: ~/.ghx/sessions/badslugnoslash/reports/*.json vs `ghx explore badslug; echo $?` (=2) and `ghx inspect badslug c; echo $?` (=2).
-- Disposition: open.
+- Disposition: resolved 2026-08-21 — ADR-0034.1 D2: persona requires cited exit codes be trace-captured, never narrated.
 
 ## 2026-07-07 404-repo failure class splits: `explore` exits 3, `read` exits 0 — soft [ADR-0034] (reconfirms prior open item)
 - Attempted: nonexistent repo via both commands. `explore tidwall/this-repo-does-not-exist-xyz` and `read tidwall/this-repo-does-not-exist-xyz README.md`.
@@ -260,7 +260,7 @@ accurate, file-cited answers — the happy path is solid; items below are edges.
 - Expected: a nonexistent repo/ref → exit 3 (or ≥1) on `read` too, matching `explore`.
 - Suggested fix: in the read path, when the repo/ref 404s or zero requested files resolve, return ExitUpstreamFailure/ExitNoResults instead of nil (as previously suggested for the standalone item).
 - Trace: rerun both commands; `echo $?`.
-- Disposition: open (reconfirmed).
+- Disposition: resolved 2026-08-21 — ADR-0034.1 D3: inspect probes repo on zero hits; repo-404 now exits 3 like explore/read.
 
 ## 2026-07-07 source-built binary self-reports version "dev"; doctor's ghx-binary check finds a stale 2.5.0 on PATH — soft [provenance]
 - Attempted: confirm the binary under test is v2.8.0. `ghx version` and `sidecar doctor`.
